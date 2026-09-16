@@ -27,13 +27,37 @@ def test_статус_не_проставлен_вовсе():
     assert result.primary_status is None
 
 
-def test_опоздание_с_первичным_статусом():
+def test_позднее_взятие_карточки_в_работу():
+    """Норматив организаторов: взять вызов в работу не позднее 30 секунд."""
     result = evaluate(
         [StatusEvent(S.ACCEPTED, 47.0)],
         Expectation(primary_status=S.ACCEPTED, is_profile=True),
+        pickup_seconds=47.0,
     )
-    assert codes(result) == ["V1"]
-    assert "17 с" in result.violations[0].detail
+    assert codes(result) == ["V8"]
+    assert "опоздание 17 с" in result.violations[0].detail
+
+
+def test_превышение_времени_обработки():
+    """Второй норматив: на обработку карточки не более трёх минут."""
+    result = evaluate(
+        [StatusEvent(S.ACCEPTED, 10.0)],
+        Expectation(primary_status=S.ACCEPTED, is_profile=True),
+        pickup_seconds=8.0,
+        handling_seconds=260.0,
+    )
+    assert codes(result) == ["V9"]
+    assert "превышение 80 с" in result.violations[0].detail
+
+
+def test_оба_норматива_соблюдены():
+    result = evaluate(
+        [StatusEvent(S.ACCEPTED, 12.0)],
+        Expectation(primary_status=S.ACCEPTED, is_profile=True),
+        pickup_seconds=9.0,
+        handling_seconds=95.0,
+    )
+    assert result.violations == []
 
 
 def test_принята_вместо_не_принята_повреждение_дорожного_покрытия():

@@ -13,11 +13,15 @@ from app.models.training import (
     Attempt,
     Scenario,
     ScenarioSource,
+    SessionState,
+    TrainingMode,
     TrainingSession,
 )
-from app.models.user import DispatchService, User
+from app.models.user import DispatchService, Role, User
 from app.schemas.teacher import (
     CatalogOut,
+    MonitorOut,
+    ProgressOut,
     CorrectIn,
     GenerateIn,
     GenerateOut,
@@ -25,10 +29,14 @@ from app.schemas.teacher import (
     ScenarioEditIn,
     ScenarioOut,
     ServiceOut,
+    SessionIn,
+    SessionOut,
+    SessionPatch,
     StudentResultOut,
 )
 from app.services import audit
 from app.services import report as report_service
+from app.services import sessions as session_service
 from app.services.ekp import get_ekp
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
 from app.services.response_status import PRIMARY, ResponseStatus
@@ -60,6 +68,7 @@ def _to_out(scenario: Scenario) -> ScenarioOut:
         id=scenario.id,
         title=scenario.title,
         incident_type=scenario.incident_type,
+        mode=str(scenario.mode),
         address=scenario.address,
         description=scenario.description,
         caller=scenario.caller,
@@ -143,10 +152,13 @@ async def generate(
 @router.get("/scenarios", response_model=list[ScenarioOut])
 def list_scenarios(
     approved: bool | None = None,
+    mode: str | None = None,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> list[ScenarioOut]:
     query = select(Scenario).order_by(Scenario.id.desc())
+    if mode:
+        query = query.where(Scenario.mode == TrainingMode(mode))
     if approved is True:
         query = query.where(Scenario.approved_at.is_not(None))
     elif approved is False:
@@ -303,7 +315,8 @@ def session_report(
         session_id=training.id,
         title=training.title,
         state=str(training.state),
-        deadline_seconds=training.deadline_seconds,
+        pickup_deadline_seconds=training.pickup_deadline_seconds,
+        handling_deadline_seconds=training.handling_deadline_seconds,
         started_at=training.started_at,
         finished_at=training.finished_at,
         students=[
@@ -329,12 +342,167 @@ def session_report(
     )
 
 
-@router.get("/sessions", response_model=list[dict])
-def list_sessions(
+def _session_out(session: TrainingSession) -> SessionOut:
+    return SessionOut(
+        id=session.id,
+        title=session.title,
+        mode=str(session.mode),
+        state=str(session.state),
+        pickup_deadline_seconds=session.pickup_deadline_seconds,
+        handling_deadline_seconds=session.handling_deadline_seconds,
+        call_interval_seconds=session.call_interval_seconds,
+        started_at=session.started_at,
+        finished_at=session.finished_at,
+        students=[
+            {"id": u.id, "full_name": u.full_name, "service": u.service.name if u.service else None}
+            for u in session.students
+        ],
+        scenarios=[
+            {"id": s.id, "title": s.title, "approved": s.is_approved} for s in session.scenarios
+        ],
+        approved_scenarios=sum(1 for s in session.scenarios if s.is_approved),
+    )
+
+
+def _load_session(session_id: int, db: Session) -> TrainingSession:
+    session = db.get(TrainingSession, session_id)
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие не найдено")
+    return session
+
+
+@router.get("/students", response_model=list[dict])
+def students(
     db: Session = Depends(get_session), user: User = Depends(require_teacher)
 ) -> list[dict]:
-    rows = db.scalars(select(TrainingSession).order_by(TrainingSession.id.desc())).all()
+    """Обучающиеся, которых можно включить в занятие."""
+    rows = db.scalars(
+        select(User).where(User.role == Role.STUDENT, User.is_active.is_(True)).order_by(User.full_name)
+    ).all()
     return [
-        {"id": s.id, "title": s.title, "state": str(s.state), "deadline_seconds": s.deadline_seconds}
-        for s in rows
+        {"id": u.id, "full_name": u.full_name, "service": u.service.name if u.service else None}
+        for u in rows
     ]
+
+
+@router.get("/sessions", response_model=list[SessionOut])
+def list_sessions(
+    db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> list[SessionOut]:
+    rows = db.scalars(select(TrainingSession).order_by(TrainingSession.id.desc())).all()
+    return [_session_out(s) for s in rows]
+
+
+@router.post("/sessions", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+def create_session(
+    payload: SessionIn,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> SessionOut:
+    session = TrainingSession(
+        title=payload.title,
+        mode=TrainingMode(payload.mode),
+        state=SessionState.DRAFT,
+        teacher=user,
+        pickup_deadline_seconds=payload.pickup_deadline_seconds,
+        handling_deadline_seconds=payload.handling_deadline_seconds,
+        call_interval_seconds=payload.call_interval_seconds,
+    )
+    db.add(session)
+    db.commit()
+    return _session_out(session)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+def update_session(
+    session_id: int,
+    payload: SessionPatch,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> SessionOut:
+    session = _load_session(session_id, db)
+    if session.state is not SessionState.DRAFT:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Состав и настройки меняются только до запуска занятия",
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    if (ids := data.pop("student_ids", None)) is not None:
+        session.students = list(
+            db.scalars(select(User).where(User.id.in_(ids), User.role == Role.STUDENT)).all()
+        )
+    if (ids := data.pop("scenario_ids", None)) is not None:
+        chosen = list(db.scalars(select(Scenario).where(Scenario.id.in_(ids))).all())
+        # Режимы обучения несовместимы: диспетчер проставляет статусы по готовой
+        # карточке, оператор классифицирует вызов. Сценарий чужого режима просто
+        # не попал бы в ленту обучающегося и потерялся бы молча.
+        foreign = [s for s in chosen if s.mode is not session.mode]
+        if foreign:
+            names = ", ".join(s.title for s in foreign[:3])
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Сценарии другого режима обучения нельзя включить в это занятие: {names}",
+            )
+        session.scenarios = chosen
+    for key, value in data.items():
+        setattr(session, key, value)
+    db.commit()
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/start", response_model=SessionOut)
+def start_session(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> SessionOut:
+    """Запускает занятие: карточки расходятся по лентам обучающихся."""
+    session = _load_session(session_id, db)
+    try:
+        created = session_service.start(session)
+    except session_service.SessionError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    db.add_all(created)
+    db.commit()
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/finish", response_model=SessionOut)
+def finish_session(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> SessionOut:
+    session = _load_session(session_id, db)
+    attempts = list(db.scalars(select(Attempt).where(Attempt.session_id == session_id)).all())
+    try:
+        evaluations = session_service.finish(session, attempts)
+    except session_service.SessionError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    db.add_all(evaluations)
+    db.commit()
+    return _session_out(session)
+
+
+@router.get("/sessions/{session_id}/monitor", response_model=MonitorOut)
+def monitor(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> MonitorOut:
+    """Ход занятия прямо сейчас: кто сколько взял и где просрочки."""
+    session = _load_session(session_id, db)
+    attempts = list(db.scalars(select(Attempt).where(Attempt.session_id == session_id)).all())
+    rows = session_service.progress(session, attempts)
+    return MonitorOut(
+        session_id=session.id,
+        state=str(session.state),
+        started_at=session.started_at,
+        call_interval_seconds=session.call_interval_seconds,
+        pickup_deadline_seconds=session.pickup_deadline_seconds,
+        total_planned=len(attempts),
+        issued=sum(r.issued for r in rows),
+        finished=sum(r.finished for r in rows),
+        students=[ProgressOut(**vars(r)) for r in rows],
+    )

@@ -44,7 +44,9 @@ class SessionReport:
     insights: list[str]
 
 
-def _insights(violations: collections.Counter, total: int, overdue_share: float) -> list[str]:
+def _insights(
+    violations: collections.Counter, total: int, overdue_share: float, deadline: int
+) -> list[str]:
     """Короткие выводы для преподавателя по типичным ошибкам группы."""
     if not total:
         return ["Занятие ещё не дало результатов: ни одна карточка не завершена."]
@@ -52,8 +54,8 @@ def _insights(violations: collections.Counter, total: int, overdue_share: float)
     notes: list[str] = []
     if overdue_share >= 0.3:
         notes.append(
-            f"Норматив в 30 секунд нарушен в {overdue_share:.0%} карточек — "
-            "стоит отработать скорость первичного статуса."
+            f"Норматив взятия в работу ({deadline} с) нарушен в "
+            f"{overdue_share:.0%} карточек — стоит отработать скорость реакции."
         )
     for code, count in violations.most_common(3):
         kind = CATALOG.get(code)
@@ -83,7 +85,7 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
     finished = 0
     scores: list[float] = []
     grammar = 0
-    deadline = session.deadline_seconds
+    deadline = session.pickup_deadline_seconds
 
     for attempt in attempts:
         result = by_student.setdefault(
@@ -128,5 +130,10 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
         overdue_share=round(overdue / len(response_times), 3) if response_times else 0.0,
         violations=violations,
         grammar_issues=grammar,
-        insights=_insights(violations, finished, overdue / len(response_times) if response_times else 0.0),
+        insights=_insights(
+            violations,
+            finished,
+            overdue / len(response_times) if response_times else 0.0,
+            deadline,
+        ),
     )

@@ -32,8 +32,12 @@ class CardOut(BaseModel):
     notified_services: dict[str, str] = Field(default_factory=dict)
     issued_at: datetime
     opened_at: datetime | None
-    deadline_seconds: int
+    pickup_deadline_seconds: int
+    handling_deadline_seconds: int
     elapsed_seconds: float
+    # Фактические значения: сколько ушло на взятие в работу и на обработку.
+    pickup_seconds: float | None = None
+    handling_seconds: float | None = None
     current_status: str | None
     available_statuses: list[str]
     comment_required_for: list[str]

@@ -1,9 +1,9 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, Boolean, DateTime
+from sqlalchemy import JSON, Boolean, Column, DateTime
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -42,6 +42,23 @@ class CardStatus(StrEnum):
     REFUSED = "Отказ"
     UNFINISHED = "Не завершено"
     COMPLETED = "Завершена"
+
+
+# Состав занятия: кого учим и на каких сценариях. Отдельные таблицы, а не
+# списки в JSON, чтобы по ним можно было делать выборки и считать отчёт.
+session_student = Table(
+    "session_student",
+    Base.metadata,
+    Column("session_id", ForeignKey("training_session.id"), primary_key=True),
+    Column("student_id", ForeignKey("app_user.id"), primary_key=True),
+)
+
+session_scenario = Table(
+    "session_scenario",
+    Base.metadata,
+    Column("session_id", ForeignKey("training_session.id"), primary_key=True),
+    Column("scenario_id", ForeignKey("scenario.id"), primary_key=True),
+)
 
 
 class Scenario(Base, TimestampMixin):
@@ -104,13 +121,28 @@ class TrainingSession(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
+    mode: Mapped[TrainingMode] = mapped_column(
+        SAEnum(TrainingMode, native_enum=False, length=32), default=TrainingMode.DISPATCHER
+    )
     state: Mapped[SessionState] = mapped_column(
         SAEnum(SessionState, native_enum=False, length=32), default=SessionState.DRAFT
     )
-    deadline_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    # Два норматива, заданных организаторами, измеряют разное.
+    # Взятие в работу — дисциплина реакции: от поступления вызова до открытия
+    # карточки. Обработка — качество работы по существу: от взятия в работу
+    # до завершения.
+    pickup_deadline_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    handling_deadline_seconds: Mapped[int] = mapped_column(Integer, default=180)
+    # Интервал между поступлением вызовов — основной регулятор сложности.
+    # Чем он меньше, тем больше карточек висит одновременно и тем жёстче
+    # проверяется умение расставлять приоритеты.
+    call_interval_seconds: Mapped[int] = mapped_column(Integer, default=20)
 
     teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
     teacher: Mapped[User] = relationship()
+
+    students: Mapped[list[User]] = relationship(secondary=session_student)
+    scenarios: Mapped[list["Scenario"]] = relationship(secondary=session_scenario)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

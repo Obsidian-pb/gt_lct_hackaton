@@ -37,6 +37,7 @@ def _card(attempt: Attempt) -> CardOut:
             notified = {}
 
     current = service.current_status(attempt)
+    pickup, handling = service.timings(attempt)
     reference = as_utc(attempt.finished_at) if attempt.finished_at else utcnow()
     return CardOut(
         attempt_id=attempt.id,
@@ -47,8 +48,11 @@ def _card(attempt: Attempt) -> CardOut:
         notified_services=notified,
         issued_at=attempt.issued_at,
         opened_at=attempt.opened_at,
-        deadline_seconds=attempt.session.deadline_seconds or scenario.deadline_seconds,
+        pickup_deadline_seconds=attempt.session.pickup_deadline_seconds,
+        handling_deadline_seconds=attempt.session.handling_deadline_seconds,
         elapsed_seconds=(reference - as_utc(attempt.issued_at)).total_seconds(),
+        pickup_seconds=pickup,
+        handling_seconds=handling,
         current_status=str(current) if current else None,
         available_statuses=[str(s) for s in service.available_statuses(attempt)],
         comment_required_for=[str(s) for s in COMMENT_REQUIRED],
@@ -69,6 +73,9 @@ def my_cards(
         .where(
             Attempt.student_id == user.id,
             Scenario.mode == TrainingMode.DISPATCHER,
+            # Вызовы приходят потоком: карточка появляется в ленте, когда
+            # наступает её время, а не в начале занятия.
+            Attempt.issued_at <= utcnow(),
         )
         .order_by(Attempt.issued_at.desc())
     ).all()

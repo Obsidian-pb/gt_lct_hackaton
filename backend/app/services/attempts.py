@@ -39,10 +39,11 @@ def available_statuses(attempt: Attempt) -> list[ResponseStatus]:
 
 
 def open_card(attempt: Attempt, now: datetime | None = None) -> Attempt:
-    """Статус «Получена службой» — проставляется при открытии карточки.
+    """Взятие карточки в работу: статус «Получена службой».
 
-    Норматив отсчитывается не отсюда, а от момента направления карточки
-    в службу: открыть её позже не значит получить больше времени.
+    С этого момента начинается отсчёт норматива обработки, а разрыв между
+    поступлением вызова и открытием — это и есть время реакции, на которое
+    отведено 30 секунд.
     """
     if attempt.opened_at is None:
         attempt.opened_at = now or utcnow()
@@ -102,13 +103,33 @@ def finish(attempt: Attempt, now: datetime | None = None) -> Attempt:
 
 def expectation_for(attempt: Attempt) -> Expectation:
     scenario = attempt.scenario
+    session = attempt.session
     return Expectation(
         primary_status=ResponseStatus(scenario.expected_primary_status),
         is_profile=scenario.is_profile,
-        deadline_seconds=attempt.session.deadline_seconds or scenario.deadline_seconds,
+        pickup_deadline_seconds=session.pickup_deadline_seconds,
+        handling_deadline_seconds=session.handling_deadline_seconds,
         required_comment_points=tuple(scenario.required_comment_points or ()),
         expects_progress_statuses=scenario.expects_progress_statuses,
     )
+
+
+def timings(attempt: Attempt) -> tuple[float | None, float | None]:
+    """Секунды до взятия карточки в работу и длительность обработки.
+
+    Взятие в работу — от поступления вызова до открытия карточки.
+    Обработка — от открытия до завершения: время, пока карточка занимала
+    внимание диспетчера и мешала взяться за другие вызовы.
+    """
+    if attempt.opened_at is None:
+        return None, None
+    pickup = (as_utc(attempt.opened_at) - as_utc(attempt.issued_at)).total_seconds()
+    handling = (
+        (as_utc(attempt.finished_at) - as_utc(attempt.opened_at)).total_seconds()
+        if attempt.finished_at is not None
+        else None
+    )
+    return pickup, handling
 
 
 def assess(attempt: Attempt) -> Assessment:
@@ -120,7 +141,8 @@ def assess(attempt: Attempt) -> Assessment:
         )
         for e in attempt.events
     ]
-    return evaluate(events, expectation_for(attempt))
+    pickup, handling = timings(attempt)
+    return evaluate(events, expectation_for(attempt), pickup, handling)
 
 
 def build_evaluation(attempt: Attempt) -> Evaluation:

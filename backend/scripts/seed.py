@@ -275,7 +275,8 @@ def seed() -> None:
             title="Практическое занятие: работа с карточками на АРМ-112",
             teacher=teacher,
             state=SessionState.ACTIVE,
-            deadline_seconds=30,
+            pickup_deadline_seconds=30,
+            handling_deadline_seconds=180,
             started_at=utcnow(),
         )
         db.add(training)

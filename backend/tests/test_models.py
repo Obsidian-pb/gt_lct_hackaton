@@ -59,7 +59,7 @@ def test_полный_цикл_занятия(session):
         author=teacher,
     )
     training = TrainingSession(
-        title="Занятие 1", teacher=teacher, state=SessionState.ACTIVE, deadline_seconds=30
+        title="Занятие 1", teacher=teacher, state=SessionState.ACTIVE
     )
     session.add_all([scenario, training])
     session.flush()

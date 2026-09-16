@@ -31,6 +31,7 @@ class ScenarioOut(BaseModel):
     id: int
     title: str
     incident_type: str
+    mode: str = "dispatcher"
     group: str | None = None
     address: str
     description: str
@@ -86,7 +87,8 @@ class ReportOut(BaseModel):
     session_id: int
     title: str
     state: str
-    deadline_seconds: int
+    pickup_deadline_seconds: int
+    handling_deadline_seconds: int
     started_at: datetime | None
     finished_at: datetime | None
     students: list[StudentResultOut]
@@ -99,3 +101,62 @@ class ReportOut(BaseModel):
     grammar_issues: int
     # Инсайты по типичным ошибкам группы — тоже требование ТЗ.
     insights: list[str]
+
+
+class SessionIn(BaseModel):
+    title: str = Field(min_length=3, max_length=255)
+    mode: str = "dispatcher"
+    pickup_deadline_seconds: int = Field(default=30, ge=5, le=300)
+    handling_deadline_seconds: int = Field(default=180, ge=30, le=1800)
+    # Интервал между вызовами — регулятор нагрузки: чем меньше, тем больше
+    # карточек висит на обучающемся одновременно.
+    call_interval_seconds: int = Field(default=20, ge=0, le=600)
+
+
+class SessionPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=255)
+    pickup_deadline_seconds: int | None = Field(default=None, ge=5, le=300)
+    handling_deadline_seconds: int | None = Field(default=None, ge=30, le=1800)
+    call_interval_seconds: int | None = Field(default=None, ge=0, le=600)
+    student_ids: list[int] | None = None
+    scenario_ids: list[int] | None = None
+
+
+class SessionOut(BaseModel):
+    id: int
+    title: str
+    mode: str
+    state: str
+    pickup_deadline_seconds: int
+    handling_deadline_seconds: int
+    call_interval_seconds: int
+    started_at: datetime | None
+    finished_at: datetime | None
+    students: list[dict]
+    scenarios: list[dict]
+    # Сколько карточек получит каждый обучающийся при запуске.
+    approved_scenarios: int
+
+
+class ProgressOut(BaseModel):
+    student_id: int
+    student_name: str
+    issued: int
+    opened: int
+    finished: int
+    overdue_pickup: int
+    in_work: int
+
+
+class MonitorOut(BaseModel):
+    """Ход занятия в реальном времени — требование ТЗ о контроле во время."""
+
+    session_id: int
+    state: str
+    started_at: datetime | None
+    call_interval_seconds: int
+    pickup_deadline_seconds: int
+    total_planned: int
+    issued: int
+    finished: int
+    students: list[ProgressOut]

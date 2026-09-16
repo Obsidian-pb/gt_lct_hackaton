@@ -35,7 +35,11 @@ class Expectation:
     # Профильное ли происшествие для службы обучающегося. Отказ от профильного
     # происшествия — грубое нарушение даже при корректном оформлении.
     is_profile: bool
-    deadline_seconds: int = 30
+    # Два норматива измеряют разное: первый — скорость реакции на поступивший
+    # вызов, второй — время работы по существу. Разделение задано
+    # организаторами и позволяет отличить нерасторопность от медленной работы.
+    pickup_deadline_seconds: int = 30
+    handling_deadline_seconds: int = 180
     # Факты, которые обязаны прозвучать в комментарии (проверяет LLM).
     required_comment_points: tuple[str, ...] = ()
     # Ожидается ли ведение статусов хода работ (длительное реагирование).
@@ -47,6 +51,10 @@ class Assessment:
     violations: list[Violation] = field(default_factory=list)
     primary_status: ResponseStatus | None = None
     primary_elapsed_seconds: float | None = None
+    # Сколько секунд прошло до взятия карточки в работу и сколько заняла
+    # сама обработка. None, если соответствующее событие не наступило.
+    pickup_seconds: float | None = None
+    handling_seconds: float | None = None
 
     @property
     def score(self) -> float:
@@ -59,11 +67,17 @@ class Assessment:
         return {c: c not in failed for c in Criterion}
 
 
-def evaluate(events: list[StatusEvent], expected: Expectation) -> Assessment:
-    result = Assessment()
+def evaluate(
+    events: list[StatusEvent],
+    expected: Expectation,
+    pickup_seconds: float | None = None,
+    handling_seconds: float | None = None,
+) -> Assessment:
+    result = Assessment(pickup_seconds=pickup_seconds, handling_seconds=handling_seconds)
     ordered = sorted(events, key=lambda e: e.elapsed_seconds)
 
     _check_sequence(ordered, result)
+    _check_timings(expected, result)
     primary = next((e for e in ordered if e.status in PRIMARY), None)
 
     if primary is None:
@@ -74,22 +88,41 @@ def evaluate(events: list[StatusEvent], expected: Expectation) -> Assessment:
 
     result.primary_status = primary.status
     result.primary_elapsed_seconds = primary.elapsed_seconds
-
-    if primary.elapsed_seconds > expected.deadline_seconds:
-        overdue = primary.elapsed_seconds - expected.deadline_seconds
-        result.violations.append(
-            Violation(
-                "V1",
-                f"Первичный статус проставлен с опозданием на {overdue:.0f} с "
-                f"(норматив {expected.deadline_seconds} с)",
-                evidence=f"{primary.elapsed_seconds:.1f} с",
-            )
-        )
-
     _check_primary_correctness(primary, expected, result)
     _check_comments(ordered, result)
     _check_progress(ordered, expected, result)
     return result
+
+
+def _check_timings(expected: Expectation, result: Assessment) -> None:
+    """Проверяет оба норматива: скорость взятия в работу и время обработки."""
+    if result.pickup_seconds is not None and (
+        result.pickup_seconds > expected.pickup_deadline_seconds
+    ):
+        overdue = result.pickup_seconds - expected.pickup_deadline_seconds
+        result.violations.append(
+            Violation(
+                "V8",
+                f"Карточка взята в работу через {result.pickup_seconds:.0f} с "
+                f"при нормативе {expected.pickup_deadline_seconds} с "
+                f"(опоздание {overdue:.0f} с)",
+                evidence=f"{result.pickup_seconds:.1f} с",
+            )
+        )
+
+    if result.handling_seconds is not None and (
+        result.handling_seconds > expected.handling_deadline_seconds
+    ):
+        overdue = result.handling_seconds - expected.handling_deadline_seconds
+        result.violations.append(
+            Violation(
+                "V9",
+                f"Обработка заняла {result.handling_seconds:.0f} с "
+                f"при нормативе {expected.handling_deadline_seconds} с "
+                f"(превышение {overdue:.0f} с)",
+                evidence=f"{result.handling_seconds:.1f} с",
+            )
+        )
 
 
 def _check_sequence(events: list[StatusEvent], result: Assessment) -> None:

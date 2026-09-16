@@ -130,6 +130,7 @@ def my_calls(
         .where(
             Attempt.student_id == user.id,
             Scenario.mode == TrainingMode.OPERATOR,
+            Attempt.issued_at <= utcnow(),
         )
         .order_by(Attempt.id)
     ).all()

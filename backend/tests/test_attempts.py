@@ -41,7 +41,12 @@ def attempt():
         required_comment_points=["информация передана в диспетчерскую «Практика»"],
         author=teacher,
     )
-    session = TrainingSession(title="Занятие", teacher=teacher, deadline_seconds=30)
+    session = TrainingSession(
+        title="Занятие",
+        teacher=teacher,
+        pickup_deadline_seconds=30,
+        handling_deadline_seconds=180,
+    )
     return Attempt(session=session, student=student, scenario=scenario, issued_at=ISSUED)
 
 
@@ -85,11 +90,12 @@ def test_образцовая_обработка_без_нарушений(attem
     assert evaluation.llm_pending is True
 
 
-def test_опоздание_фиксируется(attempt):
-    record_status(attempt, S.REJECTED, comment="не обслуживаем", now=at(41))
+def test_опоздание_со_взятием_в_работу_фиксируется(attempt):
+    open_card(attempt, now=at(41))
+    record_status(attempt, S.REJECTED, comment="не обслуживаем", now=at(45))
     evaluation = build_evaluation(attempt)
-    assert [v["code"] for v in evaluation.violations] == ["V1"]
-    assert "11 с" in evaluation.violations[0]["detail"]
+    assert [v["code"] for v in evaluation.violations] == ["V8"]
+    assert "опоздание 11 с" in evaluation.violations[0]["detail"]
 
 
 def test_завершение_работ_закрывает_карточку(attempt):

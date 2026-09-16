@@ -82,7 +82,8 @@ def db_factory():
             title="Занятие 1",
             teacher=users["teacher"],
             state=SessionState.ACTIVE,
-            deadline_seconds=30,
+            pickup_deadline_seconds=30,
+            handling_deadline_seconds=180,
         )
         db.add_all([scenario, training])
         db.flush()
