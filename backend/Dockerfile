@@ -20,6 +20,10 @@ COPY backend/alembic.ini backend/pytest.ini ./
 
 # Классификатор разбирается на этапе сборки: в образ попадает готовый ekp.json,
 # сам xlsx во время работы не нужен.
+# Расшифрованные билеты и подобранные к ним эталоны — учебный материал,
+# который нужен во время работы, а не только при сборке.
+COPY backend/data/tickets.json backend/data/ticket_rules.json ./data/
+
 COPY classificator.xlsx /tmp/classificator.xlsx
 RUN python scripts/parse_ekp.py --src /tmp/classificator.xlsx --dst /app/data/ekp.json \
     && rm /tmp/classificator.xlsx
