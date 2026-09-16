@@ -1,0 +1,173 @@
+from datetime import datetime
+from enum import StrEnum
+
+from sqlalchemy import JSON, Boolean, DateTime
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, TimestampMixin
+from app.models.user import DispatchService, User
+
+
+class ScenarioSource(StrEnum):
+    MANUAL = "manual"
+    GENERATED = "generated"
+    TICKET = "ticket"
+
+
+class SessionState(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    FINISHED = "finished"
+
+
+class CardStatus(StrEnum):
+    """Статусы карточки происшествия из памятки ГБУ «Система 112»."""
+
+    REGISTERED = "Зарегистрирована"
+    NOT_NOTIFIED = "Не оповещено"
+    REFUSED = "Отказ"
+    UNFINISHED = "Не завершено"
+    COMPLETED = "Завершена"
+
+
+class Scenario(Base, TimestampMixin):
+    """Учебный сценарий: карточка происшествия вместе с эталоном действий.
+
+    Сценарий обязан быть утверждён преподавателем перед выдачей обучающимся —
+    сгенерированные нейросетью карточки без подтверждения в занятие не идут.
+    """
+
+    __tablename__ = "scenario"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255))
+    source: Mapped[ScenarioSource] = mapped_column(
+        SAEnum(ScenarioSource, native_enum=False, length=32), default=ScenarioSource.MANUAL
+    )
+    difficulty: Mapped[int] = mapped_column(Integer, default=1)
+
+    # Привязка к ЕКП: по номеру правила восстанавливаются итоговый тип
+    # происшествия и список оповещения.
+    ekp_rule_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    incident_type: Mapped[str] = mapped_column(String(255))
+    # Флаги опросной карты, влияющие на список оповещения.
+    flags: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    address: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(Text)
+    caller: Mapped[str] = mapped_column(String(255), default="")
+
+    target_service_id: Mapped[int] = mapped_column(ForeignKey("dispatch_service.id"))
+    target_service: Mapped[DispatchService] = relationship()
+
+    # --- Эталон -------------------------------------------------------------
+    expected_primary_status: Mapped[str] = mapped_column(String(64))
+    is_profile: Mapped[bool] = mapped_column(Boolean, default=True)
+    expects_progress_statuses: Mapped[bool] = mapped_column(Boolean, default=False)
+    required_comment_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    deadline_seconds: Mapped[int] = mapped_column(Integer, default=30)
+
+    author_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    author: Mapped[User] = relationship(foreign_keys=[author_id])
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"))
+    approved_by: Mapped[User | None] = relationship(foreign_keys=[approved_by_id])
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Замечание преподавателя, по которому система переформирует сценарий.
+    teacher_note: Mapped[str | None] = mapped_column(Text)
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approved_at is not None
+
+
+class TrainingSession(Base, TimestampMixin):
+    """Практическое занятие, которым управляет преподаватель."""
+
+    __tablename__ = "training_session"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255))
+    state: Mapped[SessionState] = mapped_column(
+        SAEnum(SessionState, native_enum=False, length=32), default=SessionState.DRAFT
+    )
+    deadline_seconds: Mapped[int] = mapped_column(Integer, default=30)
+
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    teacher: Mapped[User] = relationship()
+
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    attempts: Mapped[list["Attempt"]] = relationship(back_populates="session")
+
+
+class Attempt(Base, TimestampMixin):
+    """Работа одного обучающегося с одной карточкой."""
+
+    __tablename__ = "attempt"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("training_session.id"))
+    session: Mapped[TrainingSession] = relationship(back_populates="attempts")
+    student_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    student: Mapped[User] = relationship()
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenario.id"))
+    scenario: Mapped[Scenario] = relationship()
+
+    # Точка отсчёта норматива: момент направления карточки в службу.
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Момент открытия карточки — статус «Получена службой».
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    card_status: Mapped[CardStatus] = mapped_column(
+        SAEnum(CardStatus, native_enum=False, length=32), default=CardStatus.REGISTERED
+    )
+
+    events: Mapped[list["StatusEvent"]] = relationship(
+        back_populates="attempt",
+        order_by="StatusEvent.elapsed_seconds",
+        cascade="all, delete-orphan",
+    )
+    evaluation: Mapped["Evaluation | None"] = relationship(
+        back_populates="attempt", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class StatusEvent(Base, TimestampMixin):
+    """Проставленный обучающимся статус реагирования с комментарием."""
+
+    __tablename__ = "status_event"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(ForeignKey("attempt.id"))
+    attempt: Mapped[Attempt] = relationship(back_populates="events")
+
+    status: Mapped[str] = mapped_column(String(64))
+    comment: Mapped[str | None] = mapped_column(Text)
+    # Секунды от момента направления карточки — по ним считается норматив.
+    elapsed_seconds: Mapped[float] = mapped_column(Float)
+
+
+class Evaluation(Base, TimestampMixin):
+    """Результат оценки попытки.
+
+    Детерминированная часть заполняется сразу, поля LLM дозаполняются фоновой
+    задачей — поэтому llm_pending остаётся истинным до её завершения.
+    """
+
+    __tablename__ = "evaluation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(ForeignKey("attempt.id"), unique=True)
+    attempt: Mapped[Attempt] = relationship(back_populates="evaluation")
+
+    score: Mapped[float] = mapped_column(Float)
+    criteria: Mapped[dict] = mapped_column(JSON, default=dict)
+    violations: Mapped[list[dict]] = mapped_column(JSON, default=list)
+
+    llm_pending: Mapped[bool] = mapped_column(Boolean, default=True)
+    llm_available: Mapped[bool] = mapped_column(Boolean, default=False)
+    llm_summary: Mapped[str | None] = mapped_column(Text)
+    grammar_issues: Mapped[list[str]] = mapped_column(JSON, default=list)

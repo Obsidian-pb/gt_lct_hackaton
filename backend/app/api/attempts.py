@@ -1,0 +1,204 @@
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.core.db import SessionLocal, get_session
+from app.llm import get_llm_provider
+from app.models.base import as_utc, utcnow
+from app.models.training import Attempt, Evaluation
+from app.models.user import Role, User
+from app.schemas.training import CardOut, EvaluationOut, StatusIn
+from app.services import attempts as service
+from app.services.ekp import get_ekp
+from app.services.response_status import COMMENT_REQUIRED, ResponseStatus
+
+router = APIRouter(prefix="/api/attempts", tags=["Работа на АРМ-112"])
+
+
+def _load(attempt_id: int, db: Session, user: User) -> Attempt:
+    attempt = db.get(Attempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Карточка не найдена")
+    # Обучающийся не должен видеть работу других обучающихся.
+    if user.role is Role.STUDENT and attempt.student_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к этой карточке")
+    return attempt
+
+
+def _card(attempt: Attempt) -> CardOut:
+    scenario = attempt.scenario
+    notified: dict[str, str] = {}
+    if scenario.ekp_rule_number:
+        ekp = get_ekp()
+        try:
+            notified = ekp.rule(scenario.ekp_rule_number).resolve(set(scenario.flags or []))
+        except KeyError:
+            notified = {}
+
+    current = service.current_status(attempt)
+    reference = as_utc(attempt.finished_at) if attempt.finished_at else utcnow()
+    return CardOut(
+        attempt_id=attempt.id,
+        incident_type=scenario.incident_type,
+        address=scenario.address,
+        description=scenario.description,
+        caller=scenario.caller,
+        notified_services=notified,
+        issued_at=attempt.issued_at,
+        opened_at=attempt.opened_at,
+        deadline_seconds=attempt.session.deadline_seconds or scenario.deadline_seconds,
+        elapsed_seconds=(reference - as_utc(attempt.issued_at)).total_seconds(),
+        current_status=str(current) if current else None,
+        available_statuses=[str(s) for s in service.available_statuses(attempt)],
+        comment_required_for=[str(s) for s in COMMENT_REQUIRED],
+        card_status=str(attempt.card_status),
+        finished=attempt.finished_at is not None,
+    )
+
+
+@router.get("/my", response_model=list[CardOut])
+def my_cards(
+    db: Session = Depends(get_session), user: User = Depends(get_current_user)
+) -> list[CardOut]:
+    rows = db.scalars(
+        select(Attempt).where(Attempt.student_id == user.id).order_by(Attempt.issued_at.desc())
+    ).all()
+    return [_card(a) for a in rows]
+
+
+@router.get("/{attempt_id}", response_model=CardOut)
+def get_card(
+    attempt_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CardOut:
+    return _card(_load(attempt_id, db, user))
+
+
+@router.post("/{attempt_id}/open", response_model=CardOut)
+def open_card(
+    attempt_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CardOut:
+    attempt = service.open_card(_load(attempt_id, db, user))
+    db.commit()
+    return _card(attempt)
+
+
+@router.post("/{attempt_id}/status", response_model=CardOut)
+def set_status(
+    attempt_id: int,
+    payload: StatusIn,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CardOut:
+    attempt = _load(attempt_id, db, user)
+    try:
+        target = ResponseStatus(payload.status)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, f"Неизвестный статус «{payload.status}»"
+        ) from None
+    try:
+        service.record_status(attempt, target, payload.comment)
+    except service.AttemptError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    db.commit()
+    return _card(attempt)
+
+
+@router.post("/{attempt_id}/finish", response_model=EvaluationOut)
+def finish(
+    attempt_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> EvaluationOut:
+    attempt = _load(attempt_id, db, user)
+    if attempt.evaluation is not None:
+        return _evaluation_out(attempt.evaluation)
+
+    service.finish(attempt)
+    evaluation = service.build_evaluation(attempt)
+    db.add(evaluation)
+    db.commit()
+
+    # Детерминированная оценка уже готова и отдаётся сразу — норматив отклика
+    # в 2 секунды не зависит от скорости работы LLM.
+    if evaluation.llm_pending:
+        background.add_task(run_llm_review, attempt.id)
+    return _evaluation_out(evaluation)
+
+
+@router.get("/{attempt_id}/evaluation", response_model=EvaluationOut)
+def get_evaluation(
+    attempt_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> EvaluationOut:
+    attempt = _load(attempt_id, db, user)
+    if attempt.evaluation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оценка ещё не сформирована")
+    return _evaluation_out(attempt.evaluation)
+
+
+def _evaluation_out(evaluation: Evaluation) -> EvaluationOut:
+    return EvaluationOut(
+        attempt_id=evaluation.attempt_id,
+        score=evaluation.score,
+        criteria=evaluation.criteria,
+        violations=evaluation.violations,
+        llm_pending=evaluation.llm_pending,
+        llm_available=evaluation.llm_available,
+        llm_summary=evaluation.llm_summary,
+        grammar_issues=evaluation.grammar_issues or [],
+    )
+
+
+async def run_llm_review(attempt_id: int) -> None:
+    """Фоновая смысловая проверка комментариев.
+
+    Выполняется после ответа клиенту. Недоступность провайдера не влияет
+    на уже выставленную детерминированную оценку — фиксируется признаком
+    llm_available.
+    """
+    from app.services.violations import CATALOG
+
+    with SessionLocal() as db:
+        attempt = db.get(Attempt, attempt_id)
+        if attempt is None or attempt.evaluation is None:
+            return
+        # Идемпотентность: повторный запуск не должен дублировать нарушения.
+        if not attempt.evaluation.llm_pending:
+            return
+
+        comments = "\n".join(e.comment for e in attempt.events if e.comment)
+        review = await get_llm_provider().review_comment(
+            comment=comments,
+            required_points=list(attempt.scenario.required_comment_points or []),
+            context=f"{attempt.scenario.incident_type}. {attempt.scenario.description}",
+        )
+
+        evaluation = attempt.evaluation
+        kind = CATALOG["V5"]
+        extra = [
+            {
+                "code": kind.code,
+                "title": kind.title,
+                "criterion": str(kind.criterion),
+                "severity": str(kind.severity),
+                "detail": f"В комментарии не отражено: {point}",
+                "evidence": None,
+                "example": kind.example,
+            }
+            for point in review.missing_points
+        ]
+        evaluation.violations = list(evaluation.violations) + extra
+        evaluation.score = max(0.0, evaluation.score - 0.5 * len(extra) / 3.0)
+        evaluation.grammar_issues = review.grammar_issues
+        evaluation.llm_summary = review.summary
+        evaluation.llm_available = review.available
+        evaluation.llm_pending = False
+        db.commit()

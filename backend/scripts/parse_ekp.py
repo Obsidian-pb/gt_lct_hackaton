@@ -8,6 +8,7 @@
 опросной карты (пострадавшие, нет доступа, газификация и т.п.).
 """
 
+import argparse
 import json
 import re
 import sys
@@ -15,9 +16,9 @@ from pathlib import Path
 
 import openpyxl
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "classificator.xlsx"
-DST = Path(__file__).resolve().parents[1] / "data" / "ekp.json"
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_SRC = BACKEND_DIR.parent / "classificator.xlsx"
+DEFAULT_DST = BACKEND_DIR / "data" / "ekp.json"
 
 COL_G, COL_P1, COL_P2, COL_P3 = 0, 1, 2, 3
 COL_NUMBER, COL_SUBGROUP = 4, 5
@@ -115,8 +116,8 @@ def read_services(header_rows):
     return services
 
 
-def parse():
-    wb = openpyxl.load_workbook(SRC, read_only=True, data_only=True)
+def parse(src: Path = DEFAULT_SRC, dst: Path = DEFAULT_DST):
+    wb = openpyxl.load_workbook(src, read_only=True, data_only=True)
     rows = list(wb.active.iter_rows(values_only=True))
     services = read_services(rows[:3])
 
@@ -173,17 +174,21 @@ def parse():
         )
 
     payload = {
-        "source": SRC.name,
+        "source": src.name,
         "groups": groups,
         "services": sorted({s["service"] for s in services}),
         "rules": rules,
     }
-    DST.parent.mkdir(parents=True, exist_ok=True)
-    DST.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
 
     print(f"правил: {len(rules)}, групп: {len(groups)}, служб: {len(payload['services'])}")
-    print(f"записано: {DST.relative_to(ROOT)} ({DST.stat().st_size // 1024} КБ)")
+    print(f"записано: {dst} ({dst.stat().st_size // 1024} КБ)")
 
 
 if __name__ == "__main__":
-    parse()
+    cli = argparse.ArgumentParser(description="Разбор классификатора ЕКП в ekp.json")
+    cli.add_argument("--src", type=Path, default=DEFAULT_SRC, help="путь к classificator.xlsx")
+    cli.add_argument("--dst", type=Path, default=DEFAULT_DST, help="куда записать ekp.json")
+    args = cli.parse_args()
+    parse(args.src, args.dst)

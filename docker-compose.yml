@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trainer
+      POSTGRES_PASSWORD: trainer
+      POSTGRES_DB: trainer
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trainer -d trainer"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Порт наружу нужен только для отладки; в учебном контуре можно убрать.
+    # 5434 снаружи, чтобы не конфликтовать с локально установленным Postgres.
+    ports:
+      - "5434:5432"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://trainer:trainer@db:5432/trainer
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      # Переключение контура: stub — без модели, openai — внешний API,
+      # local — локальная модель по OpenAI-совместимому протоколу.
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+    command: >-
+      sh -c "python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+volumes:
+  db-data:
