@@ -131,7 +131,7 @@ export function CardPage() {
               {Object.entries(card.notified_services).map(([service, type]) => (
                 <div
                   key={service}
-                  className={`notify__item${service === user?.service_name ? ' notify__own' : ''}`}
+                  className={`notify__item${service === user?.service_ekp_name ? ' notify__own' : ''}`}
                 >
                   <div className="notify__service">{service}</div>
                   <div className="notify__type">{type}</div>

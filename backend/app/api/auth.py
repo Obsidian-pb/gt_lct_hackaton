@@ -36,4 +36,5 @@ def me(user: User = Depends(get_current_user)) -> UserOut:
         full_name=user.full_name,
         role=str(user.role),
         service_name=user.service.name if user.service else None,
+        service_ekp_name=user.service.classifier_name if user.service else None,
     )

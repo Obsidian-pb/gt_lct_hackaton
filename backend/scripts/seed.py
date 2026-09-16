@@ -31,6 +31,16 @@ from app.services.response_status import ResponseStatus as S  # noqa: E402
 
 SERVICE_NAME = "ДДС района Чертаново Южное"
 
+# Учебные службы и их названия в классификаторе. Районные ДДС поимённо в ЕКП
+# не значатся, они проходят как территориальные органы власти и оповещаются
+# почти обо всём. Аварийные службы, наоборот, узкопрофильные — на них хорошо
+# видно, что корректный отказ от непрофильного происшествия тоже навык.
+SERVICES = [
+    (SERVICE_NAME, "Территориальные ОИВ"),
+    ("Мосводоканал", "Мосводоканал"),
+    ("Мослифт", "Мослифт"),
+]
+
 # Пароль учебных учётных записей. Совпадение с логином допустимо только
 # на локальной машине: стенд публикуется в интернете, и там DEMO_PASSWORD
 # обязателен — иначе учётка администратора подбирается с первой попытки.
@@ -40,7 +50,7 @@ USERS = [
     ("admin", "Администратор системы", Role.ADMIN, None),
     ("teacher", "Глущенко О. И., преподаватель", Role.TEACHER, None),
     ("student", "Иванов И. И., диспетчер", Role.STUDENT, SERVICE_NAME),
-    ("student2", "Петрова А. С., диспетчер", Role.STUDENT, SERVICE_NAME),
+    ("student2", "Петрова А. С., диспетчер", Role.STUDENT, "Мослифт"),
 ]
 
 SCENARIOS = [
@@ -139,9 +149,12 @@ def seed() -> None:
             print("Стенд уже наполнен, пропускаю.")
             return
 
-        service = DispatchService(name=SERVICE_NAME)
-        db.add(service)
+        services = {
+            name: DispatchService(name=name, ekp_name=ekp) for name, ekp in SERVICES
+        }
+        db.add_all(services.values())
         db.flush()
+        service = services[SERVICE_NAME]
 
         users: dict[str, User] = {}
         for login, full_name, role, service_name in USERS:
@@ -150,7 +163,7 @@ def seed() -> None:
                 full_name=full_name,
                 hashed_password=hash_password(DEMO_PASSWORD or login),
                 role=role,
-                service=service if service_name else None,
+                service=services.get(service_name) if service_name else None,
             )
             users[login] = user
             db.add(user)

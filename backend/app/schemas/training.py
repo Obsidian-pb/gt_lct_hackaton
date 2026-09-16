@@ -16,6 +16,8 @@ class UserOut(BaseModel):
     full_name: str
     role: str
     service_name: str | None = None
+    # Имя службы в классификаторе — по нему интерфейс подсвечивает свой блок.
+    service_ekp_name: str | None = None
 
 
 class CardOut(BaseModel):

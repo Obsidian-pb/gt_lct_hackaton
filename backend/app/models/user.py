@@ -26,8 +26,17 @@ class DispatchService(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True)
+    # Название этой же службы в классификаторе. Отличается от отображаемого:
+    # районные ДДС проходят в ЕКП как «Территориальные ОИВ», а не поимённо.
+    # По нему определяется, профильное ли происшествие и подсвечивать ли
+    # блок службы в списке оповещения.
+    ekp_name: Mapped[str | None] = mapped_column(String(255))
     # Работает через АРМ-112 или через интеграцию информационных систем.
     uses_arm112: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    @property
+    def classifier_name(self) -> str:
+        return self.ekp_name or self.name
 
     users: Mapped[list["User"]] = relationship(back_populates="service")
 

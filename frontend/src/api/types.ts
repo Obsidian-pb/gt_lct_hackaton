@@ -4,6 +4,7 @@ export interface User {
   full_name: string;
   role: 'admin' | 'teacher' | 'student';
   service_name: string | null;
+  service_ekp_name: string | null;
 }
 
 export interface Card {

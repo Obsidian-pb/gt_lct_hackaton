@@ -108,7 +108,7 @@ async def generate(
         get_llm_provider(),
         group=payload.group,
         count=payload.count,
-        service=service.name,
+        service=service.classifier_name,
         difficulty=payload.difficulty,
     )
     scenarios = [_save_draft(db, d, service, user) for d in drafts]
@@ -182,7 +182,7 @@ async def correct(
     draft = await draft_from_rule(
         get_llm_provider(),
         rule,
-        scenario.target_service.name,
+        scenario.target_service.classifier_name,
         scenario.difficulty,
         note=payload.note,
     )
