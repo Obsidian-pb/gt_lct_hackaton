@@ -271,30 +271,76 @@ def seed() -> None:
             db.add(call)
         db.flush()
 
-        training = TrainingSession(
-            title="Практическое занятие: работа с карточками на АРМ-112",
-            teacher=teacher,
-            state=SessionState.ACTIVE,
-            pickup_deadline_seconds=30,
-            handling_deadline_seconds=180,
-            started_at=utcnow(),
-        )
-        db.add(training)
+        # Карточки разделены по режимам: занятие диспетчера и занятие
+        # оператора живут отдельно, смешивать их нельзя.
+        dispatcher_cards = [x for x in scenarios if x.mode is TrainingMode.DISPATCHER]
+        operator_cards = [x for x in scenarios if x.mode is TrainingMode.OPERATOR]
+        learners = [users["student"], users["student2"]]
+
+        # Два занятия идут прямо сейчас, чтобы у обучающегося сразу была работа,
+        # и одно остаётся черновиком — на нём преподаватель показывает запуск
+        # занятия вживую.
+        started = utcnow()
+        running = []
+        for title, mode, cards, interval in (
+            (
+                "Практическое занятие: работа с карточками на АРМ-112",
+                TrainingMode.DISPATCHER,
+                dispatcher_cards,
+                20,
+            ),
+            (
+                "Практическое занятие: приём вызовов по номеру 112",
+                TrainingMode.OPERATOR,
+                operator_cards,
+                60,
+            ),
+        ):
+            session = TrainingSession(
+                title=title,
+                mode=mode,
+                teacher=teacher,
+                state=SessionState.ACTIVE,
+                pickup_deadline_seconds=30,
+                handling_deadline_seconds=180,
+                call_interval_seconds=interval,
+                started_at=started,
+            )
+            session.students = learners
+            session.scenarios = cards
+            db.add(session)
+            running.append((session, cards, interval))
         db.flush()
 
-        # Карточки выдаются каждому обучающемуся: на демонстрации под разными
-        # учётными записями заходят одновременно, и пустая лента у второго
-        # выглядела бы поломкой.
-        for student in (users["student"], users["student2"]):
-            for offset, scenario in enumerate(scenarios):
-                db.add(
-                    Attempt(
-                        session=training,
-                        student=student,
-                        scenario=scenario,
-                        issued_at=utcnow() - timedelta(seconds=offset * 2),
+        for session, cards, interval in running:
+            for student in learners:
+                for offset, scenario in enumerate(cards):
+                    # Вызовы поступали потоком: первые уже давно, последние
+                    # только что — обучающийся застаёт занятие в середине.
+                    db.add(
+                        Attempt(
+                            session=session,
+                            student=student,
+                            scenario=scenario,
+                            issued_at=started - timedelta(seconds=offset * interval),
+                        )
                     )
-                )
+
+        draft = TrainingSession(
+            title="Смена с высокой нагрузкой (готово к запуску)",
+            mode=TrainingMode.DISPATCHER,
+            teacher=teacher,
+            state=SessionState.DRAFT,
+            pickup_deadline_seconds=30,
+            handling_deadline_seconds=180,
+            # Вызов каждые пять секунд: успеть всё заведомо нельзя, и занятие
+            # проверяет умение расставлять приоритеты.
+            call_interval_seconds=5,
+        )
+        draft.students = learners
+        draft.scenarios = dispatcher_cards
+        db.add(draft)
+
         db.commit()
 
     source = "из DEMO_PASSWORD" if DEMO_PASSWORD else "совпадает с логином"

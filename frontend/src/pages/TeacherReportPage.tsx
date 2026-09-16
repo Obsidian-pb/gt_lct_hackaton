@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Report, TrainingSession } from '../api/types';
@@ -34,8 +35,11 @@ function ViolationBar({ code, count, total }: { code: string; count: number; tot
 }
 
 export function TeacherReportPage() {
+  // Занятие можно открыть по ссылке сразу после завершения.
+  const [params] = useSearchParams();
+  const requested = Number(params.get('session')) || null;
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
-  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [sessionId, setSessionId] = useState<number | null>(requested);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +48,7 @@ export function TeacherReportPage() {
       .sessions()
       .then((list) => {
         setSessions(list);
-        setSessionId(list[0]?.id ?? null);
+        setSessionId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Не удалось загрузить занятия'));
   }, []);
@@ -95,13 +99,13 @@ export function TeacherReportPage() {
           hint="из 100"
         />
         <Stat
-          label="Среднее время ответа"
+          label="Среднее время до ответа"
           value={
             report.average_response_seconds != null
               ? `${report.average_response_seconds} с`
               : '—'
           }
-          hint={`норматив ${report.deadline_seconds} с`}
+          hint={`норматив ${report.pickup_deadline_seconds} с`}
         />
         <Stat
           label="Просрочен норматив"

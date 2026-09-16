@@ -98,7 +98,8 @@ export interface Report {
   session_id: number;
   title: string;
   state: string;
-  deadline_seconds: number;
+  pickup_deadline_seconds: number;
+  handling_deadline_seconds: number;
   started_at: string | null;
   finished_at: string | null;
   students: StudentResult[];
@@ -112,12 +113,7 @@ export interface Report {
   insights: string[];
 }
 
-export interface TrainingSession {
-  id: number;
-  title: string;
-  state: string;
-  deadline_seconds: number;
-}
+
 
 export interface SurveyOption {
   label: string;
@@ -196,4 +192,53 @@ export interface SystemState {
   sessions_total: number;
   attempts_total: number;
   audit_events: number;
+}
+
+export interface SessionMember {
+  id: number;
+  full_name: string;
+  service: string | null;
+}
+
+export interface SessionScenario {
+  id: number;
+  title: string;
+  approved: boolean;
+}
+
+export interface TrainingSession {
+  id: number;
+  title: string;
+  mode: string;
+  state: string;
+  pickup_deadline_seconds: number;
+  handling_deadline_seconds: number;
+  call_interval_seconds: number;
+  started_at: string | null;
+  finished_at: string | null;
+  students: SessionMember[];
+  scenarios: SessionScenario[];
+  approved_scenarios: number;
+}
+
+export interface StudentProgress {
+  student_id: number;
+  student_name: string;
+  issued: number;
+  opened: number;
+  finished: number;
+  overdue_pickup: number;
+  in_work: number;
+}
+
+export interface SessionMonitor {
+  session_id: number;
+  state: string;
+  started_at: string | null;
+  call_interval_seconds: number;
+  pickup_deadline_seconds: number;
+  total_planned: number;
+  issued: number;
+  finished: number;
+  students: StudentProgress[];
 }

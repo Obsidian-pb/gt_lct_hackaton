@@ -10,6 +10,8 @@ import type {
   Report,
   Scenario,
   Service,
+  SessionMember,
+  SessionMonitor,
   SurveyOption,
   SystemState,
   TrainingSession,
@@ -76,10 +78,13 @@ export const api = {
   evaluation: (id: number) => request<Evaluation>(`/api/attempts/${id}/evaluation`),
 
   catalog: () => request<Catalog>('/api/teacher/catalog'),
-  scenarios: (approved?: boolean) =>
-    request<Scenario[]>(
-      `/api/teacher/scenarios${approved === undefined ? '' : `?approved=${approved}`}`,
-    ),
+  scenarios: (approved?: boolean, mode?: string) => {
+    const query = new URLSearchParams();
+    if (approved !== undefined) query.set('approved', String(approved));
+    if (mode) query.set('mode', mode);
+    const suffix = query.toString();
+    return request<Scenario[]>(`/api/teacher/scenarios${suffix ? `?${suffix}` : ''}`);
+  },
   generate: (group: string, count: number, difficulty: number, serviceId: number) =>
     request<GenerateResult>('/api/teacher/scenarios/generate', {
       method: 'POST',
@@ -111,6 +116,29 @@ export const api = {
     }),
 
   sessions: () => request<TrainingSession[]>('/api/teacher/sessions'),
+  sessionStudents: () => request<SessionMember[]>('/api/teacher/students'),
+  createSession: (body: {
+    title: string;
+    mode: string;
+    pickup_deadline_seconds: number;
+    handling_deadline_seconds: number;
+    call_interval_seconds: number;
+  }) =>
+    request<TrainingSession>('/api/teacher/sessions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateSession: (id: number, body: Record<string, unknown>) =>
+    request<TrainingSession>(`/api/teacher/sessions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  startSession: (id: number) =>
+    request<TrainingSession>(`/api/teacher/sessions/${id}/start`, { method: 'POST' }),
+  finishSession: (id: number) =>
+    request<TrainingSession>(`/api/teacher/sessions/${id}/finish`, { method: 'POST' }),
+  monitorSession: (id: number) =>
+    request<SessionMonitor>(`/api/teacher/sessions/${id}/monitor`),
   report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
 
   adminUsers: () => request<AdminUser[]>('/api/admin/users'),

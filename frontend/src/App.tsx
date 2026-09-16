@@ -9,6 +9,8 @@ import { LoginPage } from './pages/LoginPage';
 import { OperatorCallPage } from './pages/OperatorCallPage';
 import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
+import { TeacherSessionPage } from './pages/TeacherSessionPage';
+import { TeacherSessionsPage } from './pages/TeacherSessionsPage';
 import { TeacherScenariosPage } from './pages/TeacherScenariosPage';
 
 function Header({ role }: { role: string }) {
@@ -34,6 +36,9 @@ function Header({ role }: { role: string }) {
           <>
             <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
               Сценарии
+            </NavLink>
+            <NavLink to="/sessions" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Занятия
             </NavLink>
             <NavLink to="/report" className={({ isActive }) => (isActive ? 'active' : '')}>
               Отчёт
@@ -90,6 +95,8 @@ export default function App() {
           ) : user.role === 'teacher' ? (
             <>
               <Route path="/scenarios" element={<TeacherScenariosPage />} />
+              <Route path="/sessions" element={<TeacherSessionsPage />} />
+              <Route path="/sessions/:id" element={<TeacherSessionPage />} />
               <Route path="/report" element={<TeacherReportPage />} />
               <Route path="*" element={<Navigate to="/scenarios" replace />} />
             </>

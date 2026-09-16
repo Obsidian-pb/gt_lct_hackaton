@@ -924,3 +924,43 @@ button {
   font: inherit;
   background: var(--surface);
 }
+
+
+/* --- Набор состава занятия ---------------------------------------------- */
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.picker__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  text-align: left;
+  min-width: 190px;
+}
+
+.picker__item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Выбранное выделяется синим — как признаки в карточке ПОВ-112. */
+.picker__item--on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.picker__hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
