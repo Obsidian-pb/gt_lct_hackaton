@@ -24,6 +24,7 @@ from app.models.training import (  # noqa: E402
     Scenario,
     ScenarioSource,
     SessionState,
+    TrainingMode,
     TrainingSession,
 )
 from app.models.user import DispatchService, Role, User  # noqa: E402
@@ -142,6 +143,59 @@ SCENARIOS = [
 ]
 
 
+# Вызовы из экзаменационных билетов Службы 112. Тексты взяты дословно —
+# это настоящие учебные задачи, а не выдуманные. Эталон задан номером
+# правила классификатора, поэтому проверка классификации объективна.
+CALLS = [
+    {
+        "title": "Билет 1, вызов 1: возгорание мусорного контейнера",
+        "ekp_rule_number": 1010101,
+        "legend": (
+            "Возгорание мусорного контейнера, пострадавших нет, "
+            "Сидоров Иван Сергеевич, 916-126-34-71"
+        ),
+        "address": "Москва, Депо, около ст. Москва-Пассажирская Киевская",
+        "caller": "Сидоров Иван Сергеевич, 916-126-34-71",
+        "difficulty": 1,
+    },
+    {
+        "title": "Билет 2, вызов 1: задымление мусоропровода",
+        "ekp_rule_number": 1050602,
+        "legend": (
+            "Задымление мусоропровода в жилом доме, в доме 17 этажей, заявитель "
+            "находится на 7-м этаже. Открытого пламени не видит, пострадавших "
+            "людей нет. Ким Олег Юрьевич, 916-126-34-71"
+        ),
+        "address": "Москва, ул. Берзарина, дом 21, корп. 1, под. 3, домофон 68",
+        "caller": "Ким Олег Юрьевич, 916-126-34-71",
+        "difficulty": 3,
+    },
+    {
+        "title": "Билет 4, вызов 1: горит балкон",
+        "ekp_rule_number": 1050201,
+        "legend": (
+            "Горит балкон и два окна рядом на 13-м этаже, открытое пламя, "
+            "пострадавших не видят, наблюдают с улицы. Этажность 14, дом "
+            "газифицирован. Сидорова Анна Викторовна, 916-126-34-71"
+        ),
+        "address": "Москва, ул. Грина, дом 11 (в доме библиотека № 193)",
+        "caller": "Сидорова Анна Викторовна, 916-126-34-71",
+        "difficulty": 2,
+    },
+    {
+        "title": "Билет 30, вызов 2: наезд на пешехода",
+        "ekp_rule_number": 2020100,
+        "legend": (
+            "Наезд на пешехода, мужчина без сознания, на месте ваз 2110 красный "
+            "а128 аа177. Иванова Елена Сергеевна, 916-896-32-54"
+        ),
+        "address": "Москва, ул. Тюменская на пересечении с Тюменским проездом",
+        "caller": "Иванова Елена Сергеевна, 916-896-32-54",
+        "difficulty": 2,
+    },
+]
+
+
 def seed() -> None:
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.login == "teacher")):
@@ -191,6 +245,30 @@ def seed() -> None:
             )
             scenarios.append(scenario)
             db.add(scenario)
+        db.flush()
+
+        for item in CALLS:
+            call = Scenario(
+                title=item["title"],
+                mode=TrainingMode.OPERATOR,
+                incident_type="",  # оператор определяет тип сам
+                ekp_rule_number=item["ekp_rule_number"],
+                address=item["address"],
+                description=item["legend"],
+                caller=item["caller"],
+                target_service=service,
+                # Эталонный статус в этом режиме не используется: оператор
+                # не проставляет статус реагирования, а классифицирует вызов.
+                expected_primary_status=str(S.ACCEPTED),
+                difficulty=item["difficulty"],
+                deadline_seconds=180,
+                source=ScenarioSource.TICKET,
+                author=teacher,
+                approved_by=teacher,
+                approved_at=utcnow(),
+            )
+            scenarios.append(call)
+            db.add(call)
         db.flush()
 
         training = TrainingSession(

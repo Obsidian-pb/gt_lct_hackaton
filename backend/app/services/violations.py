@@ -21,6 +21,15 @@ class Criterion(StrEnum):
     COMPLETENESS = "Полнота информации"
 
 
+class OperatorCriterion(StrEnum):
+    """Критерии для оператора Службы 112, принимающего вызов."""
+
+    CLASSIFICATION = "Правильность классификации происшествия"
+    NOTIFICATION = "Полнота списка оповещения"
+    ADDRESS = "Точность регистрации адреса"
+    TIMELINESS = "Своевременность обработки вызова"
+
+
 class Severity(StrEnum):
     CRITICAL = "критическое"
     MAJOR = "существенное"
@@ -98,6 +107,63 @@ CATALOG: dict[str, ViolationKind] = {
 }
 
 
+# Нарушения при приёме вызова и заполнении карточки оператором Службы 112.
+# Ошибка классификации значима не сама по себе: от итогового типа зависит,
+# какие службы будут оповещены, поэтому последствие указывается в разборе.
+OPERATOR_CATALOG: dict[str, ViolationKind] = {
+    v.code: v
+    for v in (
+        ViolationKind(
+            "O1",
+            "Происшествие не классифицировано",
+            Criterion.ACTUAL_MATCH,
+            Severity.CRITICAL,
+            "Без выбора признаков карточка не формируется и ни одна служба "
+            "не получает информацию о происшествии.",
+        ),
+        ViolationKind(
+            "O2",
+            "Выбрана неверная группа происшествий",
+            Criterion.ACTUAL_MATCH,
+            Severity.CRITICAL,
+            "Пожар классифицирован как нарушение правопорядка: на место "
+            "поедет полиция вместо пожарных расчётов.",
+        ),
+        ViolationKind(
+            "O3",
+            "Неверный итоговый тип происшествия",
+            Criterion.ACTUAL_MATCH,
+            Severity.MAJOR,
+            "«Задымление» вместо «пожар»: список оповещения формируется другой, "
+            "часть служб на происшествие не выезжает.",
+        ),
+        ViolationKind(
+            "O4",
+            "Не оповещены службы, которые должны реагировать",
+            Criterion.COMPETENCE,
+            Severity.CRITICAL,
+            "Список оповещения формируется автоматически по итоговому типу, "
+            "поэтому ошибка в классификации оставляет происшествие без нужной службы.",
+        ),
+        ViolationKind(
+            "O5",
+            "Адрес происшествия не зарегистрирован",
+            Criterion.COMPLETENESS,
+            Severity.CRITICAL,
+            "Без адреса силы реагирования не смогут выехать на место.",
+        ),
+        ViolationKind(
+            "O6",
+            "Описание происшествия не заполнено",
+            Criterion.COMPLETENESS,
+            Severity.MAJOR,
+            "В описании содержатся детали, которые невозможно передать выбором "
+            "признаков, но которые важны при организации реагирования.",
+        ),
+    )
+}
+
+
 @dataclass(frozen=True)
 class Violation:
     code: str
@@ -107,4 +173,13 @@ class Violation:
 
     @property
     def kind(self) -> ViolationKind:
-        return CATALOG[self.code]
+        return kind_of(self.code)
+
+
+def kind_of(code: str) -> ViolationKind:
+    """Описание нарушения по коду из любого режима обучения."""
+    if code in CATALOG:
+        return CATALOG[code]
+    return OPERATOR_CATALOG[code]
+
+

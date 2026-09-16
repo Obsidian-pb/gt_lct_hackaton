@@ -4,6 +4,8 @@ import { useAuth } from './auth';
 import { CardListPage } from './pages/CardListPage';
 import { CardPage } from './pages/CardPage';
 import { LoginPage } from './pages/LoginPage';
+import { OperatorCallPage } from './pages/OperatorCallPage';
+import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherScenariosPage } from './pages/TeacherScenariosPage';
 
@@ -16,16 +18,27 @@ function Header({ teacher }: { teacher: boolean }) {
         <div className="app-header__sub">Учебный комплекс подготовки диспетчеров ДДС</div>
       </div>
 
-      {teacher && (
-        <nav className="app-nav">
-          <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Сценарии
-          </NavLink>
-          <NavLink to="/report" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Отчёт
-          </NavLink>
-        </nav>
-      )}
+      <nav className="app-nav">
+        {teacher ? (
+          <>
+            <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Сценарии
+            </NavLink>
+            <NavLink to="/report" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Отчёт
+            </NavLink>
+          </>
+        ) : (
+          <>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
+              Карточки ДДС
+            </NavLink>
+            <NavLink to="/calls" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Приём вызовов 112
+            </NavLink>
+          </>
+        )}
+      </nav>
 
       <div className="app-header__spacer" />
       <div className="app-header__user">
@@ -64,6 +77,8 @@ export default function App() {
             <>
               <Route path="/" element={<CardListPage />} />
               <Route path="/cards/:id" element={<CardPage />} />
+              <Route path="/calls" element={<OperatorCallsPage />} />
+              <Route path="/calls/:id" element={<OperatorCallPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}

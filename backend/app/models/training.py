@@ -10,6 +10,18 @@ from app.models.base import Base, TimestampMixin
 from app.models.user import DispatchService, User
 
 
+class TrainingMode(StrEnum):
+    """Кого обучаем.
+
+    DISPATCHER — диспетчер ДДС: получает готовую карточку и проставляет
+    статус реагирования. OPERATOR — оператор Службы 112: принимает вызов
+    и сам классифицирует происшествие по опросной карте.
+    """
+
+    DISPATCHER = "dispatcher"
+    OPERATOR = "operator"
+
+
 class ScenarioSource(StrEnum):
     MANUAL = "manual"
     GENERATED = "generated"
@@ -43,6 +55,9 @@ class Scenario(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
+    mode: Mapped[TrainingMode] = mapped_column(
+        SAEnum(TrainingMode, native_enum=False, length=32), default=TrainingMode.DISPATCHER
+    )
     source: Mapped[ScenarioSource] = mapped_column(
         SAEnum(ScenarioSource, native_enum=False, length=32), default=ScenarioSource.MANUAL
     )
@@ -124,6 +139,13 @@ class Attempt(Base, TimestampMixin):
     card_status: Mapped[CardStatus] = mapped_column(
         SAEnum(CardStatus, native_enum=False, length=32), default=CardStatus.REGISTERED
     )
+
+    # --- Режим оператора 112 -------------------------------------------------
+    # Что обучающийся выбрал в опросной карте и ввёл в карточку вручную.
+    chosen_group: Mapped[str | None] = mapped_column(String(255))
+    chosen_path: Mapped[list[str]] = mapped_column(JSON, default=list)
+    entered_address: Mapped[str | None] = mapped_column(String(500))
+    entered_description: Mapped[str | None] = mapped_column(Text)
 
     events: Mapped[list["StatusEvent"]] = relationship(
         back_populates="attempt",

@@ -6,7 +6,7 @@ from app.api.deps import get_current_user
 from app.core.db import SessionLocal, get_session
 from app.llm import get_llm_provider
 from app.models.base import as_utc, utcnow
-from app.models.training import Attempt, Evaluation
+from app.models.training import Attempt, Evaluation, Scenario, TrainingMode
 from app.models.user import Role, User
 from app.schemas.training import CardOut, EvaluationOut, StatusIn
 from app.services import attempts as service
@@ -61,8 +61,16 @@ def _card(attempt: Attempt) -> CardOut:
 def my_cards(
     db: Session = Depends(get_session), user: User = Depends(get_current_user)
 ) -> list[CardOut]:
+    # Вызовы оператора живут в отдельной ленте: там другая задача и другой
+    # интерфейс, смешивать их с карточками диспетчера нельзя.
     rows = db.scalars(
-        select(Attempt).where(Attempt.student_id == user.id).order_by(Attempt.issued_at.desc())
+        select(Attempt)
+        .join(Scenario)
+        .where(
+            Attempt.student_id == user.id,
+            Scenario.mode == TrainingMode.DISPATCHER,
+        )
+        .order_by(Attempt.issued_at.desc())
     ).all()
     return [_card(a) for a in rows]
 
@@ -174,10 +182,18 @@ async def run_llm_review(attempt_id: int) -> None:
         if not attempt.evaluation.llm_pending:
             return
 
-        comments = "\n".join(e.comment for e in attempt.events if e.comment)
+        if attempt.scenario.mode is TrainingMode.OPERATOR:
+            # У оператора нет комментариев к статусам: он вносит описание
+            # происшествия, и проверять нужно именно его грамматику.
+            text = attempt.entered_description or ""
+            required: list[str] = []
+        else:
+            text = "\n".join(e.comment for e in attempt.events if e.comment)
+            required = list(attempt.scenario.required_comment_points or [])
+
         review = await get_llm_provider().review_comment(
-            comment=comments,
-            required_points=list(attempt.scenario.required_comment_points or []),
+            comment=text,
+            required_points=required,
             context=f"{attempt.scenario.incident_type}. {attempt.scenario.description}",
         )
 

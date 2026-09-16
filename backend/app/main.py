@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import attempts, auth, teacher
+from app.api import attempts, auth, operator, teacher
 from app.core.config import get_settings
 from app.services.ekp import get_ekp
 
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(attempts.router)
 app.include_router(teacher.router)
+app.include_router(operator.router)
 
 
 @app.get("/api/health", tags=["Служебные"])

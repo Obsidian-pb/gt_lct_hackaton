@@ -1,10 +1,13 @@
 import type {
+  Call,
   Card,
   Catalog,
   Evaluation,
   GenerateResult,
+  OperatorEvaluation,
   Report,
   Scenario,
+  SurveyOption,
   TrainingSession,
   User,
 } from './types';
@@ -85,6 +88,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ note }),
     }),
+  myCalls: () => request<Call[]>('/api/operator/calls/my'),
+  call: (id: number) => request<Call>(`/api/operator/calls/${id}`),
+  surveyGroups: () => request<string[]>('/api/operator/groups'),
+  surveyOptions: (group: string, path: string[]) =>
+    request<SurveyOption[]>(
+      `/api/operator/options?group=${encodeURIComponent(group)}&path=${encodeURIComponent(
+        path.join('|'),
+      )}`,
+    ),
+  classifyCall: (
+    id: number,
+    body: { group: string; path: string[]; address: string; description: string },
+  ) =>
+    request<OperatorEvaluation>(`/api/operator/calls/${id}/classify`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   sessions: () => request<TrainingSession[]>('/api/teacher/sessions'),
   report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
 };

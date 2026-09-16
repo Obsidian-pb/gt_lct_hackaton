@@ -118,3 +118,47 @@ export interface TrainingSession {
   state: string;
   deadline_seconds: number;
 }
+
+export interface SurveyOption {
+  label: string;
+  has_children: boolean;
+  is_final: boolean;
+  incident_type: string | null;
+}
+
+export interface Call {
+  attempt_id: number;
+  legend: string;
+  reported_address: string;
+  caller: string;
+  issued_at: string;
+  deadline_seconds: number;
+  elapsed_seconds: number;
+  finished: boolean;
+  chosen_group: string | null;
+  chosen_path: string[];
+  entered_address: string | null;
+  entered_description: string | null;
+}
+
+export interface Classification {
+  correct: boolean;
+  chosen_incident_type: string | null;
+  expected_incident_type: string;
+  matched_depth: number;
+  expected_depth: number;
+  missed_services: string[];
+  extra_services: string[];
+  notified_services: Record<string, string>;
+}
+
+export interface OperatorEvaluation {
+  attempt_id: number;
+  score: number;
+  violations: Violation[];
+  classification: Classification | null;
+  llm_pending: boolean;
+  llm_available: boolean;
+  llm_summary: string | null;
+  grammar_issues: string[];
+}
