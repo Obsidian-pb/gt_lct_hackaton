@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.pytest_cache/
+
+# Воспроизводится из classificator.xlsx скриптом backend/scripts/parse_ekp.py
+backend/data/ekp.json
+
+# 34 МБ, версионируется отдельно
+presentation.pptx
+
+node_modules/
+dist/
