@@ -162,3 +162,38 @@ export interface OperatorEvaluation {
   llm_summary: string | null;
   grammar_issues: string[];
 }
+
+export interface AdminUser {
+  id: number;
+  login: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  service_id: number | null;
+  service_name: string | null;
+  created_at: string;
+}
+
+export interface AuditEvent {
+  id: number;
+  at: string;
+  action: string;
+  actor_login: string;
+  object_type: string | null;
+  object_id: number | null;
+  detail: Record<string, unknown>;
+  ip_address: string | null;
+}
+
+export interface SystemState {
+  llm_provider: string;
+  ekp_rules: number;
+  response_deadline_seconds: number;
+  users_total: number;
+  users_blocked: number;
+  scenarios_total: number;
+  scenarios_approved: number;
+  sessions_total: number;
+  attempts_total: number;
+  audit_events: number;
+}

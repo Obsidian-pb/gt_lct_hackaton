@@ -1,4 +1,6 @@
 import type {
+  AdminUser,
+  AuditEvent,
   Call,
   Card,
   Catalog,
@@ -7,7 +9,9 @@ import type {
   OperatorEvaluation,
   Report,
   Scenario,
+  Service,
   SurveyOption,
+  SystemState,
   TrainingSession,
   User,
 } from './types';
@@ -108,4 +112,26 @@ export const api = {
 
   sessions: () => request<TrainingSession[]>('/api/teacher/sessions'),
   report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
+
+  adminUsers: () => request<AdminUser[]>('/api/admin/users'),
+  adminServices: () => request<Service[]>('/api/admin/services'),
+  adminSystem: () => request<SystemState>('/api/admin/system'),
+  createUser: (body: {
+    login: string;
+    full_name: string;
+    password: string;
+    role: string;
+    service_id: number | null;
+  }) =>
+    request<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: number, body: Record<string, unknown>) =>
+    request<AdminUser>(`/api/admin/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  auditLog: (action?: string) =>
+    request<AuditEvent[]>(
+      `/api/admin/audit${action ? `?action=${encodeURIComponent(action)}` : ''}`,
+    ),
+  auditActions: () => request<string[]>('/api/admin/audit/actions'),
 };

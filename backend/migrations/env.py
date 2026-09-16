@@ -18,7 +18,7 @@ from app.core.config import get_settings  # noqa: E402
 from app.models.base import Base  # noqa: E402
 
 # Импорт ради регистрации моделей в метаданных.
-from app.models import training, user  # noqa: E402,F401
+from app.models import audit, training, user  # noqa: E402,F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)

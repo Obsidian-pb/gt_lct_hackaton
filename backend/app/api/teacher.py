@@ -1,12 +1,13 @@
 """Кабинет преподавателя: настройка среды, сценарии, отчёт о занятии."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_teacher
 from app.core.db import get_session
 from app.llm import get_llm_provider
+from app.models.audit import AuditAction
 from app.models.base import utcnow
 from app.models.training import (
     Attempt,
@@ -26,6 +27,7 @@ from app.schemas.teacher import (
     ServiceOut,
     StudentResultOut,
 )
+from app.services import audit
 from app.services import report as report_service
 from app.services.ekp import get_ekp
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
@@ -97,6 +99,7 @@ def _save_draft(db: Session, draft, service: DispatchService, author: User) -> S
 @router.post("/scenarios/generate", response_model=GenerateOut)
 async def generate(
     payload: GenerateIn,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> GenerateOut:
@@ -112,6 +115,15 @@ async def generate(
         difficulty=payload.difficulty,
     )
     scenarios = [_save_draft(db, d, service, user) for d in drafts]
+    db.flush()
+    audit.record(
+        db,
+        AuditAction.SCENARIO_GENERATED,
+        actor=user,
+        object_type="scenario",
+        detail={"группа": payload.group, "служба": service.name, "создано": len(scenarios)},
+        request=request,
+    )
     db.commit()
 
     warning = None
@@ -145,6 +157,7 @@ def list_scenarios(
 @router.post("/scenarios/{scenario_id}/approve", response_model=ScenarioOut)
 def approve(
     scenario_id: int,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> ScenarioOut:
@@ -153,6 +166,10 @@ def approve(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сценарий не найден")
     scenario.approved_by = user
     scenario.approved_at = utcnow()
+    audit.record(
+        db, AuditAction.SCENARIO_APPROVED, actor=user, object_type="scenario",
+        object_id=scenario.id, detail={"тип": scenario.incident_type}, request=request,
+    )
     db.commit()
     return _to_out(scenario)
 
@@ -161,6 +178,7 @@ def approve(
 async def correct(
     scenario_id: int,
     payload: CorrectIn,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> ScenarioOut:
@@ -202,6 +220,10 @@ async def correct(
     # Переформированный сценарий требует повторного утверждения.
     scenario.approved_at = None
     scenario.approved_by = None
+    audit.record(
+        db, AuditAction.SCENARIO_CORRECTED, actor=user, object_type="scenario",
+        object_id=scenario.id, detail={"замечание": payload.note[:200]}, request=request,
+    )
     db.commit()
     return _to_out(scenario)
 
@@ -243,6 +265,7 @@ def edit(
 @router.delete("/scenarios/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(
     scenario_id: int,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> None:
@@ -254,6 +277,10 @@ def delete(
             status.HTTP_409_CONFLICT,
             "Сценарий уже выдавался обучающимся, удалить нельзя",
         )
+    audit.record(
+        db, AuditAction.SCENARIO_DELETED, actor=user, object_type="scenario",
+        object_id=scenario.id, detail={"тип": scenario.incident_type}, request=request,
+    )
     db.delete(scenario)
     db.commit()
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.db import get_session
 from app.core.security import create_access_token, verify_password
+from app.models.audit import AuditAction
 from app.models.user import User
+from app.services import audit
 from app.schemas.training import Token, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["Аутентификация"])
@@ -14,17 +16,35 @@ router = APIRouter(prefix="/api/auth", tags=["Аутентификация"])
 
 @router.post("/token", response_model=Token)
 def login(
-    form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_session)
+    request: Request,
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_session),
 ) -> Token:
     user = db.scalar(select(User).where(User.login == form.username))
     if user is None or not verify_password(form.password, user.hashed_password):
+        # Неудачные попытки протоколируются: по ним видно подбор пароля.
+        audit.record(
+            db,
+            AuditAction.LOGIN_FAILED,
+            actor_login=form.username[:150],
+            request=request,
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный логин или пароль"
         )
     if not user.is_active:
+        audit.record(
+            db, AuditAction.LOGIN_FAILED, actor=user,
+            detail={"причина": "учётная запись заблокирована"}, request=request,
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Учётная запись заблокирована"
         )
+
+    audit.record(db, AuditAction.LOGIN, actor=user, request=request)
+    db.commit()
     return Token(access_token=create_access_token(user.login, str(user.role)))
 
 

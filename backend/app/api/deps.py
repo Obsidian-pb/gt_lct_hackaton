@@ -48,6 +48,10 @@ def require_roles(*roles: Role) -> Callable[[User], User]:
     return dependency
 
 
-require_teacher = require_roles(Role.TEACHER, Role.ADMIN)
+# Роли разведены строго. Техническое задание ограничивает администратора
+# в доступе к персональным данным и во вмешательстве в учебный процесс,
+# поэтому кабинет преподавателя ему закрыт, а кабинет администратора —
+# закрыт преподавателю.
+require_teacher = require_roles(Role.TEACHER)
 require_student = require_roles(Role.STUDENT)
 require_admin = require_roles(Role.ADMIN)

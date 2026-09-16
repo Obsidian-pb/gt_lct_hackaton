@@ -1,6 +1,8 @@
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom';
 
 import { useAuth } from './auth';
+import { AdminAuditPage } from './pages/AdminAuditPage';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 import { CardListPage } from './pages/CardListPage';
 import { CardPage } from './pages/CardPage';
 import { LoginPage } from './pages/LoginPage';
@@ -9,7 +11,7 @@ import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherScenariosPage } from './pages/TeacherScenariosPage';
 
-function Header({ teacher }: { teacher: boolean }) {
+function Header({ role }: { role: string }) {
   const { user, signOut } = useAuth();
   return (
     <header className="app-header">
@@ -19,7 +21,16 @@ function Header({ teacher }: { teacher: boolean }) {
       </div>
 
       <nav className="app-nav">
-        {teacher ? (
+        {role === 'admin' ? (
+          <>
+            <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Учётные записи
+            </NavLink>
+            <NavLink to="/audit" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Журнал аудита
+            </NavLink>
+          </>
+        ) : role === 'teacher' ? (
           <>
             <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
               Сценарии
@@ -44,7 +55,12 @@ function Header({ teacher }: { teacher: boolean }) {
       <div className="app-header__user">
         <div>{user?.full_name}</div>
         <div style={{ opacity: 0.8 }}>
-          {user?.service_name ?? (teacher ? 'преподаватель' : 'без привязки к службе')}
+          {user?.service_name ??
+            (role === 'admin'
+              ? 'администратор'
+              : role === 'teacher'
+                ? 'преподаватель'
+                : 'без привязки к службе')}
         </div>
       </div>
       <button className="app-header__logout" onClick={signOut}>
@@ -60,14 +76,18 @@ export default function App() {
   if (loading) return <div className="empty">Загрузка…</div>;
   if (!user) return <LoginPage />;
 
-  const teacher = user.role === 'teacher' || user.role === 'admin';
-
   return (
     <BrowserRouter>
-      <Header teacher={teacher} />
+      <Header role={user.role} />
       <main className="layout">
         <Routes>
-          {teacher ? (
+          {user.role === 'admin' ? (
+            <>
+              <Route path="/users" element={<AdminUsersPage />} />
+              <Route path="/audit" element={<AdminAuditPage />} />
+              <Route path="*" element={<Navigate to="/users" replace />} />
+            </>
+          ) : user.role === 'teacher' ? (
             <>
               <Route path="/scenarios" element={<TeacherScenariosPage />} />
               <Route path="/report" element={<TeacherReportPage />} />
