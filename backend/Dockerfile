@@ -15,7 +15,8 @@ COPY backend/app ./app
 COPY backend/scripts ./scripts
 # Корневые сертификаты НУЦ Минцифры — нужны для TLS до GigaChat.
 COPY backend/certs ./certs
-COPY backend/pytest.ini ./
+COPY backend/migrations ./migrations
+COPY backend/alembic.ini backend/pytest.ini ./
 
 # Классификатор разбирается на этапе сборки: в образ попадает готовый ekp.json,
 # сам xlsx во время работы не нужен.

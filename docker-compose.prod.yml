@@ -63,7 +63,7 @@ services:
       GIGACHAT_CA_BUNDLE: ${GIGACHAT_CA_BUNDLE:-}
       GIGACHAT_VERIFY_TLS: ${GIGACHAT_VERIFY_TLS:-true}
     command: >-
-      sh -c "python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -c "python scripts/migrate.py && python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
       interval: 30s

@@ -19,4 +19,10 @@ def get_session() -> Iterator[Session]:
 
 
 def create_all() -> None:
+    """Создаёт схему напрямую, минуя миграции.
+
+    Используется только в тестах на временной базе. Рабочая схема
+    приводится в порядок через scripts/migrate.py, иначе обновление
+    приложения теряло бы данные.
+    """
     Base.metadata.create_all(engine)

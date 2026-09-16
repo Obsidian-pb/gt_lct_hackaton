@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
 
-from app.core.db import SessionLocal, create_all  # noqa: E402
+from app.core.db import SessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models.base import utcnow  # noqa: E402
 from app.models.training import (  # noqa: E402
@@ -143,7 +143,6 @@ SCENARIOS = [
 
 
 def seed() -> None:
-    create_all()
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.login == "teacher")):
             print("Стенд уже наполнен, пропускаю.")
