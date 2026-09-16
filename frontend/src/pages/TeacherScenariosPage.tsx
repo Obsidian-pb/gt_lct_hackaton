@@ -1,0 +1,255 @@
+import { useCallback, useEffect, useState } from 'react';
+
+import { api } from '../api/client';
+import type { Catalog, Scenario } from '../api/types';
+
+function ScenarioCard({
+  scenario,
+  onApprove,
+  onCorrect,
+  busy,
+}: {
+  scenario: Scenario;
+  onApprove: (id: number) => void;
+  onCorrect: (id: number, note: string) => void;
+  busy: boolean;
+}) {
+  const [note, setNote] = useState('');
+  const [correcting, setCorrecting] = useState(false);
+
+  return (
+    <div className={`draft${scenario.approved ? ' draft--approved' : ''}`}>
+      <div className="draft__head">
+        <div>
+          <div className="draft__type">{scenario.incident_type}</div>
+          <div className="card__meta">
+            {scenario.address} · заявитель: {scenario.caller}
+          </div>
+        </div>
+        <div className="draft__badges">
+          <span className={scenario.is_profile ? 'chip chip--ok' : 'chip chip--warn'}>
+            {scenario.is_profile ? 'профильное' : 'непрофильное'}
+          </span>
+          <span className="chip chip--neutral">эталон: {scenario.expected_primary_status}</span>
+          {scenario.approved ? (
+            <span className="chip chip--ok">утверждён</span>
+          ) : (
+            <span className="chip chip--danger">ждёт утверждения</span>
+          )}
+        </div>
+      </div>
+
+      <div className="draft__body">{scenario.description}</div>
+
+      {scenario.required_comment_points.length > 0 && (
+        <>
+          <div className="card__label" style={{ marginTop: 10 }}>
+            Что обязано прозвучать в комментарии
+          </div>
+          <ul className="draft__points">
+            {scenario.required_comment_points.map((point, index) => (
+              <li key={index}>{point}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {Object.keys(scenario.notified_services).length > 0 && (
+        <div className="draft__services">
+          Оповещаются по ЕКП: {Object.keys(scenario.notified_services).join(', ')}
+        </div>
+      )}
+
+      {scenario.teacher_note && (
+        <div className="draft__note">Учтено замечание: {scenario.teacher_note}</div>
+      )}
+
+      {correcting ? (
+        <>
+          <textarea
+            className="comment-area"
+            style={{ marginTop: 10 }}
+            placeholder="Что не так со сценарием? Система переформирует карточку и эталон с учётом замечания."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            autoFocus
+          />
+          <div className="actions">
+            <button
+              className="btn"
+              disabled={busy || note.trim().length < 3}
+              onClick={() => {
+                onCorrect(scenario.id, note.trim());
+                setCorrecting(false);
+                setNote('');
+              }}
+            >
+              Переформировать
+            </button>
+            <button className="btn btn--ghost" onClick={() => setCorrecting(false)}>
+              Отмена
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="actions">
+          {!scenario.approved && (
+            <button className="btn" disabled={busy} onClick={() => onApprove(scenario.id)}>
+              Утвердить
+            </button>
+          )}
+          <button className="btn btn--ghost" disabled={busy} onClick={() => setCorrecting(true)}>
+            Замечание
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TeacherScenariosPage() {
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [group, setGroup] = useState('');
+  const [count, setCount] = useState(5);
+  const [difficulty, setDifficulty] = useState(2);
+  const [serviceId, setServiceId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setScenarios(await api.scenarios());
+  }, []);
+
+  useEffect(() => {
+    api
+      .catalog()
+      .then((data) => {
+        setCatalog(data);
+        setGroup(data.groups[0] ?? '');
+        setServiceId(data.services[0]?.id ?? null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Не удалось загрузить справочники'));
+    reload().catch(() => undefined);
+  }, [reload]);
+
+  async function generate() {
+    if (!group || serviceId == null) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.generate(group, count, difficulty, serviceId);
+      setMessage(
+        result.warning ?? `Сформировано карточек: ${result.created}. Проверьте и утвердите.`,
+      );
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сформировать сценарии');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function act(action: Promise<Scenario>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action;
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Операция не выполнена');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error && !catalog) return <div className="alert">{error}</div>;
+  if (!catalog) return <div className="empty">Загрузка…</div>;
+
+  const pending = scenarios.filter((s) => !s.approved).length;
+
+  return (
+    <>
+      <h1 className="page-title">Учебные сценарии</h1>
+      <p className="page-hint">
+        Нейросеть формирует карточки, а тип происшествия и список оповещаемых служб берутся
+        из классификатора. Сценарий попадает обучающимся только после вашего утверждения.
+        Ждут проверки: {pending} из {scenarios.length}.
+      </p>
+
+      <div className="panel-form">
+        <div className="field">
+          <label htmlFor="group">Категория происшествий</label>
+          <select id="group" value={group} onChange={(e) => setGroup(e.target.value)}>
+            {catalog.groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="service">Служба обучающихся</label>
+          <select
+            id="service"
+            value={serviceId ?? ''}
+            onChange={(e) => setServiceId(Number(e.target.value))}
+          >
+            {catalog.services.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field field--narrow">
+          <label htmlFor="count">Сколько карточек</label>
+          <input
+            id="count"
+            type="number"
+            min={1}
+            max={20}
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
+          />
+        </div>
+        <div className="field field--narrow">
+          <label htmlFor="difficulty">Сложность</label>
+          <select
+            id="difficulty"
+            value={difficulty}
+            onChange={(e) => setDifficulty(Number(e.target.value))}
+          >
+            {Object.entries(catalog.difficulties).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="btn" onClick={generate} disabled={busy}>
+          {busy ? 'Формирование…' : 'Сформировать'}
+        </button>
+      </div>
+
+      {error && <div className="alert">{error}</div>}
+      {message && <div className="pending">{message}</div>}
+
+      {scenarios.length === 0 ? (
+        <div className="empty">Сценариев пока нет. Выберите категорию и сформируйте карточки.</div>
+      ) : (
+        scenarios.map((scenario) => (
+          <ScenarioCard
+            key={scenario.id}
+            scenario={scenario}
+            busy={busy}
+            onApprove={(id) => act(api.approveScenario(id))}
+            onCorrect={(id, note) => act(api.correctScenario(id, note))}
+          />
+        ))
+      )}
+    </>
+  );
+}

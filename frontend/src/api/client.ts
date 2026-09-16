@@ -1,4 +1,13 @@
-import type { Card, Evaluation, User } from './types';
+import type {
+  Card,
+  Catalog,
+  Evaluation,
+  GenerateResult,
+  Report,
+  Scenario,
+  TrainingSession,
+  User,
+} from './types';
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 const TOKEN_KEY = 'arm112.token';
@@ -58,4 +67,24 @@ export const api = {
     }),
   finish: (id: number) => request<Evaluation>(`/api/attempts/${id}/finish`, { method: 'POST' }),
   evaluation: (id: number) => request<Evaluation>(`/api/attempts/${id}/evaluation`),
+
+  catalog: () => request<Catalog>('/api/teacher/catalog'),
+  scenarios: (approved?: boolean) =>
+    request<Scenario[]>(
+      `/api/teacher/scenarios${approved === undefined ? '' : `?approved=${approved}`}`,
+    ),
+  generate: (group: string, count: number, difficulty: number, serviceId: number) =>
+    request<GenerateResult>('/api/teacher/scenarios/generate', {
+      method: 'POST',
+      body: JSON.stringify({ group, count, difficulty, service_id: serviceId }),
+    }),
+  approveScenario: (id: number) =>
+    request<Scenario>(`/api/teacher/scenarios/${id}/approve`, { method: 'POST' }),
+  correctScenario: (id: number, note: string) =>
+    request<Scenario>(`/api/teacher/scenarios/${id}/correct`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+  sessions: () => request<TrainingSession[]>('/api/teacher/sessions'),
+  report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
 };
