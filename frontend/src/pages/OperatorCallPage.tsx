@@ -1,9 +1,78 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Call, OperatorEvaluation, SurveyOption } from '../api/types';
 import { Timer } from '../components/Timer';
+
+/**
+ * Голосовая имитация звонка заявителя.
+ *
+ * Речь записана заранее и лежит в раздаче фронтенда: браузер только
+ * проигрывает готовый файл. Синтезировать её на стороне клиента не вышло —
+ * в Firefox движок после отмены речи замолкал до перезагрузки страницы,
+ * и вылечить это со стороны приложения оказалось невозможно.
+ *
+ * Запись может отсутствовать: у сценариев, придуманных нейросетью, её нет.
+ * Интерфейс обязан работать и без звука — текст вызова виден всегда.
+ */
+function CallAudio({ src }: { src: string | null }) {
+  const audio = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const [broken, setBroken] = useState(false);
+
+  const play = useCallback(() => {
+    const element = audio.current;
+    if (!element) return;
+    setAnswered(true);
+    // Слушать вызов заново заявитель начинает с начала, а не с места обрыва.
+    element.currentTime = 0;
+    element.play().then(
+      () => setPlaying(true),
+      () => setBroken(true),
+    );
+  }, []);
+
+  const interrupt = useCallback(() => {
+    audio.current?.pause();
+    setPlaying(false);
+  }, []);
+
+  if (!src || broken) {
+    return (
+      <div className="call-audio call-audio--mute">
+        Запись вызова недоступна. Текст обращения заявителя — ниже.
+      </div>
+    );
+  }
+
+  return (
+    <div className="call-audio">
+      <audio
+        ref={audio}
+        src={src}
+        preload="auto"
+        onEnded={() => setPlaying(false)}
+        onError={() => setBroken(true)}
+      />
+      <span className={`call-audio__dot${playing ? ' call-audio__dot--live' : ''}`} />
+      <span className="call-audio__label">
+        {playing ? 'Заявитель говорит…' : answered ? 'Вызов прослушан' : 'Входящий вызов'}
+      </span>
+      <div className="app-header__spacer" />
+      {playing ? (
+        <button className="btn btn--ghost" onClick={interrupt}>
+          Прервать
+        </button>
+      ) : (
+        <button className="btn" onClick={play}>
+          {answered ? 'Прослушать снова' : 'Ответить на вызов'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Шаг опросной карты: выбранный признак и варианты следующего уровня. */
 function SurveyStep({
@@ -129,7 +198,10 @@ export function OperatorCallPage() {
         </div>
 
         <div className="card__block legend">
-          <div className="card__label">Что сообщает заявитель</div>
+          <CallAudio key={call.attempt_id} src={call.audio_url} />
+          <div className="card__label" style={{ marginTop: 12 }}>
+            Что сообщает заявитель
+          </div>
           <div className="card__description">{call.legend}</div>
           <div className="legend__address">Со слов заявителя: {call.reported_address}</div>
         </div>

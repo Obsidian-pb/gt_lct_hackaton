@@ -1,5 +1,7 @@
 """Рабочее место оператора Службы 112: приём вызова и заполнение карточки."""
 
+import re
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -9,7 +11,13 @@ from app.api.attempts import run_llm_review
 from app.api.deps import get_current_user
 from app.core.db import get_session
 from app.models.base import as_utc, utcnow
-from app.models.training import Attempt, Evaluation, Scenario, TrainingMode
+from app.models.training import (
+    Attempt,
+    Evaluation,
+    Scenario,
+    ScenarioSource,
+    TrainingMode,
+)
 from app.models.user import Role, User
 from app.services.ekp import get_ekp
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, FilledCard
@@ -41,6 +49,8 @@ class CallOut(BaseModel):
     chosen_path: list[str]
     entered_address: str | None
     entered_description: str | None
+    # Готовая запись голоса заявителя, если для сценария она озвучена.
+    audio_url: str | None
 
 
 class ClassifyIn(BaseModel):
@@ -85,6 +95,19 @@ def _load(attempt_id: int, db: Session, user: User) -> Attempt:
     return attempt
 
 
+# Записи озвучены заранее и разложены по номеру билета и вызова: браузеру
+# остаётся проиграть файл. Синтезировать речь на стороне клиента оказалось
+# невозможно — в Firefox движок после отмены замолкает до перезагрузки.
+TICKET_TITLE = re.compile(r"Билет (\d+), вызов (\d+)")
+
+
+def _audio_url(scenario: Scenario) -> str | None:
+    if scenario.source is not ScenarioSource.TICKET:
+        return None
+    found = TICKET_TITLE.match(scenario.title)
+    return f"/audio/ticket-{found[1]}-{found[2]}.mp3" if found else None
+
+
 def _call(attempt: Attempt) -> CallOut:
     reference = as_utc(attempt.finished_at) if attempt.finished_at else utcnow()
     return CallOut(
@@ -100,6 +123,7 @@ def _call(attempt: Attempt) -> CallOut:
         chosen_path=list(attempt.chosen_path or []),
         entered_address=attempt.entered_address,
         entered_description=attempt.entered_description,
+        audio_url=_audio_url(attempt.scenario),
     )
 
 

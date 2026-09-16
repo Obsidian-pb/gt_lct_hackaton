@@ -135,6 +135,7 @@ export interface Call {
   chosen_path: string[];
   entered_address: string | null;
   entered_description: string | null;
+  audio_url: string | null;
 }
 
 export interface Classification {

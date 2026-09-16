@@ -2,6 +2,8 @@
 
 import pytest
 
+from app.api.operator import _audio_url
+from app.models.training import Scenario, ScenarioSource
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, FilledCard, evaluate
 
 FIRE_TRASH = 1010101  # на улице / мусор / открытое пламя
@@ -87,3 +89,26 @@ def test_недоведённая_классификация(path):
     result = check(path=path)
     assert "O1" in codes(result)
     assert result.classification.chosen_rule is None
+
+
+def scenario(title: str, source: ScenarioSource) -> Scenario:
+    return Scenario(title=title, source=source)
+
+
+def test_запись_вызова_находится_по_номеру_билета():
+    """Файлы озвучены заранее и названы по билету и номеру вызова в нём."""
+    ticket = scenario("Билет 12, вызов 3", ScenarioSource.TICKET)
+    assert _audio_url(ticket) == "/audio/ticket-12-3.mp3"
+
+
+@pytest.mark.parametrize(
+    "title,source",
+    [
+        # Сценарии, придуманные нейросетью, никто не озвучивал.
+        ("Возгорание мусора во дворе", ScenarioSource.GENERATED),
+        # Название билета могли поправить вручную — тогда файла тоже нет.
+        ("Билет без номера", ScenarioSource.TICKET),
+    ],
+)
+def test_без_записи_вызов_остаётся_текстовым(title, source):
+    assert _audio_url(scenario(title, source)) is None

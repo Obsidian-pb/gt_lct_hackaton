@@ -964,3 +964,50 @@ button {
   font-size: 11px;
   opacity: 0.7;
 }
+
+
+/* --- Голосовая имитация звонка ------------------------------------------ */
+
+.call-audio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.call-audio--mute {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.call-audio__label {
+  font-weight: 600;
+}
+
+.call-audio__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  flex: none;
+}
+
+/* Пульсация, пока заявитель говорит: экран показывает, что линия занята. */
+.call-audio__dot--live {
+  background: var(--danger);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(179 38 30 / 45%);
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 6px rgb(179 38 30 / 0%);
+  }
+}
