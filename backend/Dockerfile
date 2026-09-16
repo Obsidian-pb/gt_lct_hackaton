@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
 COPY backend/scripts ./scripts
+# Корневые сертификаты НУЦ Минцифры — нужны для TLS до GigaChat.
+COPY backend/certs ./certs
 COPY backend/pytest.ini ./
 
 # Классификатор разбирается на этапе сборки: в образ попадает готовый ekp.json,

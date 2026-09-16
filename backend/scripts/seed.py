@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -30,6 +31,11 @@ from app.services.response_status import ResponseStatus as S  # noqa: E402
 
 SERVICE_NAME = "ДДС района Чертаново Южное"
 
+# Пароль учебных учётных записей. Совпадение с логином допустимо только
+# на локальной машине: стенд публикуется в интернете, и там DEMO_PASSWORD
+# обязателен — иначе учётка администратора подбирается с первой попытки.
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD")
+
 USERS = [
     ("admin", "Администратор системы", Role.ADMIN, None),
     ("teacher", "Глущенко О. И., преподаватель", Role.TEACHER, None),
@@ -40,7 +46,8 @@ USERS = [
 SCENARIOS = [
     {
         "title": "Застревание в лифте",
-        "incident_type": "застревание в лифте",
+        "ekp_rule_number": 14100100,
+        "incident_type": "Застревание в лифте",
         "address": "Москва, ул. Берзарина, д. 21, корп. 1, под. 3",
         "description": (
             "Застряли в лифте между 5 и 6 этажом, два человека, "
@@ -57,7 +64,8 @@ SCENARIOS = [
     },
     {
         "title": "Сработала пожарная сигнализация",
-        "incident_type": "сработка пожарной сигнализации: жилой дом",
+        "ekp_rule_number": 1051600,
+        "incident_type": "пожарная сигнализация (жилой дом)",
         "address": "Москва, ул. Академика Янгеля, д. 6, корп. 2",
         "description": (
             "Сработала пожарная сигнализация в жилом доме, признаков возгорания "
@@ -74,7 +82,8 @@ SCENARIOS = [
     },
     {
         "title": "Оборван провод во дворе",
-        "incident_type": "обрыв провода",
+        "ekp_rule_number": 14110301,
+        "incident_type": "Обрыв проводов (двор)",
         "address": "Москва, Варшавское шоссе, д. 152, двор",
         "description": (
             "Во дворе жилого дома оборван провод, назначение неизвестно, "
@@ -91,7 +100,8 @@ SCENARIOS = [
     },
     {
         "title": "Прорыв трубы с горячей водой",
-        "incident_type": "повреждение трубопровода: горячее водоснабжение",
+        "ekp_rule_number": 14020300,
+        "incident_type": "Течь (прорыв трубы) в квартире (подъезде подвале)",
         "address": "Москва, ул. Днепропетровская, д. 3, корп. 5, под. 2",
         "description": (
             "Прорыв трубы с горячей водой в подвале жилого дома, заливает подъезд, "
@@ -109,7 +119,8 @@ SCENARIOS = [
     },
     {
         "title": "Посторонние граждане в подвале",
-        "incident_type": "подозрительные / посторонние граждане",
+        "ekp_rule_number": 15140000,
+        "incident_type": "Подозрительные граждане",
         "address": "Москва, ул. Кировоградская, д. 24, подвал",
         "description": "В подвале жилого дома находятся посторонние граждане.",
         "caller": "Смирнова Ольга Ивановна, 903-226-13-83",
@@ -137,7 +148,7 @@ def seed() -> None:
             user = User(
                 login=login,
                 full_name=full_name,
-                hashed_password=hash_password(login),
+                hashed_password=hash_password(DEMO_PASSWORD or login),
                 role=role,
                 service=service if service_name else None,
             )
@@ -151,6 +162,7 @@ def seed() -> None:
             scenario = Scenario(
                 title=item["title"],
                 incident_type=item["incident_type"],
+                ekp_rule_number=item["ekp_rule_number"],
                 address=item["address"],
                 description=item["description"],
                 caller=item["caller"],
@@ -179,19 +191,23 @@ def seed() -> None:
         db.add(training)
         db.flush()
 
-        # Карточки выдаются с небольшим сдвигом, чтобы таймер был показателен.
-        for offset, scenario in enumerate(scenarios):
-            db.add(
-                Attempt(
-                    session=training,
-                    student=users["student"],
-                    scenario=scenario,
-                    issued_at=utcnow() - timedelta(seconds=offset * 2),
+        # Карточки выдаются каждому обучающемуся: на демонстрации под разными
+        # учётными записями заходят одновременно, и пустая лента у второго
+        # выглядела бы поломкой.
+        for student in (users["student"], users["student2"]):
+            for offset, scenario in enumerate(scenarios):
+                db.add(
+                    Attempt(
+                        session=training,
+                        student=student,
+                        scenario=scenario,
+                        issued_at=utcnow() - timedelta(seconds=offset * 2),
+                    )
                 )
-            )
         db.commit()
 
-    print("Готово. Учётные записи (пароль совпадает с логином):")
+    source = "из DEMO_PASSWORD" if DEMO_PASSWORD else "совпадает с логином"
+    print(f"Готово. Учебные учётные записи (пароль {source}):")
     for login, full_name, role, _ in USERS:
         print(f"  {login:9s} {str(role):8s} {full_name}")
 

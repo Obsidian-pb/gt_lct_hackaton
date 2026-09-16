@@ -198,7 +198,15 @@ async def run_llm_review(attempt_id: int) -> None:
         evaluation.violations = list(evaluation.violations) + extra
         evaluation.score = max(0.0, evaluation.score - 0.5 * len(extra) / 3.0)
         evaluation.grammar_issues = review.grammar_issues
-        evaluation.llm_summary = review.summary
         evaluation.llm_available = review.available
+        # Недоступность модели нельзя выдавать за отсутствие замечаний: без
+        # этой пометки обучающийся получил бы завышенный балл, а преподаватель
+        # увидел бы «нарушений нет» вместо «проверка не выполнена».
+        evaluation.llm_summary = (
+            review.summary
+            if review.available
+            else "Смысловая проверка комментариев не выполнена: модель недоступна. "
+            "Оценка учитывает только норматив, статусы и наличие комментариев."
+        )
         evaluation.llm_pending = False
         db.commit()

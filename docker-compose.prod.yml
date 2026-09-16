@@ -1,0 +1,98 @@
+# Продовая конфигурация учебного стенда.
+#
+# Наружу открывается единственный порт на петлевом интерфейсе; TLS и публичный
+# доступ обеспечивает хостовой nginx. База данных портов не публикует вовсе.
+# Лимиты ресурсов и логов заданы потому, что сервер общий с другими проектами.
+
+name: dds112
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  init: true
+  logging: *logging
+
+services:
+  db:
+    <<: *hardening
+    image: postgres:17-alpine
+    # Entrypoint postgres создаёт каталог данных и переключается на своего
+    # пользователя, поэтому полное срезание capabilities его ломает.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    environment:
+      POSTGRES_USER: ${DB_USER:?укажите DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?укажите DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:?укажите DB_NAME}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 1.0
+
+  backend:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      SECRET_KEY: ${SECRET_KEY:?задайте SECRET_KEY, иначе токены подделываются}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?задайте DEMO_PASSWORD для учебных учётных записей}
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat}
+      GIGACHAT_CA_BUNDLE: ${GIGACHAT_CA_BUNDLE:-}
+      GIGACHAT_VERIFY_TLS: ${GIGACHAT_VERIFY_TLS:-true}
+    command: >-
+      sh -c "python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 40s
+      retries: 3
+    mem_limit: 768m
+    cpus: 1.5
+
+  web:
+    <<: *hardening
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8090}:8080"
+    # Master-процессу nginx нужно подготовить каталоги кеша и понизить
+    # привилегии воркеров; остальные capabilities срезаны.
+    cap_add: [CHOWN, SETGID, SETUID]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    mem_limit: 128m
+    cpus: 0.5
+
+volumes:
+  db-data:

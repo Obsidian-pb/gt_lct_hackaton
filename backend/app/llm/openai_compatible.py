@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import re
+from urllib.parse import urlparse
 
 import httpx
 
@@ -16,19 +19,62 @@ from app.llm.base import CommentReview, GeneratedScenario
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_json(content: str) -> dict:
+    """Разбирает ответ модели.
+
+    Модель часто оборачивает JSON в markdown-блок, несмотря на требование
+    response_format, поэтому сначала снимаем обрамление и берём объект
+    от первой открывающей скобки до последней закрывающей.
+    """
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(text[start : end + 1])
+
+
+def _is_local(base_url: str) -> bool:
+    """Локальный ли адрес модели.
+
+    К локальной модели нельзя ходить через HTTP_PROXY из окружения: прокси
+    не знает про loopback и возвращает ошибку. К внешнему API, наоборот,
+    прокси может быть единственным маршрутом, поэтому там окружение уважаем.
+    """
+    host = urlparse(base_url).hostname or ""
+    if host in {"localhost", "host.docker.internal"}:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private
+
+
 REVIEW_SYSTEM_PROMPT = """\
 Ты — специалист отдела контроля реагирования ГБУ «Система 112». Проверяешь \
 комментарий диспетчера ДДС к статусу реагирования на карточку происшествия.
 
-Требования к комментарию (памятка «Работа на АРМ-112»): указана причина отказа \
-от реагирования, отражены сведения о передаче информации в другие службы, \
-приведены уточнённые данные о происшествии и итоги работы диспетчера.
-
 Проверь, раскрыт ли в комментарии каждый обязательный пункт. Пункт считается \
-раскрытым, если смысл передан — дословного совпадения не требуется.
+раскрытым, если сведения из него прямо сообщены — дословного совпадения \
+не требуется, достаточно передать смысл своими словами.
+
+Пункт НЕ считается раскрытым, если комментарий лишь подразумевает его косвенно. \
+Отказ от реагирования не заменяет сведений: «не обслуживаем» не сообщает, кто \
+обслуживает, и не сообщает, куда передана информация.
+
+В missing_points перечисли нераскрытые пункты ДОСЛОВНО в той формулировке, \
+в которой они даны. Не переформулируй их и не добавляй своих. Раскрытые пункты \
+в ответ не включай.
 
 Верни строго JSON:
-{"missing_points": ["<пункт, который не раскрыт>"], \
+{"missing_points": ["<нераскрытый пункт дословно>"], \
 "grammar_issues": ["<орфографическая или грамматическая ошибка>"], \
 "summary": "<одно предложение для обучающегося>"}"""
 
@@ -44,35 +90,63 @@ SCENARIO_SYSTEM_PROMPT = """\
 
 class OpenAICompatibleProvider:
     def __init__(
-        self, *, base_url: str, api_key: str, model: str, timeout: float, name: str
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout: float,
+        name: str,
+        disable_thinking: bool = False,
+        supports_response_format: bool = True,
+        verify: bool | str = True,
     ) -> None:
         self.name = name
         self._model = model
+        self._disable_thinking = disable_thinking
+        self._supports_response_format = supports_response_format
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"), headers=headers, timeout=timeout
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=timeout,
+            trust_env=not _is_local(base_url),
+            verify=verify,
         )
+
+    async def _auth_headers(self) -> dict[str, str]:
+        """Заголовки авторизации на каждый запрос.
+
+        Базовая реализация ничего не добавляет: ключ задан один раз при
+        создании клиента. Провайдерам с истекающими токенами нужно обновление,
+        поэтому они переопределяют этот метод.
+        """
+        return {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
     async def _complete(self, system: str, user: str) -> dict | None:
+        payload: dict = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.2,
+        }
+        if self._supports_response_format:
+            payload["response_format"] = {"type": "json_object"}
+        if self._disable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+
         try:
             response = await self._client.post(
-                "/chat/completions",
-                json={
-                    "model": self._model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"},
-                },
+                "/chat/completions", json=payload, headers=await self._auth_headers()
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
-            return json.loads(content)
+            return _parse_json(content or "")
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             # Недоступность LLM не должна ронять занятие: детерминированная
             # часть оценки уже посчитана и будет показана обучающемуся.
@@ -91,8 +165,18 @@ class OpenAICompatibleProvider:
         data = await self._complete(REVIEW_SYSTEM_PROMPT, user)
         if data is None:
             return CommentReview(available=False)
+
+        # Модель иногда возвращает собственные формулировки вместо переданных
+        # пунктов. Засчитываем только то, что есть в исходном списке, — иначе
+        # обучающийся получит замечание о пункте, которого ему не задавали.
+        allowed = {p.strip(): p for p in required_points}
+        missing = [
+            allowed[str(x).strip()]
+            for x in data.get("missing_points", [])
+            if str(x).strip() in allowed
+        ]
         return CommentReview(
-            missing_points=[str(x) for x in data.get("missing_points", [])],
+            missing_points=missing,
             grammar_issues=[str(x) for x in data.get("grammar_issues", [])],
             summary=str(data.get("summary", "")),
         )

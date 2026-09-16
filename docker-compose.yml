@@ -33,6 +33,12 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-false}
+      GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat}
+      GIGACHAT_CA_BUNDLE: ${GIGACHAT_CA_BUNDLE:-}
+      GIGACHAT_VERIFY_TLS: ${GIGACHAT_VERIFY_TLS:-true}
     command: >-
       sh -c "python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:

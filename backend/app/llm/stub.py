@@ -1,24 +1,20 @@
-"""Провайдер без модели: лексическая проверка вместо смысловой.
+"""Режим без языковой модели.
 
-Нужен, чтобы тренажёр и тесты работали при полностью отключённой LLM.
-Качество оценки заведомо ниже: пункт считается раскрытым при совпадении
-значимых слов, поэтому перефразированный ответ будет помечен как пропуск.
+Смысловую проверку комментариев выполнить нечем, поэтому провайдер честно
+сообщает, что она не выполнена, и не выставляет нарушений.
+
+Сверку по ключевым словам здесь пробовали и убрали: она штрафовала за верный
+ответ, изложенный своими словами. Например, комментарий «кабель относится
+к Ростелекому, сведения направлены им по принадлежности» раскрывает оба
+обязательных пункта, но по словам не совпадает ни с одним. Ложное обвинение
+обучающегося хуже отсутствия проверки, а детерминированная часть оценки —
+норматив, статусы, последовательность, обязательность комментариев —
+работает и без модели.
 """
 
 from __future__ import annotations
 
-import re
-
 from app.llm.base import CommentReview, GeneratedScenario
-
-STOPWORDS = frozenset(
-    "и в во не на с со что а по к у за из о от для при об это как также был была было".split()
-)
-
-
-def _significant(text: str) -> set[str]:
-    words = re.findall(r"\w{3,}", text.lower())
-    return {w for w in words if w not in STOPWORDS}
 
 
 class StubProvider:
@@ -27,19 +23,7 @@ class StubProvider:
     async def review_comment(
         self, *, comment: str, required_points: list[str], context: str
     ) -> CommentReview:
-        said = _significant(comment or "")
-        missing = []
-        for point in required_points:
-            expected = _significant(point)
-            if not expected:
-                continue
-            overlap = len(expected & said) / len(expected)
-            if overlap < 0.5:
-                missing.append(point)
-        return CommentReview(
-            missing_points=missing,
-            summary="Смысловая проверка недоступна: сверка выполнена по ключевым словам.",
-        )
+        return CommentReview(available=False)
 
     async def generate_scenario(
         self, *, incident_type: str, group: str, difficulty: str

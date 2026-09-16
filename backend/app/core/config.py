@@ -24,6 +24,22 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = 60.0
+    # Отключает «размышление» у рассуждающих моделей (Qwen3 и подобные).
+    # На проверке комментария это сокращает ответ с 31 до 2,5 секунд и
+    # повышает точность. Поле понимают llama.cpp и vLLM, но не внешний
+    # OpenAI API — поэтому передаётся только при явном включении.
+    llm_disable_thinking: bool = False
+
+    # --- GigaChat ----------------------------------------------------------
+    # Ключ авторизации из личного кабинета (base64) либо пара
+    # client_id:client_secret — провайдер принимает оба вида.
+    gigachat_auth_key: str = ""
+    gigachat_scope: str = "GIGACHAT_API_PERS"
+    gigachat_model: str = "GigaChat"
+    # Путь к корневому сертификату НУЦ Минцифры. Пустое значение оставляет
+    # системное хранилище; False отключает проверку — только для отладки.
+    gigachat_ca_bundle: str = ""
+    gigachat_verify_tls: bool = True
 
     ekp_path: Path = BASE_DIR / "data" / "ekp.json"
 

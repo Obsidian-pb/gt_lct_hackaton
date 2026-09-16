@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.attempts import run_llm_review
 from app.core.db import get_session
 from app.core.security import hash_password
+from app.llm.base import CommentReview
 from app.main import app
 from app.models.base import Base
 from app.models.training import Attempt, Scenario, SessionState, TrainingSession
@@ -164,7 +165,16 @@ def test_полный_цикл_обработки_карточки(client):
 
 
 @pytest.mark.asyncio
-async def test_фоновая_оценка_дописывает_пропущенный_пункт_и_идемпотентна(client):
+async def test_фоновая_оценка_дописывает_пропущенный_пункт_и_идемпотентна(client, monkeypatch):
+    class FakeProvider:
+        name = "fake"
+
+        async def review_comment(self, *, comment, required_points, context):
+            return CommentReview(
+                missing_points=list(required_points), summary="проверено", available=True
+            )
+
+    monkeypatch.setattr("app.api.attempts.get_llm_provider", lambda: FakeProvider())
     headers = token(client, "student")
     client.post(
         "/api/attempts/1/status",
