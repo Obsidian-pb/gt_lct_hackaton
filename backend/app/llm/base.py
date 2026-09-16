@@ -31,6 +31,24 @@ class GeneratedScenario:
     signs: list[str]
     expected_primary_status: str
     required_comment_points: list[str]
+    # Профильное ли происшествие для службы обучающегося. Определяет, будет
+    # ли отказ от реагирования ошибкой, и должно согласовываться с эталонным
+    # статусом: у непрофильного ожидается «Не принята».
+    is_profile: bool = True
+    # False, если модель не ответила: сценарий пустой и показывать его нельзя.
+    available: bool = True
+
+    @classmethod
+    def unavailable(cls, incident_type: str) -> "GeneratedScenario":
+        return cls(
+            incident_description=incident_type,
+            address="",
+            caller="",
+            signs=[],
+            expected_primary_status="Принята",
+            required_comment_points=[],
+            available=False,
+        )
 
 
 class LLMProvider(Protocol):
@@ -41,5 +59,12 @@ class LLMProvider(Protocol):
     ) -> CommentReview: ...
 
     async def generate_scenario(
-        self, *, incident_type: str, group: str, difficulty: str
+        self,
+        *,
+        incident_type: str,
+        group: str,
+        difficulty: str,
+        service: str = ...,
+        signs: list[str] | None = ...,
+        note: str | None = ...,
     ) -> GeneratedScenario: ...

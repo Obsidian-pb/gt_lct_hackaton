@@ -26,7 +26,14 @@ class StubProvider:
         return CommentReview(available=False)
 
     async def generate_scenario(
-        self, *, incident_type: str, group: str, difficulty: str
+        self,
+        *,
+        incident_type: str,
+        group: str,
+        difficulty: str,
+        service: str = "",
+        signs: list[str] | None = None,
+        note: str | None = None,
     ) -> GeneratedScenario:
         return GeneratedScenario(
             incident_description=f"{incident_type} ({group}, сложность: {difficulty})",

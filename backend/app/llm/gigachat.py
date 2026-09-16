@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -58,6 +59,9 @@ class GigaChatProvider(OpenAICompatibleProvider):
         self._timeout = timeout
         self._token: str | None = None
         self._token_expires_at: float = 0.0
+        # Без замка параллельные запросы разом обнаруживают пустой токен
+        # и дружно идут в OAuth, получая отказ по частоте обращений.
+        self._token_lock = asyncio.Lock()
 
     @staticmethod
     def _normalize_auth_key(auth_key: str) -> str:
@@ -73,7 +77,10 @@ class GigaChatProvider(OpenAICompatibleProvider):
 
     async def _auth_headers(self) -> dict[str, str]:
         if self._token is None or time.time() >= self._token_expires_at:
-            await self._refresh_token()
+            async with self._token_lock:
+                # Пока ждали замок, токен мог обновить кто-то другой.
+                if self._token is None or time.time() >= self._token_expires_at:
+                    await self._refresh_token()
         return {"Authorization": f"Bearer {self._token}"}
 
     async def _refresh_token(self) -> None:

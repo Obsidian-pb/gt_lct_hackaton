@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import logging
@@ -18,6 +19,11 @@ import httpx
 from app.llm.base import CommentReview, GeneratedScenario
 
 logger = logging.getLogger(__name__)
+
+# Повторы при ограничении частоты обращений: провайдер просит подождать,
+# а не отказывает окончательно.
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 1.5
 
 
 def _parse_json(content: str) -> dict:
@@ -38,6 +44,25 @@ def _parse_json(content: str) -> dict:
         if start == -1 or end <= start:
             raise
         return json.loads(text[start : end + 1])
+
+
+def _as_text_list(value: object) -> list[str]:
+    """Приводит список из ответа модели к строкам.
+
+    Модель нередко возвращает вместо строк объекты вида
+    {"text": "...", "number": 1}. Без разбора они превращались бы
+    в мусорные строки с фигурными скобками.
+    """
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        if isinstance(item, dict):
+            item = item.get("text") or item.get("point") or item.get("value") or ""
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return result
 
 
 def _is_local(base_url: str) -> bool:
@@ -79,13 +104,50 @@ REVIEW_SYSTEM_PROMPT = """\
 "summary": "<одно предложение для обучающегося>"}"""
 
 SCENARIO_SYSTEM_PROMPT = """\
-Ты формируешь учебный сценарий для тренажёра диспетчера ДДС города Москвы.
-Придумай правдоподобное происшествие указанного типа: краткое описание, \
-московский адрес, заявителя и обязательные пункты комментария.
+Ты готовишь учебный сценарий для тренажёра диспетчера дежурно-диспетчерской \
+службы города Москвы.
 
-Верни строго JSON:
-{"incident_description": "", "address": "", "caller": "", "signs": [], \
-"expected_primary_status": "Принята|Не принята", "required_comment_points": []}"""
+Как устроено обучение. Диспетчеру ДДС поступает карточка происшествия из \
+системы-112. Он обязан в течение 30 секунд проставить статус реагирования — \
+«Принята», если происшествие в зоне ответственности его службы, либо \
+«Не принята», если нет, — и сопроводить статус комментарием.
+
+Комментарий — это ТЕКСТ, который диспетчер пишет в карточку. В нём должны быть \
+СВЕДЕНИЯ: причина отказа от реагирования, сведения о передаче информации в \
+другую службу, уточнённые данные о происшествии, итоги работы.
+
+required_comment_points — это факты, которые обязаны прозвучать в тексте \
+комментария. Это НЕ действия диспетчера и НЕ вопросы заявителю.
+
+  Правильно: «лифты в доме обслуживает подрядная организация «Практика»»,
+             «информация передана в диспетчерскую «Практика»»,
+             «на месте работает аварийная бригада, прибыла в 14:20».
+  Неправильно: «Запросить информацию о пострадавших» — это действие;
+               «Определить модель лифта» — это действие;
+               «уточнённые данные о происшествии» — обобщение, его нельзя
+               проверить в тексте; напиши сами данные.
+
+Каждый пункт — конкретное проверяемое утверждение об этом происшествии. \
+Если пишешь про причину, назови саму причину. Если про передачу информации — \
+назови, кому передана. Пунктов должно быть два или три.
+
+ВАЖНО: комментарий пишет сама служба обучающегося, от своего лица. Поэтому \
+пункт «информация передана в <служба обучающегося>» бессмысленен — она не \
+передаёт сведения сама себе. Если происшествие для неё непрофильное, укажи \
+в пунктах другую службу, в чьей зоне ответственности происшествие находится.
+
+Адреса делай разнообразными и настоящими для Москвы: разные округа, улицы, \
+номера домов, подъезды. Заявителя не выдумывай — его подставят отдельно, \
+оставь поле caller пустым.
+
+Верни строго JSON, все элементы списков — строки:
+{"incident_description": "<что произошло, 1-2 предложения>",
+ "address": "<московский адрес>",
+ "caller": "<ФИО, телефон>",
+ "signs": ["<признак происшествия>"],
+ "expected_primary_status": "Принята" или "Не принята",
+ "is_profile": true или false,
+ "required_comment_points": ["<факт, который обязан быть в комментарии>"]}"""
 
 
 class OpenAICompatibleProvider:
@@ -140,18 +202,27 @@ class OpenAICompatibleProvider:
         if self._disable_thinking:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-        try:
-            response = await self._client.post(
-                "/chat/completions", json=payload, headers=await self._auth_headers()
-            )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            return _parse_json(content or "")
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            # Недоступность LLM не должна ронять занятие: детерминированная
-            # часть оценки уже посчитана и будет показана обучающемуся.
-            logger.warning("Провайдер %s недоступен: %s", self.name, exc)
-            return None
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                response = await self._client.post(
+                    "/chat/completions", json=payload, headers=await self._auth_headers()
+                )
+                # Ограничение частоты — не отказ: провайдер просит подождать.
+                if response.status_code == 429 and attempt < RETRY_ATTEMPTS - 1:
+                    await asyncio.sleep(RETRY_BASE_DELAY * 2**attempt)
+                    continue
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                return _parse_json(content or "")
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                if attempt < RETRY_ATTEMPTS - 1 and isinstance(exc, httpx.TransportError):
+                    await asyncio.sleep(RETRY_BASE_DELAY * 2**attempt)
+                    continue
+                # Недоступность модели не должна ронять занятие: детерминированная
+                # часть оценки уже посчитана и будет показана обучающемуся.
+                logger.warning("Провайдер %s недоступен: %s", self.name, exc)
+                return None
+        return None
 
     async def review_comment(
         self, *, comment: str, required_points: list[str], context: str
@@ -182,19 +253,56 @@ class OpenAICompatibleProvider:
         )
 
     async def generate_scenario(
-        self, *, incident_type: str, group: str, difficulty: str
+        self,
+        *,
+        incident_type: str,
+        group: str,
+        difficulty: str,
+        service: str = "дежурно-диспетчерская служба района",
+        signs: list[str] | None = None,
+        note: str | None = None,
+        is_profile: bool | None = None,
+        other_services: list[str] | None = None,
     ) -> GeneratedScenario:
-        user = (
-            f"Группа происшествий: {group}\n"
-            f"Итоговый тип происшествия: {incident_type}\n"
-            f"Сложность: {difficulty}"
-        )
-        data = await self._complete(SCENARIO_SYSTEM_PROMPT, user) or {}
+        lines = [
+            f"Служба обучающегося: {service}",
+            f"Группа происшествий: {group}",
+            f"Итоговый тип происшествия: {incident_type}",
+        ]
+        if signs:
+            lines.append("Признаки происшествия по классификатору: " + ", ".join(signs))
+        if is_profile is not None:
+            lines.append(
+                "Происшествие профильное для службы обучающегося, ожидается «Принята»."
+                if is_profile
+                else "Происшествие НЕ профильное для службы обучающегося, ожидается "
+                "«Не принята» с указанием, куда передана информация."
+            )
+        if other_services:
+            # Реальный список оповещения из ЕКП: чтобы модель называла
+            # существующие службы, а не выдумывала их.
+            lines.append(
+                "По классификатору на это происшествие реагируют: "
+                + ", ".join(other_services[:8])
+            )
+        lines.append(f"Сложность: {difficulty}")
+        if note:
+            # Замечание преподавателя к ранее сформированному сценарию —
+            # сценарий «Коррекция» из технического задания.
+            lines.append(f"\nЗамечание преподавателя, учти его: {note}")
+
+        data = await self._complete(SCENARIO_SYSTEM_PROMPT, "\n".join(lines))
+        if data is None:
+            return GeneratedScenario.unavailable(incident_type)
+        status = str(data.get("expected_primary_status") or "Принята").strip()
+        if status not in {"Принята", "Не принята"}:
+            status = "Принята"
         return GeneratedScenario(
-            incident_description=str(data.get("incident_description", incident_type)),
-            address=str(data.get("address", "")),
-            caller=str(data.get("caller", "")),
-            signs=[str(x) for x in data.get("signs", [])],
-            expected_primary_status=str(data.get("expected_primary_status", "Принята")),
-            required_comment_points=[str(x) for x in data.get("required_comment_points", [])],
+            incident_description=str(data.get("incident_description") or incident_type),
+            address=str(data.get("address") or ""),
+            caller=str(data.get("caller") or ""),
+            signs=_as_text_list(data.get("signs")),
+            expected_primary_status=status,
+            is_profile=bool(data.get("is_profile", status == "Принята")),
+            required_comment_points=_as_text_list(data.get("required_comment_points")),
         )

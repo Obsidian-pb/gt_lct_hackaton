@@ -83,6 +83,19 @@ def norm(value):
     return text or None
 
 
+def service_name(raw):
+    """Приводит заголовок колонки к названию службы.
+
+    В таблице колонки названы «Классификатор МВД», «Классификатор СМП» —
+    это про классификатор соответствующей службы, а не про её имя. В списке
+    оповещения такие подписи выглядят нелепо, поэтому приставку снимаем.
+    """
+    text = norm(raw)
+    if text and text.startswith("Классификатор "):
+        text = text[len("Классификатор ") :].strip()
+    return text or None
+
+
 def read_services(header_rows):
     """Собирает описание колонок служб из трёхстрочной шапки.
 
@@ -93,7 +106,7 @@ def read_services(header_rows):
     services = []
     current_name = None
     for col in range(FIRST_SERVICE_COL, len(row1)):
-        name = norm(row1[col]) if col < len(row1) else None
+        name = service_name(row1[col]) if col < len(row1) else None
         if name:
             current_name = name
         if not current_name:

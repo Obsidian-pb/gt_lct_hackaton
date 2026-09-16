@@ -29,9 +29,9 @@ def test_признаки_задают_итоговый_тип(ekp):
 def test_без_флагов_экстренные_службы_не_оповещаются(ekp):
     """У пожара мусора без пострадавших нет повода звать МВД, СМП и ЦЭМП."""
     notified = ekp.rule(FIRE_TRASH).resolve()
-    assert "Классификатор МЧС" in notified
-    assert "Классификатор МВД" not in notified
-    assert "Классификатор СМП" not in notified
+    assert "МЧС" in notified
+    assert "МВД" not in notified
+    assert "СМП" not in notified
     assert "ЦЭМП" not in notified
 
 
@@ -40,24 +40,24 @@ def test_флаг_пострадавшие_расширяет_список_оп�
     base = rule.resolve()
     with_victims = rule.resolve({"пострадавшие"})
     assert set(base) < set(with_victims)
-    assert with_victims["Классификатор МВД"] == "пожар"
+    assert with_victims["МВД"] == "пожар"
     assert with_victims["ЦЭМП"] == "карточка-112"
 
 
 def test_служба_видит_происшествие_под_своим_названием(ekp):
     """Итоговый тип системы-112 и тип в системе службы могут не совпадать."""
     notified = ekp.rule(FIRE_TRASH).resolve({"пострадавшие"})
-    assert notified["Классификатор МЧС"] == "пожар: мусор"
-    assert notified["Классификатор МВД"] == "пожар"
+    assert notified["МЧС"] == "пожар: мусор"
+    assert notified["МВД"] == "пожар"
 
 
 def test_нет_реагирования_не_попадает_в_список(ekp):
     """Служебное значение «нет реагирования» означает отсутствие реагирования."""
     rule = ekp.rule(FIRE_TRASH)
     resolved = rule.resolve({"пострадавшие_не_на_месте"})
-    assert "Классификатор СМП" not in resolved
+    assert "СМП" not in resolved
     assert any(
-        not n.responds for n in rule.notifications if n.service == "Классификатор СМП"
+        not n.responds for n in rule.notifications if n.service == "СМП"
     )
 
 

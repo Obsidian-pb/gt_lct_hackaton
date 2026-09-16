@@ -118,7 +118,7 @@ def test_карточка_содержит_список_оповещения_и�
     card = cards[0]
     assert card["address"].startswith("Москва, ул. Берзарина")
     assert card["available_statuses"] == [str(S.ACCEPTED), str(S.REJECTED)]
-    assert "Классификатор МЧС" in card["notified_services"]
+    assert "МЧС" in card["notified_services"]
 
 
 def test_обучающийся_не_видит_чужую_карточку(client):
