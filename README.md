@@ -1,7 +1,7 @@
 ## UX Flow
 
-<a href="docs/UX-Flow.pdf">
-  <img src="docs/UX-Flow.png" alt="UX Flow" width="100%">
+<a href="UX%20Flow.pdf">
+  <img src="UX-Flow.png" alt="UX Flow" width="100%">
 </a>
 
 > Пользовательский сценарий системы: преподаватель → создание тренировки → выбор сценария → запуск → работа обучающегося → обработка и сохранение результатов.
