@@ -1,0 +1,7 @@
+{
+  "authorization_key": "NGJhMWNlOGItYTZkYi00NDI3LThhYzItODhiZWFmMWM4YTcwOjg1ZGE3MmY0LTdhMTUtNGNiMC1iZGUyLTY3YmM3ZTIyZjlmOA==",
+  "scope": "GIGACHAT_API_PERS",
+  "model": "pro",
+  "verify_ssl": true,
+  "base_url": "https://api.giga.chat/v1"
+}

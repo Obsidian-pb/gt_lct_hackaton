@@ -1,0 +1,8 @@
+__pycache__/
+data/
+test-output/
+# Персональная конфигурация не публикуется.
+config.local.json
+# config.team.json намеренно НЕ игнорируется: это общая конфигурация команды.
+.venv/
+ui-error.log
