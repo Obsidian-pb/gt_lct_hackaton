@@ -1,0 +1,40 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Микрофон — ИИ для проекта</title>
+<style>
+body{font:17px/1.5 system-ui,sans-serif;background:#edf2f5;color:#183346;margin:0;padding:24px}main{max-width:660px;margin:6vh auto;background:white;padding:30px;border-radius:18px;box-shadow:0 12px 45px #17374715}h1{font-size:27px;margin-top:0}button{font:inherit;border:0;border-radius:9px;padding:12px 18px;background:#155f77;color:white;cursor:pointer;margin:5px 5px 5px 0}button:disabled{opacity:.5;cursor:default}textarea{box-sizing:border-box;width:100%;font:inherit;min-height:150px;padding:12px;border:1px solid #8da5b4;border-radius:9px}small{display:block;color:#546d7d}#status{min-height:50px}label{display:block;margin:20px 0 8px}.secondary{background:#e3ecf0;color:#183346}
+</style><main><small>ПРОБНАЯ ВЕРСИЯ · ГОЛОСОВОЙ ВВОД</small><h1>Ваш вопрос заявителю</h1>
+<p>Разрешите микрофон, произнесите вопрос и проверьте распознанный текст. Ответ заявителя появится в консоли.</p>
+<button id="start">Включить микрофон</button><button class="secondary" id="stop" disabled>Остановить</button>
+<p id="status" role="status">Микрофон ещё не включён.</p>
+<label for="text">Текст вопроса — можно исправить</label><textarea id="text" maxlength="2000" placeholder="Например: назовите точный адрес"></textarea>
+<button id="send">Передать в консоль</button><button class="secondary" id="cancel">Отмена</button>
+<small>Распознавание зависит от браузера и может использовать его сетевой сервис. Эта страница не сохраняет аудиозапись.</small></main>
+<script>
+const q=id=>document.getElementById(id), Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recognition, sending=false, requestId=0;
+const status=text=>q('status').textContent=text;
+function stop(){requestId++; recognition?.abort(); recognition=null; q('start').disabled=!Recognition; q('stop').disabled=true;}
+if(!Recognition){q('start').disabled=true;status('Распознавание недоступно. Откройте ссылку в Chrome / Edge или введите текст вручную.');}
+q('start').onclick=async()=>{
+ const id=++requestId; q('start').disabled=true;
+ try{
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true}); stream.getTracks().forEach(t=>t.stop());
+  if(id!==requestId)return;
+  recognition=new Recognition(); recognition.lang='ru-RU'; recognition.interimResults=true; recognition.continuous=false;
+  recognition.onresult=e=>{q('text').value=Array.from(e.results).map(r=>r[0].transcript).join(' ');};
+  let failed=false;
+  recognition.onerror=e=>{failed=true;status(({ 'not-allowed':'Микрофон запрещён. Разрешите его в настройках сайта.', 'network':'Сервис распознавания недоступен. Попробуйте другой браузер или текстовый ввод.', 'no-speech':'Речь не услышана. Попробуйте ещё раз.'})[e.error]||'Ошибка распознавания: '+e.error);};
+  recognition.onend=()=>{if(sending)return;q('start').disabled=false;q('stop').disabled=true;if(!failed)status(q('text').value.trim()?'Запись завершена. Проверьте текст и передайте его в консоль.':'Речь не услышана. Можно повторить запись.');};
+  q('stop').disabled=false;status('Слушаю… После записи проверьте текст и нажмите «Передать в консоль».');recognition.start();
+ }catch(e){q('start').disabled=false;status(e.name==='NotAllowedError'?'Доступ к микрофону запрещён. Разрешите его в настройках сайта.':'Микрофон недоступен: '+e.message);}
+};
+q('stop').onclick=()=>{recognition?.stop();};
+async function send(cancel){
+ if(sending)return; const text=cancel?'':q('text').value.trim();if(!cancel&&!text){status('Сначала произнесите или введите вопрос.');return;}
+ sending=true;stop();q('send').disabled=q('cancel').disabled=q('start').disabled=true;
+ try{const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});if(!r.ok)throw Error('Сеанс истёк');status(cancel?'Отменено. Вернитесь в консоль.':'Передано. Вернитесь в консоль; это окно можно закрыть.');}
+ catch(e){status('Окно больше не связано с консолью. Повторите команду /voice в консоли.');}
+}
+q('send').onclick=()=>send(false);q('cancel').onclick=()=>send(true);
+window.addEventListener('pagehide',stop);
+</script></html>
