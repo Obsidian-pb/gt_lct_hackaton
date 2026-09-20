@@ -4,7 +4,13 @@ import pytest
 
 from app.api.operator import _audio_url
 from app.models.training import Scenario, ScenarioSource
-from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, FilledCard, evaluate
+from app.models.training import CallOutcome
+from app.services.operator import (
+    DEFAULT_CALL_DEADLINE_SECONDS,
+    Expected,
+    FilledCard,
+    evaluate,
+)
 
 FIRE_TRASH = 1010101  # на улице / мусор / открытое пламя
 FIRES = "Пожары и задымления"
@@ -112,3 +118,146 @@ def test_запись_вызова_находится_по_номеру_биле
 )
 def test_без_записи_вызов_остаётся_текстовым(title, source):
     assert _audio_url(scenario(title, source)) is None
+
+
+# --- Исход обращения: не всякий вызов надо классифицировать ------------------
+#
+# Экзаменационные билеты Службы 112 проверяют это прямо: из 96 вызовов
+# 18 происходят в других субъектах, а один вовсе не является происшествием.
+# До сих пор такие вызовы в занятия не заводились.
+
+TULA = Expected(
+    outcome=CallOutcome.REFER,
+    referral_target="Тульская область",
+)
+NOT_INCIDENT = Expected(outcome=CallOutcome.REJECT)
+MOSCOW_FIRE = Expected(outcome=CallOutcome.CLASSIFY, rule_number=FIRE_TRASH)
+
+
+def outcome_card(**kwargs) -> FilledCard:
+    defaults = dict(
+        group=None,
+        path=(),
+        address="Тульская обл., дорога от Киреевска в сторону Октябрьского",
+        description="Съезд автомобиля в кювет, пострадавших нет",
+        elapsed_seconds=90.0,
+        outcome=CallOutcome.REFER,
+        referral_target="Тульская область",
+    )
+    return FilledCard(**{**defaults, **kwargs})
+
+
+def test_передача_по_принадлежности_без_замечаний():
+    result = evaluate(outcome_card(), TULA, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+    assert result.outcome_correct is True
+    assert result.score == 1.0
+
+
+def test_чужой_регион_классифицирован_как_московский():
+    """Самая дорогая ошибка: московские силы туда не поедут."""
+    result = evaluate(
+        outcome_card(outcome=CallOutcome.CLASSIFY, group=FIRES, path=RIGHT_PATH),
+        TULA,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O7"]
+    assert result.outcome_correct is False
+    assert result.score == 0.0
+    assert "Тульская область" in result.violations[0].detail
+
+
+def test_передача_без_указания_субъекта():
+    result = evaluate(
+        outcome_card(referral_target=""), TULA, DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert codes(result) == ["O9"]
+    # Исход верный, поэтому балл снижается, а не обнуляется.
+    assert result.outcome_correct is True
+    assert 0.0 < result.score < 1.0
+
+
+def test_передача_не_в_тот_субъект():
+    result = evaluate(
+        outcome_card(referral_target="Рязанская область"),
+        TULA,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O9"]
+
+
+def test_столица_не_засчитывается_за_область():
+    """«Москва» вместо «Московской области» — то самое смешение, которое
+    вызов и проверяет."""
+    result = evaluate(
+        outcome_card(referral_target="Москва"),
+        Expected(outcome=CallOutcome.REFER, referral_target="Московская область"),
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O9"]
+
+
+def test_сокращение_субъекта_принимается():
+    result = evaluate(
+        outcome_card(referral_target="МО"),
+        Expected(outcome=CallOutcome.REFER, referral_target="Московская область"),
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+
+
+def test_не_происшествие_отклонено_верно():
+    result = evaluate(
+        outcome_card(
+            outcome=CallOutcome.REJECT,
+            address="Москва, Сущевский Вал, дом 5, строение 1",
+            description="Ссора с продавцом салона связи",
+        ),
+        NOT_INCIDENT,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+    assert result.score == 1.0
+
+
+def test_не_происшествие_зарегистрировано():
+    result = evaluate(
+        outcome_card(outcome=CallOutcome.CLASSIFY, group=FIRES, path=RIGHT_PATH),
+        NOT_INCIDENT,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O10"]
+    assert result.score == 0.0
+
+
+@pytest.mark.parametrize("wrong", [CallOutcome.REFER, CallOutcome.REJECT])
+def test_московское_происшествие_не_передают_и_не_отклоняют(wrong):
+    """Обратная ошибка не легче: на происшествие не выедет никто."""
+    result = evaluate(
+        card(outcome=wrong, referral_target="Тульская область"),
+        MOSCOW_FIRE,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O8"]
+    assert result.score == 0.0
+
+
+def test_при_передаче_адрес_и_описание_всё_равно_нужны():
+    """Передавать вызов без адреса некуда, даже если субъект назван верно.
+
+    Балл при этом не обнуляется: решение о судьбе обращения принято верно,
+    а незаполненные поля — отдельная, менее тяжёлая ошибка. Обнуление
+    оставлено за неверным исходом.
+    """
+    result = evaluate(
+        outcome_card(address="", description=""), TULA, DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert codes(result) == ["O5", "O6"]
+    assert result.score == 0.25
+
+
+def test_прежние_вызовы_с_номером_правила_работают_как_раньше():
+    """Совместимость: эталон числом означает исход «классифицировать»."""
+    result = evaluate(card(), FIRE_TRASH, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+    assert result.score == 1.0
