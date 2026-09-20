@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlalchemy import JSON, DateTime
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Integer, String, func
+from sqlalchemy import ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -75,3 +75,58 @@ class AuditEvent(Base):
     object_id: Mapped[int | None] = mapped_column(Integer)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(64))
+
+
+class ErrorEvent(Base):
+    """Сбой в работе комплекса.
+
+    Техническое задание требует от администратора «формировать отчёты
+    об ошибках и сбоях», а на учебном комплексе он видит только браузер:
+    журналы контейнеров ему недоступны. Поэтому необработанные ошибки
+    приложения складываются в базу и показываются в кабинете.
+
+    Хранится отдельно от журнала аудита: аудит отвечает на вопрос «кто что
+    сделал» и не удаляется полгода, а список сбоев — техническая сводка,
+    которую чистят по мере устранения.
+    """
+
+    __tablename__ = "error_event"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    # Куда пришёл запрос, на котором всё сломалось.
+    path: Mapped[str | None] = mapped_column(String(255))
+    method: Mapped[str | None] = mapped_column(String(10))
+    # Тип исключения и сообщение — по ним сбои группируются.
+    kind: Mapped[str] = mapped_column(String(128), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    traceback: Mapped[str | None] = mapped_column(Text)
+    actor_login: Mapped[str | None] = mapped_column(String(150))
+
+
+class SystemSetting(Base):
+    """Настройка комплекса, заданная администратором из интерфейса.
+
+    Пара «ключ — значение», а не колонки на каждую настройку: иначе любая
+    новая настройка требовала бы миграции, а их приходится согласовывать
+    между всеми, кто правит систему одновременно.
+
+    Значение из базы главнее переменной окружения: переменные задают
+    начальное состояние при первом запуске, дальше комплексом управляет
+    администратор, у которого доступа к серверу нет.
+
+    Секреты (ключ доступа к языковой модели) хранятся здесь же и наружу
+    не отдаются никогда — только признак того, что значение задано.
+    """
+
+    __tablename__ = "system_setting"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"))
+    updated_by: Mapped[User | None] = relationship()
