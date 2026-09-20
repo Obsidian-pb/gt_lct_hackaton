@@ -13,3 +13,9 @@ presentation.pptx
 
 node_modules/
 dist/
+
+# Локальные настройки и рабочие копии агентов
+.claude/
+
+# Собранная документация — воспроизводится scripts/build_docs.py
+docs/build/
