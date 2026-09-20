@@ -30,6 +30,16 @@ export function EvaluationReport({ evaluation }: { evaluation: Evaluation }) {
           ))}
         </div>
 
+        {/* Примечание преподавателя — выше автоматических замечаний: это
+            адресный разбор живого человека, а не вывод проверок. */}
+        {evaluation.teacher_feedback && (
+          <div className="draft__note">
+            <b>Примечание преподавателя</b>
+            {evaluation.teacher_feedback_by ? ` (${evaluation.teacher_feedback_by})` : ''}:{' '}
+            {evaluation.teacher_feedback}
+          </div>
+        )}
+
         {evaluation.llm_pending && (
           <div className="pending">
             <span className="spinner" />

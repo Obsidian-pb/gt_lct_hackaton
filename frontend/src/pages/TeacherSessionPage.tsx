@@ -1,9 +1,78 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { api, teacherApi } from '../api/client';
 import type { Scenario, SessionMember, SessionMonitor, TrainingSession } from '../api/types';
 import { MODE_LABELS, STATE_LABELS } from './TeacherSessionsPage';
+
+const DIFFICULTY_LABELS: Record<number, string> = {
+  1: 'простые',
+  2: 'средние',
+  3: 'сложные',
+};
+
+/** Критерии успешности занятия — правятся, пока занятие в черновике. */
+function Criteria({ session, onChanged }: { session: TrainingSession; onChanged: () => void }) {
+  const [passScore, setPassScore] = useState(Math.round(session.pass_score * 100));
+  const [maxCritical, setMaxCritical] = useState(session.max_critical_violations);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setError(null);
+    setSaved(false);
+    try {
+      await api.updateSession(session.id, {
+        pass_score: passScore / 100,
+        max_critical_violations: maxCritical,
+      });
+      setSaved(true);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить критерии');
+    }
+  }
+
+  return (
+    <>
+      <h2 className="section-heading">Критерии успешности</h2>
+      <p className="page-hint">
+        Работа зачтена, если средний балл не ниже порога и критических нарушений
+        не больше допустимого. В отчёте по каждому обучающемуся будет видно, прошёл
+        он порог или нет.
+      </p>
+      <div className="panel-form">
+        <div className="field field--narrow">
+          <label htmlFor="pass-score">Порог зачёта, баллов</label>
+          <input
+            id="pass-score"
+            type="number"
+            min={0}
+            max={100}
+            value={passScore}
+            onChange={(e) => setPassScore(Number(e.target.value))}
+          />
+        </div>
+        <div className="field field--narrow">
+          <label htmlFor="max-critical">Критических нарушений</label>
+          <input
+            id="max-critical"
+            type="number"
+            min={0}
+            max={100}
+            value={maxCritical}
+            onChange={(e) => setMaxCritical(Number(e.target.value))}
+          />
+        </div>
+        <button className="btn btn--ghost" onClick={save}>
+          Сохранить критерии
+        </button>
+      </div>
+      {error && <div className="alert">{error}</div>}
+      {saved && !error && <div className="pending">Критерии сохранены.</div>}
+    </>
+  );
+}
 
 /** Набор состава — доступен только до запуска занятия. */
 function Compose({
@@ -15,6 +84,7 @@ function Compose({
 }) {
   const [students, setStudents] = useState<SessionMember[]>([]);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [difficulty, setDifficulty] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const chosenStudents = new Set(session.students.map((s) => s.id));
@@ -22,9 +92,17 @@ function Compose({
 
   useEffect(() => {
     api.sessionStudents().then(setStudents).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     // Только утверждённые и только своего режима: чужие в ленту не попадут.
-    api.scenarios(true, session.mode).then(setScenarios).catch(() => undefined);
-  }, [session.mode]);
+    // Уровень сложности отбирает сервер: показывать выбранный уровень, но
+    // держать в памяти весь список — значит рано или поздно разойтись с ним.
+    teacherApi
+      .scenariosByDifficulty(true, session.mode, difficulty)
+      .then(setScenarios)
+      .catch(() => undefined);
+  }, [session.mode, difficulty]);
 
   async function toggle(kind: 'student_ids' | 'scenario_ids', id: number) {
     const current = kind === 'student_ids' ? chosenStudents : chosenScenarios;
@@ -65,12 +143,30 @@ function Compose({
       <h2 className="section-heading">Карточки занятия</h2>
       <p className="page-hint">
         Доступны только утверждённые сценарии режима «{MODE_LABELS[session.mode]}». Каждый
-        обучающийся получит их все, но в своём порядке.
+        обучающийся получит их все, но в своём порядке — от простых к сложным.
       </p>
+
+      <div className="field field--narrow">
+        <label htmlFor="difficulty-filter">Уровень сложности</label>
+        <select
+          id="difficulty-filter"
+          value={difficulty ?? ''}
+          onChange={(e) => setDifficulty(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">все уровни</option>
+          {Object.entries(DIFFICULTY_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {scenarios.length === 0 ? (
         <div className="empty">
-          Утверждённых сценариев этого режима нет. Сформируйте и утвердите их на вкладке
-          «Сценарии».
+          {difficulty === null
+            ? 'Утверждённых сценариев этого режима нет. Сформируйте и утвердите их на вкладке «Сценарии».'
+            : `Утверждённых сценариев уровня «${DIFFICULTY_LABELS[difficulty]}» нет. Выберите другой уровень или сформируйте карточки на вкладке «Сценарии».`}
         </div>
       ) : (
         <div className="picker">
@@ -83,6 +179,7 @@ function Compose({
             >
               <span>{scenario.incident_type || scenario.title}</span>
               <span className="picker__hint">
+                {DIFFICULTY_LABELS[scenario.difficulty] ?? scenario.difficulty} ·{' '}
                 {scenario.is_profile ? 'профильное' : 'непрофильное'}
               </span>
             </button>
@@ -231,12 +328,19 @@ export function TeacherSessionPage() {
         </span>{' '}
         · вызов раз в {session.call_interval_seconds} с · взять в работу за{' '}
         {session.pickup_deadline_seconds} с · обработать за{' '}
-        {session.handling_deadline_seconds} с
+        {session.handling_deadline_seconds} с · зачёт от{' '}
+        {Math.round(session.pass_score * 100)} баллов при{' '}
+        {session.max_critical_violations} критических нарушениях
       </p>
 
       {error && <div className="alert">{error}</div>}
 
-      {draft && <Compose session={session} onChanged={() => reload().catch(() => undefined)} />}
+      {draft && (
+        <>
+          <Criteria session={session} onChanged={() => reload().catch(() => undefined)} />
+          <Compose session={session} onChanged={() => reload().catch(() => undefined)} />
+        </>
+      )}
       {active && (
         <Monitor sessionId={session.id} interval={session.call_interval_seconds} />
       )}

@@ -71,6 +71,39 @@ class ScenarioEditIn(BaseModel):
     difficulty: int | None = Field(default=None, ge=1, le=3)
 
 
+class GrammarCheckOut(BaseModel):
+    """Замечания к тексту сценария после ручной правки преподавателем."""
+
+    scenario_id: int
+    issues: list[str]
+    # Что именно проверялось: преподаватель должен понимать, к какому тексту
+    # относятся замечания, — часть полей сценария в проверку не идёт.
+    checked_fields: list[str]
+
+
+class FeedbackIn(BaseModel):
+    """Примечание преподавателя к конкретной работе обучающегося."""
+
+    text: str = Field(min_length=3, max_length=2000)
+
+
+class WorkOut(BaseModel):
+    """Работа обучающегося глазами преподавателя — строка для обратной связи."""
+
+    attempt_id: int
+    student_id: int
+    student_name: str
+    scenario_title: str
+    finished_at: datetime | None
+    score: float | None
+    violations: int
+    critical: int
+    teacher_feedback: str | None = None
+    teacher_feedback_at: datetime | None = None
+    # ФИО автора примечания: результаты обучения нельзя менять без следа.
+    teacher_feedback_by: str | None = None
+
+
 class StudentResultOut(BaseModel):
     student_id: int
     student_name: str
@@ -79,6 +112,9 @@ class StudentResultOut(BaseModel):
     average_score: float
     overdue: int
     violations: dict[str, int]
+    critical: int = 0
+    # None — завершённых работ нет, судить о зачёте не по чему.
+    passed: bool | None = None
 
 
 class ReportOut(BaseModel):
@@ -101,6 +137,11 @@ class ReportOut(BaseModel):
     grammar_issues: int
     # Инсайты по типичным ошибкам группы — тоже требование ТЗ.
     insights: list[str]
+    # Критерии успешности занятия и итог по ним.
+    pass_score: float
+    max_critical_violations: int
+    passed_students: int
+    failed_students: int
 
 
 class SessionIn(BaseModel):
@@ -111,6 +152,11 @@ class SessionIn(BaseModel):
     # Интервал между вызовами — регулятор нагрузки: чем меньше, тем больше
     # карточек висит на обучающемся одновременно.
     call_interval_seconds: int = Field(default=20, ge=0, le=600)
+    # Критерии успешности: порог среднего балла и допустимое число критических
+    # нарушений. Умолчания повторяют значения колонок — занятие, созданное
+    # без явных критериев, оценивается так же, как и прежде.
+    pass_score: float = Field(default=0.7, ge=0, le=1)
+    max_critical_violations: int = Field(default=0, ge=0, le=100)
 
 
 class SessionPatch(BaseModel):
@@ -118,6 +164,8 @@ class SessionPatch(BaseModel):
     pickup_deadline_seconds: int | None = Field(default=None, ge=5, le=300)
     handling_deadline_seconds: int | None = Field(default=None, ge=30, le=1800)
     call_interval_seconds: int | None = Field(default=None, ge=0, le=600)
+    pass_score: float | None = Field(default=None, ge=0, le=1)
+    max_critical_violations: int | None = Field(default=None, ge=0, le=100)
     student_ids: list[int] | None = None
     scenario_ids: list[int] | None = None
 
@@ -130,6 +178,8 @@ class SessionOut(BaseModel):
     pickup_deadline_seconds: int
     handling_deadline_seconds: int
     call_interval_seconds: int
+    pass_score: float
+    max_critical_violations: int
     started_at: datetime | None
     finished_at: datetime | None
     students: list[dict]

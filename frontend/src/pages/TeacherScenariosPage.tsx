@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { api } from '../api/client';
-import type { Catalog, Scenario } from '../api/types';
+import { api, teacherApi } from '../api/client';
+import type { Catalog, GrammarCheck, Scenario } from '../api/types';
 
 function ScenarioCard({
   scenario,
@@ -16,6 +16,26 @@ function ScenarioCard({
 }) {
   const [note, setNote] = useState('');
   const [correcting, setCorrecting] = useState(false);
+  // Результат проверки грамматики держим у карточки, а не на странице:
+  // замечания относятся к конкретному сценарию и должны быть рядом с ним.
+  const [grammar, setGrammar] = useState<GrammarCheck | null>(null);
+  const [grammarError, setGrammarError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function checkGrammar() {
+    setChecking(true);
+    setGrammar(null);
+    setGrammarError(null);
+    try {
+      setGrammar(await teacherApi.checkGrammar(scenario.id));
+    } catch (e) {
+      setGrammarError(
+        e instanceof Error ? e.message : 'Проверка грамматики не выполнена',
+      );
+    } finally {
+      setChecking(false);
+    }
+  }
 
   return (
     <div className={`draft${scenario.approved ? ' draft--approved' : ''}`}>
@@ -64,6 +84,26 @@ function ScenarioCard({
         <div className="draft__note">Учтено замечание: {scenario.teacher_note}</div>
       )}
 
+      {grammarError && <div className="alert">{grammarError}</div>}
+      {grammar &&
+        (grammar.issues.length === 0 ? (
+          <div className="draft__note">
+            Проверка грамматики выполнена, замечаний нет. Проверялись поля:{' '}
+            {grammar.checked_fields.join(', ').toLowerCase()}.
+          </div>
+        ) : (
+          <>
+            <div className="card__label" style={{ marginTop: 10 }}>
+              Замечания к грамматике
+            </div>
+            <ul className="draft__points">
+              {grammar.issues.map((issue, index) => (
+                <li key={index}>{issue}</li>
+              ))}
+            </ul>
+          </>
+        ))}
+
       {correcting ? (
         <>
           <textarea
@@ -100,6 +140,14 @@ function ScenarioCard({
           )}
           <button className="btn btn--ghost" disabled={busy} onClick={() => setCorrecting(true)}>
             Замечание
+          </button>
+          <button
+            className="btn btn--ghost"
+            disabled={busy || checking}
+            onClick={checkGrammar}
+            title="Проверить текст сценария после ручных правок. Сценарий не изменится."
+          >
+            {checking ? 'Проверка…' : 'Проверить грамматику'}
           </button>
         </div>
       )}

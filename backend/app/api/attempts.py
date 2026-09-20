@@ -170,6 +170,13 @@ def _evaluation_out(evaluation: Evaluation) -> EvaluationOut:
         llm_available=evaluation.llm_available,
         llm_summary=evaluation.llm_summary,
         grammar_issues=evaluation.grammar_issues or [],
+        teacher_feedback=evaluation.teacher_feedback,
+        teacher_feedback_at=evaluation.teacher_feedback_at,
+        teacher_feedback_by=(
+            evaluation.teacher_feedback_by.full_name
+            if evaluation.teacher_feedback_by
+            else None
+        ),
     )
 
 

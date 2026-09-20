@@ -71,6 +71,11 @@ function WorkRow({ work }: { work: Work }) {
     <tr>
       <td>
         <Link to={link}>{work.title}</Link>
+        {work.teacher_feedback && (
+          <div className="advice">
+            {work.teacher_feedback_by ?? 'Преподаватель'}: {work.teacher_feedback}
+          </div>
+        )}
       </td>
       <td className="card__meta">{MODE_NAMES[work.mode] ?? work.mode}</td>
       <td className="card__meta">
@@ -204,7 +209,11 @@ export function StudentProgressPage() {
       {data.works.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="card__block">
-            <div className="card__label">Завершённые работы</div>
+            <div className="card__label">
+              Завершённые работы
+              {data.works.some((w) => w.teacher_feedback) &&
+                ' — преподаватель прокомментировал часть из них'}
+            </div>
             <table className="card-table">
               <thead>
                 <tr>

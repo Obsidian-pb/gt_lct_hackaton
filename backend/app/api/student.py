@@ -30,6 +30,11 @@ class WorkOut(BaseModel):
     score: float
     violations: int
     critical: int
+    # Обратная связь преподавателя по этой работе — требование ТЗ о комментариях
+    # к результатам. Обучающийся видит её и в разборе карточки, и здесь, чтобы
+    # не открывать каждую работу в поисках, где преподаватель что-то написал.
+    teacher_feedback: str | None = None
+    teacher_feedback_by: str | None = None
 
 
 class MistakeOut(BaseModel):
@@ -119,6 +124,8 @@ def my_progress(
                 score=w.score,
                 violations=w.violations,
                 critical=w.critical,
+                teacher_feedback=w.teacher_feedback,
+                teacher_feedback_by=w.teacher_feedback_by,
             )
             for w in result.works
         ],

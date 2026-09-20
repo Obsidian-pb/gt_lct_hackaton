@@ -11,6 +11,7 @@ from app.models.audit import AuditAction
 from app.models.base import utcnow
 from app.models.training import (
     Attempt,
+    Evaluation,
     Scenario,
     ScenarioSource,
     SessionState,
@@ -23,8 +24,10 @@ from app.schemas.teacher import (
     MonitorOut,
     ProgressOut,
     CorrectIn,
+    FeedbackIn,
     GenerateIn,
     GenerateOut,
+    GrammarCheckOut,
     ReportOut,
     ScenarioEditIn,
     ScenarioOut,
@@ -33,6 +36,7 @@ from app.schemas.teacher import (
     SessionOut,
     SessionPatch,
     StudentResultOut,
+    WorkOut,
 )
 from app.services import audit
 from app.services import export as export_service
@@ -41,6 +45,7 @@ from app.services import sessions as session_service
 from app.services.ekp import get_ekp
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
 from app.services.response_status import PRIMARY, ResponseStatus
+from app.services.violations import Severity, kind_of
 
 router = APIRouter(prefix="/api/teacher", tags=["Кабинет преподавателя"])
 
@@ -154,12 +159,17 @@ async def generate(
 def list_scenarios(
     approved: bool | None = None,
     mode: str | None = None,
+    difficulty: int | None = None,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> list[ScenarioOut]:
     query = select(Scenario).order_by(Scenario.id.desc())
     if mode:
         query = query.where(Scenario.mode == TrainingMode(mode))
+    # Отбор по уровню сложности: преподаватель собирает состав занятия
+    # из заданий нужного уровня, а не перебирает весь список глазами.
+    if difficulty is not None:
+        query = query.where(Scenario.difficulty == difficulty)
     if approved is True:
         query = query.where(Scenario.approved_at.is_not(None))
     elif approved is False:
@@ -275,6 +285,63 @@ def edit(
     return _to_out(scenario)
 
 
+# Поля, которые преподаватель правит руками и которые имеет смысл проверять:
+# заявителя и служебные отметки в проверку не берём — там имена и телефоны,
+# на них модель выдаёт замечания к каждому слову.
+GRAMMAR_FIELDS = ("Название", "Адрес", "Описание", "Обязательные пункты комментария")
+
+
+@router.post("/scenarios/{scenario_id}/grammar", response_model=GrammarCheckOut)
+async def check_grammar(
+    scenario_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> GrammarCheckOut:
+    """Принудительная проверка грамматики текста сценария.
+
+    Сценарий подготовки занятия из технического задания: после ручных
+    правок преподаватель по своей команде проверяет написанное. Проверка
+    ничего в сценарии не меняет — она только возвращает замечания, решение
+    остаётся за преподавателем.
+
+    Отдельного метода у провайдера нет и не нужно: review_comment уже
+    возвращает grammar_issues, а список обязательных пунктов при пустом
+    значении не даёт замечаний по существу.
+    """
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сценарий не найден")
+
+    text = "\n".join(
+        part
+        for part in (
+            scenario.title,
+            scenario.address,
+            scenario.description,
+            *(scenario.required_comment_points or []),
+        )
+        if part
+    )
+    review = await get_llm_provider().review_comment(
+        comment=text,
+        required_points=[],
+        context=scenario.incident_type,
+    )
+    if not review.available:
+        # Молчание здесь читалось бы как «ошибок нет», а это неправда:
+        # проверка не выполнена вовсе.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Модель недоступна, проверка грамматики не выполнена. "
+            "Текст сценария не изменён.",
+        )
+    return GrammarCheckOut(
+        scenario_id=scenario.id,
+        issues=review.grammar_issues,
+        checked_fields=list(GRAMMAR_FIELDS),
+    )
+
+
 @router.delete("/scenarios/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(
     scenario_id: int,
@@ -333,6 +400,8 @@ def session_report(
                 average_score=s.average_score,
                 overdue=s.overdue,
                 violations=dict(s.violations),
+                critical=s.critical,
+                passed=s.passed(data.pass_score, data.max_critical_violations),
             )
             for s in data.students
         ],
@@ -344,7 +413,94 @@ def session_report(
         violations=dict(data.violations),
         grammar_issues=data.grammar_issues,
         insights=data.insights,
+        pass_score=data.pass_score,
+        max_critical_violations=data.max_critical_violations,
+        passed_students=data.passed_students,
+        failed_students=data.failed_students,
     )
+
+
+def _work_out(attempt: Attempt) -> WorkOut:
+    evaluation = attempt.evaluation
+    critical = sum(
+        1
+        for item in (evaluation.violations if evaluation else [])
+        if item.get("code") and kind_of(item["code"]).severity is Severity.CRITICAL
+    )
+    return WorkOut(
+        attempt_id=attempt.id,
+        student_id=attempt.student_id,
+        student_name=attempt.student.full_name,
+        scenario_title=attempt.scenario.title,
+        finished_at=attempt.finished_at,
+        score=evaluation.score if evaluation else None,
+        violations=len(evaluation.violations or []) if evaluation else 0,
+        critical=critical,
+        teacher_feedback=evaluation.teacher_feedback if evaluation else None,
+        teacher_feedback_at=evaluation.teacher_feedback_at if evaluation else None,
+        teacher_feedback_by=(
+            evaluation.teacher_feedback_by.full_name
+            if evaluation and evaluation.teacher_feedback_by
+            else None
+        ),
+    )
+
+
+@router.get("/sessions/{session_id}/works", response_model=list[WorkOut])
+def session_works(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> list[WorkOut]:
+    """Работы занятия поимённо — отсюда преподаватель даёт обратную связь.
+
+    Отчёт сводит результаты по обучающемуся, а комментировать техническое
+    задание требует конкретную работу, поэтому список отдельный.
+    """
+    _load_session(session_id, db)
+    attempts = db.scalars(
+        select(Attempt).where(Attempt.session_id == session_id).order_by(Attempt.id)
+    ).all()
+    return [_work_out(a) for a in attempts]
+
+
+@router.post("/attempts/{attempt_id}/feedback", response_model=WorkOut)
+def leave_feedback(
+    attempt_id: int,
+    payload: FeedbackIn,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> WorkOut:
+    """Примечание преподавателя к конкретной работе обучающегося.
+
+    Требование технического задания о предоставлении обратной связи
+    через интерфейс системы. Автор и время сохраняются рядом с текстом:
+    примечание дописывается к уже выставленной оценке, а результаты
+    обучения нельзя менять без фиксации в журнале аудита.
+    """
+    attempt = db.get(Attempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Работа не найдена")
+
+    evaluation: Evaluation | None = attempt.evaluation
+    if evaluation is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Работа ещё не завершена: комментировать нечего",
+        )
+
+    evaluation.teacher_feedback = payload.text
+    evaluation.teacher_feedback_at = utcnow()
+    evaluation.teacher_feedback_by = user
+    audit.record(
+        db, AuditAction.FEEDBACK_LEFT, actor=user, object_type="attempt",
+        object_id=attempt.id,
+        detail={"обучающийся": attempt.student.full_name, "примечание": payload.text[:200]},
+        request=request,
+    )
+    db.commit()
+    return _work_out(attempt)
 
 
 @router.get("/sessions/{session_id}/report.csv", response_class=Response)
@@ -390,6 +546,8 @@ def _session_out(session: TrainingSession) -> SessionOut:
         pickup_deadline_seconds=session.pickup_deadline_seconds,
         handling_deadline_seconds=session.handling_deadline_seconds,
         call_interval_seconds=session.call_interval_seconds,
+        pass_score=session.pass_score,
+        max_critical_violations=session.max_critical_violations,
         started_at=session.started_at,
         finished_at=session.finished_at,
         students=[
@@ -446,6 +604,8 @@ def create_session(
         pickup_deadline_seconds=payload.pickup_deadline_seconds,
         handling_deadline_seconds=payload.handling_deadline_seconds,
         call_interval_seconds=payload.call_interval_seconds,
+        pass_score=payload.pass_score,
+        max_critical_violations=payload.max_critical_violations,
     )
     db.add(session)
     db.commit()

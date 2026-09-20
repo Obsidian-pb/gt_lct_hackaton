@@ -51,6 +51,10 @@ class Work:
     score: float
     violations: int
     critical: int
+    # Примечание преподавателя к этой работе, если оно оставлено. В личном
+    # кабинете оно важнее автоматических замечаний: это адресный разбор.
+    teacher_feedback: str | None = None
+    teacher_feedback_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +189,12 @@ def build(attempts: list[Attempt]) -> Progress:
                 score=evaluation.score,
                 violations=len(evaluation.violations or []),
                 critical=critical,
+                teacher_feedback=evaluation.teacher_feedback,
+                teacher_feedback_by=(
+                    evaluation.teacher_feedback_by.full_name
+                    if evaluation.teacher_feedback_by
+                    else None
+                ),
             )
         )
 

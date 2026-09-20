@@ -71,3 +71,8 @@ class EvaluationOut(BaseModel):
     llm_available: bool
     llm_summary: str | None = None
     grammar_issues: list[str] = Field(default_factory=list)
+    # Примечание преподавателя к этой работе. Показывается вместе с автором
+    # и временем: обучающийся должен видеть, кто и когда его оставил.
+    teacher_feedback: str | None = None
+    teacher_feedback_at: datetime | None = None
+    teacher_feedback_by: str | None = None
