@@ -12,7 +12,7 @@ import collections
 from dataclasses import dataclass, field
 
 from app.models.training import Attempt, TrainingSession
-from app.services.violations import CATALOG, Severity
+from app.services.violations import Severity, kind_of
 
 
 @dataclass
@@ -58,9 +58,10 @@ def _insights(
             f"{overdue_share:.0%} карточек — стоит отработать скорость реакции."
         )
     for code, count in violations.most_common(3):
-        kind = CATALOG.get(code)
-        if kind is None:
-            continue
+        # kind_of, а не каталог диспетчера: на занятии оператора 112 все коды
+        # приходят из другого каталога, и отчёт молчал о них вовсе — при
+        # восьми нарушениях сообщал, что системных ошибок не видно.
+        kind = kind_of(code)
         share = count / total
         if share < 0.2:
             continue
@@ -68,7 +69,7 @@ def _insights(
 
     critical = sum(
         c for code, c in violations.items()
-        if code in CATALOG and CATALOG[code].severity is Severity.CRITICAL
+        if kind_of(code).severity is Severity.CRITICAL
     )
     if critical and not notes:
         notes.append(f"Критических нарушений: {critical}. Разберите их индивидуально.")
