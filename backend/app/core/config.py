@@ -11,6 +11,12 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://trainer:trainer@localhost:5432/trainer"
     secret_key: str = "dev-secret-change-me"
+
+    # Пул соединений с базой. Значения по умолчанию рассчитаны на норматив
+    # ТЗ — сто одновременных пользователей — и проверены scripts/loadtest.py.
+    db_pool_size: int = 20
+    db_pool_overflow: int = 30
+    db_pool_timeout_seconds: float = 10.0
     access_token_ttl_minutes: int = 12 * 60
 
     # Норматив подтверждения приёма карточки диспетчером ДДС.
