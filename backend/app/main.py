@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, attempts, auth, operator, teacher
+from app.api import admin, attempts, auth, operator, student, teacher
 from app.core.config import get_settings
 from app.services.ekp import get_ekp
 
@@ -28,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(attempts.router)
 app.include_router(teacher.router)
 app.include_router(operator.router)
+app.include_router(student.router)
 app.include_router(admin.router)
 
 

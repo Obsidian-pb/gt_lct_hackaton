@@ -243,3 +243,47 @@ export interface SessionMonitor {
   finished: number;
   students: StudentProgress[];
 }
+
+export interface ModeStats {
+  mode: string;
+  attempts: number;
+  finished: number;
+  average_score: number;
+  overdue_pickup: number;
+}
+
+export interface Work {
+  attempt_id: number;
+  title: string;
+  mode: string;
+  finished_at: string;
+  score: number;
+  violations: number;
+  critical: number;
+}
+
+export interface Mistake {
+  code: string;
+  title: string;
+  severity: string;
+  criterion: string;
+  count: number;
+  share: number;
+  example: string;
+}
+
+export interface PersonalProgress {
+  student_id: number;
+  student_name: string;
+  total: number;
+  finished: number;
+  average_score: number;
+  average_pickup_seconds: number | null;
+  overdue_pickup: number;
+  grammar_issues: number;
+  trend: number | null;
+  by_mode: ModeStats[];
+  mistakes: Mistake[];
+  works: Work[];
+  advice: string[];
+}

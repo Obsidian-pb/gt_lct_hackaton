@@ -779,6 +779,35 @@ button {
   margin-top: 3px;
 }
 
+/* --- Личный кабинет обучающегося ----------------------------------------- */
+
+/* Цветом отмечается только то, что требует внимания: рост и провал.
+   Нейтральные показатели остаются обычными, иначе пестрит и ничего не видно. */
+.stat__value--ok {
+  color: var(--ok);
+}
+
+.stat__value--bad {
+  color: var(--danger);
+}
+
+.stat__of {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.advice {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  line-height: 1.5;
+}
+
+.advice:last-child {
+  margin-bottom: 0;
+}
+
 .stat__hint {
   font-size: 11px;
   color: var(--muted);

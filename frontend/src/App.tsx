@@ -8,6 +8,7 @@ import { CardPage } from './pages/CardPage';
 import { LoginPage } from './pages/LoginPage';
 import { OperatorCallPage } from './pages/OperatorCallPage';
 import { OperatorCallsPage } from './pages/OperatorCallsPage';
+import { StudentProgressPage } from './pages/StudentProgressPage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherSessionPage } from './pages/TeacherSessionPage';
 import { TeacherSessionsPage } from './pages/TeacherSessionsPage';
@@ -51,6 +52,9 @@ function Header({ role }: { role: string }) {
             </NavLink>
             <NavLink to="/calls" className={({ isActive }) => (isActive ? 'active' : '')}>
               Приём вызовов 112
+            </NavLink>
+            <NavLink to="/progress" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Мои результаты
             </NavLink>
           </>
         )}
@@ -106,6 +110,7 @@ export default function App() {
               <Route path="/cards/:id" element={<CardPage />} />
               <Route path="/calls" element={<OperatorCallsPage />} />
               <Route path="/calls/:id" element={<OperatorCallPage />} />
+              <Route path="/progress" element={<StudentProgressPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}

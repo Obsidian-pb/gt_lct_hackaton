@@ -12,6 +12,7 @@ import type {
   Service,
   SessionMember,
   SessionMonitor,
+  PersonalProgress,
   SurveyOption,
   SystemState,
   TrainingSession,
@@ -140,6 +141,11 @@ export const api = {
   monitorSession: (id: number) =>
     request<SessionMonitor>(`/api/teacher/sessions/${id}/monitor`),
   report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
+
+  progress: (studentId?: number) =>
+    request<PersonalProgress>(
+      `/api/student/progress${studentId ? `?student_id=${studentId}` : ''}`,
+    ),
 
   adminUsers: () => request<AdminUser[]>('/api/admin/users'),
   adminServices: () => request<Service[]>('/api/admin/services'),
