@@ -384,3 +384,14 @@ export interface Report {
   passed_students: number;
   failed_students: number;
 }
+
+// --- Учебные группы ---------------------------------------------------------
+
+/** Постоянный список обучающихся: набор курса, смена, поток. */
+export interface StudyGroup {
+  id: number;
+  title: string;
+  note: string | null;
+  teacher_name: string;
+  students: SessionMember[];
+}

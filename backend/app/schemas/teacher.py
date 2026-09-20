@@ -171,7 +171,31 @@ class SessionPatch(BaseModel):
     pass_score: float | None = Field(default=None, ge=0, le=1)
     max_critical_violations: int | None = Field(default=None, ge=0, le=100)
     student_ids: list[int] | None = None
+    # Состав можно задать группой: её участники копируются в занятие.
+    # Именно копируются, а не связываются ссылкой — иначе правка группы
+    # задним числом переписала бы состав уже проведённого занятия.
+    group_id: int | None = None
     scenario_ids: list[int] | None = None
+
+
+class GroupIn(BaseModel):
+    title: str = Field(min_length=3, max_length=255)
+    note: str | None = Field(default=None, max_length=500)
+    student_ids: list[int] = Field(default_factory=list)
+
+
+class GroupPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=255)
+    note: str | None = Field(default=None, max_length=500)
+    student_ids: list[int] | None = None
+
+
+class GroupOut(BaseModel):
+    id: int
+    title: str
+    note: str | None
+    teacher_name: str
+    students: list[dict]
 
 
 class SessionOut(BaseModel):

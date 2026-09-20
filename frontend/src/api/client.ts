@@ -312,3 +312,26 @@ export const teacherApi = {
       body: JSON.stringify({ text }),
     }),
 };
+
+// --- Учебные группы ---------------------------------------------------------
+
+import type { StudyGroup } from './types';
+
+export const groupsApi = {
+  list: () => request<StudyGroup[]>('/api/teacher/groups'),
+  create: (body: { title: string; note?: string | null; student_ids?: number[] }) =>
+    request<StudyGroup>('/api/teacher/groups', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  update: (
+    id: number,
+    body: { title?: string; note?: string | null; student_ids?: number[] },
+  ) =>
+    request<StudyGroup>(`/api/teacher/groups/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  remove: (id: number) =>
+    request<void>(`/api/teacher/groups/${id}`, { method: 'DELETE' }),
+};

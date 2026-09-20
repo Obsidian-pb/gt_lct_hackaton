@@ -42,6 +42,11 @@ class AuditAction(StrEnum):
     MATERIAL_PUBLISHED = "Учебный материал опубликован"
     MATERIAL_UNPUBLISHED = "Учебный материал снят с публикации"
     MATERIAL_DELETED = "Удалён учебный материал"
+    # Учебные группы: изменение состава решает, кто получит карточки
+    # на следующем занятии, — это распределение доступа к обучению.
+    GROUP_CREATED = "Создана учебная группа"
+    GROUP_UPDATED = "Изменена учебная группа"
+    GROUP_DELETED = "Удалена учебная группа"
 
 
 class AuditEvent(Base):

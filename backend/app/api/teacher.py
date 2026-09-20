@@ -10,6 +10,7 @@ from app.llm import get_llm_provider
 from app.models.audit import AuditAction
 from app.models.base import utcnow
 from app.models.training import (
+    StudyGroup,
     Attempt,
     Evaluation,
     Scenario,
@@ -20,6 +21,9 @@ from app.models.training import (
 )
 from app.models.user import DispatchService, Role, User
 from app.schemas.teacher import (
+    GroupIn,
+    GroupOut,
+    GroupPatch,
     CatalogOut,
     MonitorOut,
     ProgressOut,
@@ -584,6 +588,126 @@ def students(
     ]
 
 
+def _group_out(group: StudyGroup) -> GroupOut:
+    return GroupOut(
+        id=group.id,
+        title=group.title,
+        note=group.note,
+        teacher_name=group.teacher.full_name,
+        students=[
+            {"id": u.id, "full_name": u.full_name, "service": u.service.name if u.service else None}
+            for u in sorted(group.students, key=lambda u: u.full_name)
+        ],
+    )
+
+
+def _students_by_ids(db: Session, ids: list[int]) -> list[User]:
+    """Только действующие обучающиеся: заблокированного включать в группу незачем."""
+    return list(
+        db.scalars(
+            select(User).where(
+                User.id.in_(ids), User.role == Role.STUDENT, User.is_active.is_(True)
+            )
+        ).all()
+    )
+
+
+@router.get("/groups", response_model=list[GroupOut])
+def list_groups(
+    db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> list[GroupOut]:
+    """Учебные группы видны всем преподавателям: смену ведёт тот, кто на месте."""
+    rows = db.scalars(select(StudyGroup).order_by(StudyGroup.title)).all()
+    return [_group_out(g) for g in rows]
+
+
+@router.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(
+    payload: GroupIn,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> GroupOut:
+    if db.scalar(select(StudyGroup).where(StudyGroup.title == payload.title)):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"Группа «{payload.title}» уже заведена"
+        )
+    group = StudyGroup(
+        title=payload.title,
+        note=payload.note,
+        teacher=user,
+        students=_students_by_ids(db, payload.student_ids),
+    )
+    db.add(group)
+    db.flush()
+    audit.record(
+        db,
+        AuditAction.GROUP_CREATED,
+        actor=user,
+        object_type="group",
+        object_id=group.id,
+        detail={"title": group.title, "students": len(group.students)},
+        request=request,
+    )
+    db.commit()
+    return _group_out(group)
+
+
+@router.patch("/groups/{group_id}", response_model=GroupOut)
+def update_group(
+    group_id: int,
+    payload: GroupPatch,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> GroupOut:
+    group = db.get(StudyGroup, group_id)
+    if group is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Группа не найдена")
+
+    data = payload.model_dump(exclude_unset=True)
+    if (ids := data.pop("student_ids", None)) is not None:
+        group.students = _students_by_ids(db, ids)
+    for key, value in data.items():
+        setattr(group, key, value)
+    audit.record(
+        db,
+        AuditAction.GROUP_UPDATED,
+        actor=user,
+        object_type="group",
+        object_id=group.id,
+        detail={"fields": sorted(payload.model_dump(exclude_unset=True))},
+        request=request,
+    )
+    db.commit()
+    return _group_out(group)
+
+
+@router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> None:
+    group = db.get(StudyGroup, group_id)
+    if group is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Группа не найдена")
+    # Проведённые занятия не пострадают: состав копировался в занятие,
+    # а не ссылался на группу.
+    audit.record(
+        db,
+        AuditAction.GROUP_DELETED,
+        actor=user,
+        object_type="group",
+        object_id=group.id,
+        detail={"title": group.title},
+        request=request,
+    )
+    db.delete(group)
+    db.commit()
+
+
 @router.get("/sessions", response_model=list[SessionOut])
 def list_sessions(
     db: Session = Depends(get_session), user: User = Depends(require_teacher)
@@ -629,6 +753,13 @@ def update_session(
         )
 
     data = payload.model_dump(exclude_unset=True)
+    if (group_id := data.pop("group_id", None)) is not None:
+        group = db.get(StudyGroup, group_id)
+        if group is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Группа не найдена")
+        # Состав копируется, а не связывается ссылкой: занятие — это событие,
+        # и правка группы через неделю не должна переписывать его состав.
+        session.students = list(group.students)
     if (ids := data.pop("student_ids", None)) is not None:
         session.students = list(
             db.scalars(select(User).where(User.id.in_(ids), User.role == Role.STUDENT)).all()

@@ -1088,3 +1088,44 @@ button {
   color: var(--muted);
   line-height: 1.35;
 }
+
+/* --- Учебные группы ------------------------------------------------------- */
+
+/* Список обучающихся в две колонки: состав смены обычно не помещается
+   в один экран, а выбирать приходится сразу многих. */
+.picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 2px 16px;
+  margin-top: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.picker__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.picker__row span:last-child {
+  margin-left: auto;
+}
+
+.group {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.group:first-of-type {
+  border-top: none;
+}
+
+.group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}

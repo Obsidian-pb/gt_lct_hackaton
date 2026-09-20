@@ -11,6 +11,7 @@ import { MaterialsPage } from './pages/MaterialsPage';
 import { OperatorCallPage } from './pages/OperatorCallPage';
 import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { StudentProgressPage } from './pages/StudentProgressPage';
+import { TeacherGroupsPage } from './pages/TeacherGroupsPage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherSessionPage } from './pages/TeacherSessionPage';
 import { TeacherSessionsPage } from './pages/TeacherSessionsPage';
@@ -39,6 +40,9 @@ function Header({ role }: { role: string }) {
           <>
             <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
               Сценарии
+            </NavLink>
+            <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Группы
             </NavLink>
             <NavLink to="/sessions" className={({ isActive }) => (isActive ? 'active' : '')}>
               Занятия
@@ -107,6 +111,7 @@ export default function App() {
           ) : user.role === 'teacher' ? (
             <>
               <Route path="/scenarios" element={<TeacherScenariosPage />} />
+              <Route path="/groups" element={<TeacherGroupsPage />} />
               <Route path="/sessions" element={<TeacherSessionsPage />} />
               <Route path="/sessions/:id" element={<TeacherSessionPage />} />
               <Route path="/report" element={<TeacherReportPage />} />

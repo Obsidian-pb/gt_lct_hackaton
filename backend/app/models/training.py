@@ -67,12 +67,43 @@ session_student = Table(
     Column("student_id", ForeignKey("app_user.id"), primary_key=True),
 )
 
+# Состав учебной группы. Группа — это именованный список обучающихся,
+# который преподаватель собирает один раз и потом переиспользует: набор
+# курса, смена, поток. В занятие состав попадает копированием, а не ссылкой,
+# поэтому изменение группы задним числом не переписывает уже проведённое
+# занятие.
+study_group_student = Table(
+    "study_group_student",
+    Base.metadata,
+    Column("group_id", ForeignKey("study_group.id"), primary_key=True),
+    Column("student_id", ForeignKey("app_user.id"), primary_key=True),
+)
+
 session_scenario = Table(
     "session_scenario",
     Base.metadata,
     Column("session_id", ForeignKey("training_session.id"), primary_key=True),
     Column("scenario_id", ForeignKey("scenario.id"), primary_key=True),
 )
+
+
+class StudyGroup(Base, TimestampMixin):
+    """Учебная группа — постоянный список обучающихся.
+
+    Техническое задание требует от преподавателя назначать учащимся «конкретные
+    задания и группы». Задания назначаются составом занятия, а группа избавляет
+    от того, чтобы собирать одних и тех же людей заново к каждому занятию.
+    """
+
+    __tablename__ = "study_group"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), unique=True)
+    note: Mapped[str | None] = mapped_column(String(500))
+
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    teacher: Mapped[User] = relationship()
+    students: Mapped[list[User]] = relationship(secondary=study_group_student)
 
 
 class Scenario(Base, TimestampMixin):
