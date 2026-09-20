@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { api, teacherApi } from '../api/client';
 import type { TrainingSession } from '../api/types';
 
 export const STATE_LABELS: Record<string, string> = {
@@ -28,6 +28,9 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
   const [interval, setIntervalSeconds] = useState(20);
   const [pickup, setPickup] = useState(30);
   const [handling, setHandling] = useState(180);
+  // Критерии успешности: на экране балл стобалльный, на сервер уходит доля.
+  const [passScore, setPassScore] = useState(70);
+  const [maxCritical, setMaxCritical] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,12 +38,14 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const session = await api.createSession({
+      const session = await teacherApi.createSession({
         title,
         mode,
         pickup_deadline_seconds: pickup,
         handling_deadline_seconds: handling,
         call_interval_seconds: interval,
+        pass_score: passScore / 100,
+        max_critical_violations: maxCritical,
       });
       onCreated(session.id);
     } catch (e) {
@@ -115,6 +120,28 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
           onChange={(e) => setHandling(Number(e.target.value))}
         />
       </div>
+      <div className="field field--narrow">
+        <label htmlFor="pass-score">Порог зачёта, баллов</label>
+        <input
+          id="pass-score"
+          type="number"
+          min={0}
+          max={100}
+          value={passScore}
+          onChange={(e) => setPassScore(Number(e.target.value))}
+        />
+      </div>
+      <div className="field field--narrow">
+        <label htmlFor="max-critical">Критических нарушений</label>
+        <input
+          id="max-critical"
+          type="number"
+          min={0}
+          max={100}
+          value={maxCritical}
+          onChange={(e) => setMaxCritical(Number(e.target.value))}
+        />
+      </div>
       <button className="btn" onClick={submit} disabled={busy || title.trim().length < 3}>
         Создать
       </button>
@@ -125,6 +152,11 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
         Чем меньше интервал между вызовами, тем больше карточек висит на обучающемся
         одновременно. Это основной регулятор нагрузки: занятие с интервалом в пять секунд
         заведомо не позволяет успеть всё и проверяет умение расставлять приоритеты.
+      </p>
+      <p className="page-hint" style={{ width: '100%', margin: 0 }}>
+        Занятие зачтено, если средний балл не ниже порога и критических нарушений
+        не больше допустимого. Критическое нарушение — то, из-за которого служба
+        не выехала бы на происшествие, поэтому по умолчанию их не прощают вовсе.
       </p>
       {error && <div className="alert" style={{ width: '100%' }}>{error}</div>}
     </div>

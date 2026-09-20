@@ -24,10 +24,24 @@ class StudentResult:
     scores: list[float] = field(default_factory=list)
     overdue: int = 0
     violations: collections.Counter = field(default_factory=collections.Counter)
+    # Критические нарушения считаются отдельно от прочих: по ним занятие
+    # не засчитывается независимо от среднего балла.
+    critical: int = 0
 
     @property
     def average_score(self) -> float:
         return round(sum(self.scores) / len(self.scores), 3) if self.scores else 0.0
+
+    def passed(self, pass_score: float, max_critical: int) -> bool | None:
+        """Зачтена ли работа обучающегося по критериям успешности занятия.
+
+        None, а не False, когда завершённых работ нет: обучающийся, до которого
+        карточки не дошли, не «не сдал» — судить о нём не по чему, и в отчёте
+        это должно отличаться от провала.
+        """
+        if not self.finished:
+            return None
+        return self.average_score >= pass_score and self.critical <= max_critical
 
 
 @dataclass
@@ -42,6 +56,30 @@ class SessionReport:
     violations: collections.Counter
     grammar_issues: int
     insights: list[str]
+
+    @property
+    def pass_score(self) -> float:
+        return self.session.pass_score
+
+    @property
+    def max_critical_violations(self) -> int:
+        return self.session.max_critical_violations
+
+    @property
+    def passed_students(self) -> int:
+        return sum(
+            1
+            for s in self.students
+            if s.passed(self.pass_score, self.max_critical_violations)
+        )
+
+    @property
+    def failed_students(self) -> int:
+        return sum(
+            1
+            for s in self.students
+            if s.passed(self.pass_score, self.max_critical_violations) is False
+        )
 
 
 def _insights(
@@ -118,6 +156,8 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
             if code:
                 violations[code] += 1
                 result.violations[code] += 1
+                if kind_of(code).severity is Severity.CRITICAL:
+                    result.critical += 1
 
     return SessionReport(
         session=session,

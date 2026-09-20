@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { api } from '../api/client';
-import type { Report, TrainingSession } from '../api/types';
+import { api, teacherApi } from '../api/client';
+import type { Report, SessionWork, TrainingSession } from '../api/types';
 import { VIOLATION_TITLES } from '../violations';
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -34,6 +34,80 @@ function ViolationBar({ code, count, total }: { code: string; count: number; tot
   );
 }
 
+/** Одна работа с полем для примечания преподавателя. */
+function WorkFeedback({
+  work,
+  onSaved,
+}: {
+  work: SessionWork;
+  onSaved: (work: SessionWork) => void;
+}) {
+  const [text, setText] = useState(work.teacher_feedback ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      onSaved(await teacherApi.leaveFeedback(work.attempt_id, text.trim()));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить примечание');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="draft">
+      <div className="draft__head">
+        <div>
+          <div className="draft__type">{work.student_name}</div>
+          <div className="card__meta">{work.scenario_title}</div>
+        </div>
+        <div className="draft__badges">
+          {work.score === null ? (
+            <span className="chip chip--neutral">не завершена</span>
+          ) : (
+            <span className={work.score >= 0.7 ? 'chip chip--ok' : 'chip chip--danger'}>
+              {Math.round(work.score * 100)} баллов
+            </span>
+          )}
+          {work.critical > 0 && (
+            <span className="chip chip--danger">критических: {work.critical}</span>
+          )}
+        </div>
+      </div>
+
+      {work.teacher_feedback_at && (
+        <div className="draft__note">
+          Примечание оставил {work.teacher_feedback_by ?? 'преподаватель'},{' '}
+          {new Date(work.teacher_feedback_at).toLocaleString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </div>
+      )}
+
+      <textarea
+        className="comment-area"
+        style={{ marginTop: 10 }}
+        placeholder="Что сказать обучающемуся по этой работе? Примечание увидит он один."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="actions">
+        <button className="btn btn--ghost" disabled={busy || text.trim().length < 3} onClick={save}>
+          {work.teacher_feedback ? 'Изменить примечание' : 'Оставить примечание'}
+        </button>
+      </div>
+      {error && <div className="alert">{error}</div>}
+    </div>
+  );
+}
+
 export function TeacherReportPage() {
   // Занятие можно открыть по ссылке сразу после завершения.
   const [params] = useSearchParams();
@@ -41,6 +115,7 @@ export function TeacherReportPage() {
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [sessionId, setSessionId] = useState<number | null>(requested);
   const [report, setReport] = useState<Report | null>(null);
+  const [works, setWorks] = useState<SessionWork[]>([]);
   const [error, setError] = useState<string | null>(null);
   // Пока файл готовится, кнопки заблокированы: PDF на большом занятии
   // собирается не мгновенно, а повторные щелчки скачали бы его дважды.
@@ -78,7 +153,16 @@ export function TeacherReportPage() {
       .report(sessionId)
       .then(setReport)
       .catch((e) => setError(e instanceof Error ? e.message : 'Не удалось построить отчёт'));
+    teacherApi.sessionWorks(sessionId).then(setWorks).catch(() => undefined);
   }, [sessionId]);
+
+  // Сохранённое примечание подменяем в списке, а не перезагружаем отчёт:
+  // иначе набранный в соседних полях текст пропал бы.
+  const replaceWork = useCallback((saved: SessionWork) => {
+    setWorks((current) =>
+      current.map((w) => (w.attempt_id === saved.attempt_id ? saved : w)),
+    );
+  }, []);
 
   if (error) return <div className="alert">{error}</div>;
   if (!report) return <div className="empty">Загрузка отчёта…</div>;
@@ -142,6 +226,13 @@ export function TeacherReportPage() {
           hint="доля карточек"
         />
         <Stat label="Замечаний к грамматике" value={String(report.grammar_issues)} />
+        <Stat
+          label="Прошли порог"
+          value={`${report.passed_students} / ${report.passed_students + report.failed_students}`}
+          hint={`зачёт от ${Math.round(report.pass_score * 100)} баллов при ${
+            report.max_critical_violations
+          } критических`}
+        />
       </div>
 
       <h2 className="section-heading">Выводы по группе</h2>
@@ -171,6 +262,8 @@ export function TeacherReportPage() {
             <th>Завершено</th>
             <th>Средний балл</th>
             <th>Просрочек</th>
+            <th>Критических</th>
+            <th>Зачёт</th>
           </tr>
         </thead>
         <tbody>
@@ -193,10 +286,34 @@ export function TeacherReportPage() {
                 )}
               </td>
               <td>{student.overdue}</td>
+              <td>{student.critical}</td>
+              <td>
+                {student.passed === null ? (
+                  <span className="chip chip--neutral">нет работ</span>
+                ) : (
+                  <span className={student.passed ? 'chip chip--ok' : 'chip chip--danger'}>
+                    {student.passed ? 'зачтено' : 'не зачтено'}
+                  </span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      <h2 className="section-heading">Обратная связь по работам</h2>
+      <p className="page-hint">
+        Автоматический разбор говорит, что нарушено, но не говорит, что делать
+        обучающемуся дальше. Примечание к работе он увидит в разборе карточки
+        и в своём личном кабинете; автор и время сохраняются в журнале аудита.
+      </p>
+      {works.length === 0 ? (
+        <div className="empty">Работ по этому занятию пока нет.</div>
+      ) : (
+        works.map((work) => (
+          <WorkFeedback key={work.attempt_id} work={work} onSaved={replaceWork} />
+        ))
+      )}
     </>
   );
 }

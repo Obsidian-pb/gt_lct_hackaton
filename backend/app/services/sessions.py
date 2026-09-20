@@ -74,6 +74,14 @@ def start(session: TrainingSession, now: datetime | None = None) -> list[Attempt
         # в одной и той же последовательности и подсказывают друг другу.
         order = list(approved)
         random.Random(f"{session.id}-{student.id}").shuffle(order)
+        # Раздача по уровням сложности: карточки поступают от простых
+        # к сложным. Сортировка устойчива, поэтому внутри одного уровня
+        # сохраняется перемешанный порядок и подсказать соседу по-прежнему
+        # нечего. Адаптивности по ходу занятия ТЗ не требует, а уровень
+        # задания преподаватель выбирает сам при подборе состава.
+        # «or 0» — у сценария, ещё не сохранённого в базу, уровень не проставлен:
+        # умолчание колонки срабатывает только при записи.
+        order.sort(key=lambda scenario: scenario.difficulty or 0)
         times = plan_issue_times(moment, len(order), session.call_interval_seconds)
         for scenario, issued_at in zip(order, times):
             attempt = Attempt(

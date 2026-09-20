@@ -258,4 +258,47 @@ export const materialsApi = {
   // только на случай, если заголовок потеряется на обратном прокси.
   download: (id: number, fallbackName: string) =>
     download(`/api/materials/${id}/file`, fallbackName),
+// --- Доработки кабинета преподавателя ---------------------------------------
+// Файл общий и правится только дописыванием в конец, поэтому новые вызовы
+// собраны отдельным объектом, а не добавлены в api выше, а типы для них
+// импортированы отдельной строкой, а не в общий список в начале файла.
+import type { GrammarCheck, SessionWork } from './types';
+
+export const teacherApi = {
+  /** Принудительная проверка грамматики текста сценария. Ничего не меняет. */
+  checkGrammar: (scenarioId: number) =>
+    request<GrammarCheck>(`/api/teacher/scenarios/${scenarioId}/grammar`, {
+      method: 'POST',
+    }),
+  /** Сценарии нужного уровня сложности — для подбора состава занятия. */
+  scenariosByDifficulty: (approved: boolean, mode: string, difficulty: number | null) => {
+    const query = new URLSearchParams({ approved: String(approved), mode });
+    if (difficulty !== null) query.set('difficulty', String(difficulty));
+    return request<Scenario[]>(`/api/teacher/scenarios?${query.toString()}`);
+  },
+  /**
+   * Создание занятия вместе с критериями успешности. Повторяет api.createSession
+   * не по прихоти: тип тела там перечисляет поля поимённо, а дописывать в него
+   * новые нельзя — файл общий и правится только добавлением в конец.
+   */
+  createSession: (body: {
+    title: string;
+    mode: string;
+    pickup_deadline_seconds: number;
+    handling_deadline_seconds: number;
+    call_interval_seconds: number;
+    pass_score: number;
+    max_critical_violations: number;
+  }) =>
+    request<TrainingSession>('/api/teacher/sessions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  sessionWorks: (sessionId: number) =>
+    request<SessionWork[]>(`/api/teacher/sessions/${sessionId}/works`),
+  leaveFeedback: (attemptId: number, text: string) =>
+    request<SessionWork>(`/api/teacher/attempts/${attemptId}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
 };

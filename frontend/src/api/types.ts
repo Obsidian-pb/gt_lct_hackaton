@@ -309,4 +309,64 @@ export interface Material {
 
 export interface MaterialDetail extends Material {
   body: string | null;
+// --- Доработки кабинета преподавателя ---------------------------------------
+// Файл общий, правится только дописыванием в конец, поэтому поля к уже
+// описанным сущностям добавлены слиянием объявлений: TypeScript соединяет
+// одноимённые интерфейсы одного модуля в один тип.
+
+/** Замечания к тексту сценария после принудительной проверки грамматики. */
+export interface GrammarCheck {
+  scenario_id: number;
+  issues: string[];
+  checked_fields: string[];
+}
+
+/** Работа обучающегося глазами преподавателя — строка для обратной связи. */
+export interface SessionWork {
+  attempt_id: number;
+  student_id: number;
+  student_name: string;
+  scenario_title: string;
+  finished_at: string | null;
+  score: number | null;
+  violations: number;
+  critical: number;
+  teacher_feedback: string | null;
+  teacher_feedback_at: string | null;
+  teacher_feedback_by: string | null;
+}
+
+export interface Evaluation {
+  teacher_feedback: string | null;
+  teacher_feedback_at: string | null;
+  teacher_feedback_by: string | null;
+}
+
+export interface Work {
+  teacher_feedback: string | null;
+  teacher_feedback_by: string | null;
+}
+
+export interface Scenario {
+  /** Режим обучения: в подборе состава занятия карточки чужого режима не нужны. */
+  mode: string;
+}
+
+export interface TrainingSession {
+  /** Критерии успешности занятия: порог балла и допустимые критические нарушения. */
+  pass_score: number;
+  max_critical_violations: number;
+}
+
+export interface StudentResult {
+  critical: number;
+  /** null — завершённых работ нет, о зачёте судить не по чему. */
+  passed: boolean | null;
+}
+
+export interface Report {
+  pass_score: number;
+  max_critical_violations: number;
+  passed_students: number;
+  failed_students: number;
 }
