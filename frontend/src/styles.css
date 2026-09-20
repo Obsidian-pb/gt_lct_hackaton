@@ -1040,3 +1040,51 @@ button {
     box-shadow: 0 0 0 6px rgb(179 38 30 / 0%);
   }
 }
+
+/* --- Решение по вызову ---------------------------------------------------- */
+
+/* Три равнозначных варианта в ряд: оператор выбирает один из них до опросной
+   карты, и ни один не должен выглядеть предпочтительным. */
+.outcomes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.outcome:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.outcome:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.outcome--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.outcome__title {
+  font-weight: 600;
+}
+
+.outcome__hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}

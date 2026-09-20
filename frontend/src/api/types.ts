@@ -122,6 +122,13 @@ export interface SurveyOption {
   incident_type: string | null;
 }
 
+/**
+ * Что оператор решает сделать с обращением. Классификация — не единственный
+ * правильный ответ: происшествие в другом субъекте передают по
+ * принадлежности, а обращение, происшествием не являющееся, не регистрируют.
+ */
+export type CallOutcome = 'classify' | 'refer' | 'reject';
+
 export interface Call {
   attempt_id: number;
   legend: string;
@@ -135,6 +142,8 @@ export interface Call {
   chosen_path: string[];
   entered_address: string | null;
   entered_description: string | null;
+  chosen_outcome: CallOutcome | null;
+  chosen_referral_target: string | null;
   audio_url: string | null;
 }
 
@@ -152,6 +161,9 @@ export interface Classification {
 export interface OperatorEvaluation {
   attempt_id: number;
   score: number;
+  expected_outcome: CallOutcome;
+  chosen_outcome: CallOutcome | null;
+  expected_referral_target: string | null;
   violations: Violation[];
   classification: Classification | null;
   llm_pending: boolean;

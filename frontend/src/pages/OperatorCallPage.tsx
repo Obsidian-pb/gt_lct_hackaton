@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Call, OperatorEvaluation, SurveyOption } from '../api/types';
+import type { Call, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
 import { Timer } from '../components/Timer';
 
 /**
@@ -74,6 +74,79 @@ function CallAudio({ src }: { src: string | null }) {
   );
 }
 
+/**
+ * Первое решение оператора: наше ли это происшествие и происшествие ли вообще.
+ *
+ * Стоит до опросной карты намеренно. Классифицировать вызов из другого
+ * субъекта бессмысленно — в московском классификаторе такого происшествия
+ * нет, — а опросная карта, открытая сразу, подталкивает заполнять её не глядя
+ * на адрес. Экзаменационные билеты проверяют ровно эту привычку.
+ */
+const OUTCOMES: Array<{ value: CallOutcome; title: string; hint: string }> = [
+  {
+    value: 'classify',
+    title: 'Происшествие в Москве',
+    hint: 'Заполнить опросную карту и зарегистрировать карточку',
+  },
+  {
+    value: 'refer',
+    title: 'Другой субъект',
+    hint: 'Передать по принадлежности в систему-112 своего региона',
+  },
+  {
+    value: 'reject',
+    title: 'Не происшествие',
+    hint: 'Обращение не относится к ведению Системы-112',
+  },
+];
+
+function OutcomeChoice({
+  value,
+  target,
+  disabled,
+  onChange,
+  onTarget,
+}: {
+  value: CallOutcome;
+  target: string;
+  disabled: boolean;
+  onChange: (value: CallOutcome) => void;
+  onTarget: (value: string) => void;
+}) {
+  return (
+    <div className="card__block">
+      <div className="card__label">Решение по вызову</div>
+      <div className="outcomes">
+        {OUTCOMES.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            className={`outcome${value === option.value ? ' outcome--active' : ''}`}
+            onClick={() => onChange(option.value)}
+          >
+            <span className="outcome__title">{option.title}</span>
+            <span className="outcome__hint">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+
+      {value === 'refer' && (
+        <div className="field" style={{ maxWidth: 460, marginTop: 12 }}>
+          <label htmlFor="referral">Субъект Российской Федерации</label>
+          <input
+            id="referral"
+            value={target}
+            disabled={disabled}
+            placeholder="Например: Московская область"
+            onChange={(e) => onTarget(e.target.value)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Шаг опросной карты: выбранный признак и варианты следующего уровня. */
 function SurveyStep({
   title,
@@ -122,6 +195,8 @@ export function OperatorCallPage() {
   const [levels, setLevels] = useState<SurveyOption[][]>([]);
   const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
+  const [outcome, setOutcome] = useState<CallOutcome>('classify');
+  const [referral, setReferral] = useState('');
   const [evaluation, setEvaluation] = useState<OperatorEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -158,12 +233,20 @@ export function OperatorCallPage() {
   }, []);
 
   const submit = useCallback(async () => {
-    if (!group) return;
+    // Группа обязательна только там, где вызов положено классифицировать.
+    if (outcome === 'classify' && !group) return;
     setBusy(true);
     setError(null);
     try {
       setEvaluation(
-        await api.classifyCall(attemptId, { group, path, address, description }),
+        await api.classifyCall(attemptId, {
+          outcome,
+          referral_target: referral,
+          group: group ?? '',
+          path,
+          address,
+          description,
+        }),
       );
       setCall(await api.call(attemptId));
     } catch (e) {
@@ -171,7 +254,7 @@ export function OperatorCallPage() {
     } finally {
       setBusy(false);
     }
-  }, [attemptId, group, path, address, description]);
+  }, [attemptId, group, path, address, description, outcome, referral]);
 
   if (error && !call) return <div className="alert">{error}</div>;
   if (!call) return <div className="empty">Загрузка вызова…</div>;
@@ -208,6 +291,15 @@ export function OperatorCallPage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
+        <OutcomeChoice
+          value={outcome}
+          target={referral}
+          disabled={locked}
+          onChange={setOutcome}
+          onTarget={setReferral}
+        />
+
+        {outcome === 'classify' && (
         <div className="card__block">
           <div className="card__label">Опросная карта — классифицируйте происшествие</div>
 
@@ -242,6 +334,7 @@ export function OperatorCallPage() {
             />
           ))}
         </div>
+        )}
 
         <div className="card__block">
           <div className="field">
@@ -269,7 +362,11 @@ export function OperatorCallPage() {
 
           {!locked && (
             <div className="actions">
-              <button className="btn" onClick={submit} disabled={busy || !group}>
+              <button
+                className="btn"
+                onClick={submit}
+                disabled={busy || (outcome === 'classify' && !group)}
+              >
                 {busy ? 'Сохранение…' : 'Сохранить карточку'}
               </button>
             </div>
@@ -282,8 +379,17 @@ export function OperatorCallPage() {
   );
 }
 
+const OUTCOME_NAMES: Record<CallOutcome, string> = {
+  classify: 'зарегистрировать происшествие',
+  refer: 'передать по принадлежности',
+  reject: 'не регистрировать: не происшествие',
+};
+
 function OperatorReport({ evaluation }: { evaluation: OperatorEvaluation }) {
   const classification = evaluation.classification;
+  const outcomeWrong =
+    evaluation.chosen_outcome !== null &&
+    evaluation.chosen_outcome !== evaluation.expected_outcome;
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card__block">
@@ -292,6 +398,28 @@ function OperatorReport({ evaluation }: { evaluation: OperatorEvaluation }) {
           <span className="score__value">{Math.round(evaluation.score * 100)}</span>
           <span className="card__meta">из 100</span>
         </div>
+
+        {outcomeWrong && (
+          <div className="classify-result">
+            <div>
+              <b>Решение по вызову:</b>{' '}
+              <span className="chip chip--danger">
+                {OUTCOME_NAMES[evaluation.chosen_outcome!]}
+              </span>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <b>Следовало:</b>{' '}
+              <span className="chip chip--ok">
+                {OUTCOME_NAMES[evaluation.expected_outcome]}
+              </span>
+              {evaluation.expected_referral_target && (
+                <span className="card__meta" style={{ marginLeft: 8 }}>
+                  в «{evaluation.expected_referral_target}»
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {classification && (
           <div className="classify-result">

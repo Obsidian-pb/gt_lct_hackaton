@@ -39,6 +39,10 @@ class ScenarioOut(BaseModel):
     difficulty: int
     source: str
     expected_primary_status: str
+    # Эталонный исход обращения. Преподаватель обязан видеть, что вызов —
+    # ловушка: иначе он не сможет проверить эталон, а утверждает сценарий он.
+    expected_outcome: str = "classify"
+    referral_target: str | None = None
     is_profile: bool
     required_comment_points: list[str]
     service_name: str

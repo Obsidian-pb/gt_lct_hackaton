@@ -2,6 +2,7 @@ import type {
   AdminUser,
   AuditEvent,
   Call,
+  CallOutcome,
   Card,
   Catalog,
   Evaluation,
@@ -133,7 +134,14 @@ export const api = {
     ),
   classifyCall: (
     id: number,
-    body: { group: string; path: string[]; address: string; description: string },
+    body: {
+      outcome: CallOutcome;
+      referral_target?: string;
+      group: string;
+      path: string[];
+      address: string;
+      description: string;
+    },
   ) =>
     request<OperatorEvaluation>(`/api/operator/calls/${id}/classify`, {
       method: 'POST',

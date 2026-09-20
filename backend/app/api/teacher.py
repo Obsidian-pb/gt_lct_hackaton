@@ -81,6 +81,8 @@ def _to_out(scenario: Scenario) -> ScenarioOut:
         difficulty=scenario.difficulty,
         source=str(scenario.source),
         expected_primary_status=scenario.expected_primary_status,
+        expected_outcome=str(scenario.expected_outcome),
+        referral_target=scenario.referral_target,
         is_profile=scenario.is_profile,
         required_comment_points=list(scenario.required_comment_points or []),
         service_name=scenario.target_service.name,
