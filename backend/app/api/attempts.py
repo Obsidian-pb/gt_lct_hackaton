@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import forbid_admin_to_student_work, get_current_user
 from app.core.db import SessionLocal, get_session
 from app.llm import get_llm_provider
 from app.models.base import as_utc, utcnow
@@ -23,6 +23,7 @@ def _load(attempt_id: int, db: Session, user: User) -> Attempt:
     # Обучающийся не должен видеть работу других обучающихся.
     if user.role is Role.STUDENT and attempt.student_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к этой карточке")
+    forbid_admin_to_student_work(user)
     return attempt
 
 

@@ -4,13 +4,20 @@
 не имеет доступа к результатам обучения и оценкам. Он управляет доступом
 и техническим состоянием, а персональные данные об успеваемости видит
 только преподаватель — это принцип минимальных привилегий.
+
+Второе ограничение того же раздела ТЗ — невмешательство в учебный процесс
+во время активного занятия — проверяется при правке учётной записи, см.
+`_running_session_of`. Необратимого удаления данных в кабинете нет вовсе:
+учётные записи блокируются, а не стираются, и записи журнала аудита не
+удаляются ничем — поэтому требование «не удалять без резервного
+копирования» здесь просто нечему нарушить.
 """
 
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
@@ -18,7 +25,7 @@ from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.security import hash_password
 from app.models.audit import AuditAction, AuditEvent
-from app.models.training import Attempt, Scenario, TrainingSession
+from app.models.training import Attempt, Scenario, SessionState, TrainingSession
 from app.models.user import DispatchService, Role, User
 from app.services import audit
 from app.services.ekp import get_ekp
@@ -79,6 +86,34 @@ class SystemOut(BaseModel):
     sessions_total: int
     attempts_total: int
     audit_events: int
+
+
+def _running_session_of(db: Session, user: User) -> TrainingSession | None:
+    """Идущее занятие, в котором участвует пользователь, иначе None.
+
+    Техническое задание ограничивает администратора в прямом вмешательстве
+    в учебный процесс: «администратор не может менять оценки или сценарии
+    во время активного занятия». Проверка адресная, а не «идёт хоть
+    какое-нибудь занятие»: правка учётной записи постороннего сотрудника
+    идущему занятию не мешает, а запрещать сверх требования — значит
+    мешать администратору делать свою работу.
+
+    Участие определяется и составом занятия, и выданными карточками.
+    Карточка учитывается отдельно, потому что она и есть след занятия
+    у обучающегося: работа уже начата, чем бы ни был заполнен состав.
+    """
+    return db.scalar(
+        select(TrainingSession)
+        .where(
+            TrainingSession.state == SessionState.ACTIVE,
+            or_(
+                TrainingSession.teacher_id == user.id,
+                TrainingSession.students.any(User.id == user.id),
+                TrainingSession.attempts.any(Attempt.student_id == user.id),
+            ),
+        )
+        .limit(1)
+    )
 
 
 def _out(user: User) -> UserOut:
@@ -153,6 +188,24 @@ def update_user(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Нельзя заблокировать собственную учётную запись"
         )
+
+    # Роль и служба — это состав занятия: роль решает, чьи карточки человек
+    # видит, служба — от имени какой ДДС он их отрабатывает. Преподавателю
+    # состав после запуска уже закрыт (см. teacher.update_session), и было бы
+    # странно, если бы администратор менял его в обход. Блокировка,
+    # разблокировка, смена пароля и правка ФИО остаются доступными: первые
+    # три прямо вменены администратору как мера безопасности, последняя
+    # учебного процесса не касается.
+    if ("role" in data and data["role"] != user.role) or (
+        "service_id" in data and data["service_id"] != user.service_id
+    ):
+        running = _running_session_of(db, user)
+        if running is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Идёт занятие «{running.title}»: роль и служба его участника "
+                "меняются только после завершения занятия",
+            )
 
     changed: dict = {}
     if password := data.pop("password", None):
