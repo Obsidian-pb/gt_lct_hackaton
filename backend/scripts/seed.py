@@ -326,6 +326,91 @@ def play(session, student, scenario, plan, issued_at):
     return attempt, evaluation
 
 
+# Название прошедших занятий служит и признаком того, что история уже заведена:
+# повторный запуск не должен наплодить дублей.
+PAST_SESSIONS = (
+    ("Занятие: статусы реагирования, первый подход", 9, "SLOPPY"),
+    ("Занятие: статусы реагирования, повторно", 2, "DILIGENT"),
+)
+
+
+def seed_history(db, teacher, learners, dispatcher_cards, started) -> int:
+    """Заводит два прошедших занятия — историю, по которой виден прогресс.
+
+    Идемпотентна: занятие с таким названием заводится один раз. Благодаря
+    этому историю можно добавить к уже работающему стенду, не пересоздавая
+    базу и не теряя импортированные билеты и журнал аудита.
+    """
+    plans_by_name = {"SLOPPY": SLOPPY, "DILIGENT": DILIGENT}
+    created = 0
+
+    for title, days_ago, plans_name in PAST_SESSIONS:
+        if db.scalar(select(TrainingSession).where(TrainingSession.title == title)):
+            continue
+        plans = plans_by_name[plans_name]
+        past_start = started - timedelta(days=days_ago)
+        past = TrainingSession(
+            title=title,
+            mode=TrainingMode.DISPATCHER,
+            teacher=teacher,
+            state=SessionState.FINISHED,
+            pickup_deadline_seconds=30,
+            handling_deadline_seconds=180,
+            call_interval_seconds=60,
+            started_at=past_start,
+            finished_at=past_start + timedelta(minutes=30),
+        )
+        past.students = list(learners)
+        past.scenarios = list(dispatcher_cards)
+        db.add(past)
+        db.flush()
+
+        for student in learners:
+            for offset, scenario in enumerate(dispatcher_cards):
+                plan = plans.get(scenario.title)
+                if plan is None:
+                    continue
+                # Второй обучающийся ошибается реже: в отчёте преподавателя
+                # должна быть видна разница между людьми, а не один уровень.
+                if student is learners[1] and plans is SLOPPY and offset % 2:
+                    plan = DILIGENT[scenario.title]
+                attempt, evaluation = play(
+                    past, student, scenario, plan, past_start + timedelta(seconds=offset * 60)
+                )
+                db.add_all([attempt, evaluation])
+                created += 1
+    return created
+
+
+def add_history_to_existing() -> None:
+    """Добавляет историю к уже наполненному стенду.
+
+    Отдельная команда нужна потому, что seed целиком пропускается на
+    непустой базе, а ронять рабочую базу ради демонстрационных данных
+    нельзя: в ней импортированные билеты и журнал аудита.
+    """
+    with SessionLocal() as db:
+        teacher = db.scalar(select(User).where(User.role == Role.TEACHER))
+        learners = list(db.scalars(select(User).where(User.role == Role.STUDENT).order_by(User.id)))
+        cards = list(
+            db.scalars(
+                select(Scenario)
+                .where(Scenario.mode == TrainingMode.DISPATCHER)
+                .order_by(Scenario.id)
+            )
+        )
+        if teacher is None or len(learners) < 2 or not cards:
+            print("Стенд не наполнен — сначала запустите seed.py без ключей.")
+            return
+        created = seed_history(db, teacher, learners, cards, utcnow())
+        db.commit()
+    print(
+        f"Добавлено работ: {created}."
+        if created
+        else "История уже заведена, ничего не добавлено."
+    )
+
+
 def seed() -> None:
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.login == "teacher")):
@@ -471,49 +556,7 @@ def seed() -> None:
         draft.scenarios = dispatcher_cards
         db.add(draft)
 
-        # Два прошедших занятия: по ним обучающийся видит свой прогресс,
-        # а преподаватель — динамику группы. Первое занятие проведено слабо,
-        # второе заметно лучше — в кабинете это видно как рост.
-        for number, (title, days_ago, plans) in enumerate(
-            (
-                ("Занятие: статусы реагирования, первый подход", 9, SLOPPY),
-                ("Занятие: статусы реагирования, повторно", 2, DILIGENT),
-            )
-        ):
-            past_start = started - timedelta(days=days_ago)
-            past = TrainingSession(
-                title=title,
-                mode=TrainingMode.DISPATCHER,
-                teacher=teacher,
-                state=SessionState.FINISHED,
-                pickup_deadline_seconds=30,
-                handling_deadline_seconds=180,
-                call_interval_seconds=60,
-                started_at=past_start,
-                finished_at=past_start + timedelta(minutes=30),
-            )
-            past.students = learners
-            past.scenarios = dispatcher_cards
-            db.add(past)
-            db.flush()
-
-            for student in learners:
-                for offset, scenario in enumerate(dispatcher_cards):
-                    plan = plans.get(scenario.title)
-                    if plan is None:
-                        continue
-                    # Второй обучающийся ошибается реже: в отчёте преподавателя
-                    # должна быть видна разница между людьми, а не один уровень.
-                    if student is learners[1] and plans is SLOPPY and offset % 2:
-                        plan = DILIGENT[scenario.title]
-                    attempt, evaluation = play(
-                        past,
-                        student,
-                        scenario,
-                        plan,
-                        past_start + timedelta(seconds=offset * 60),
-                    )
-                    db.add_all([attempt, evaluation])
+        seed_history(db, teacher, learners, dispatcher_cards, started)
 
         db.commit()
 
@@ -524,4 +567,7 @@ def seed() -> None:
 
 
 if __name__ == "__main__":
-    seed()
+    if "--history" in sys.argv:
+        add_history_to_existing()
+    else:
+        seed()
