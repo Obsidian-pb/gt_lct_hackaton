@@ -395,3 +395,92 @@ export interface StudyGroup {
   teacher_name: string;
   students: SessionMember[];
 }
+
+// --- Состояние комплекса ----------------------------------------------------
+// Вид у всех компонентов одинаковый: ok — исправен ли (null, когда судить
+// не по чему), note — объяснение по-русски, остальное — числа для показа.
+
+export interface DatabaseState {
+  ok: boolean;
+  response_ms: number | null;
+  note: string;
+}
+
+export interface LlmState {
+  provider: string;
+  model: string;
+  ok: boolean | null;
+  checked_at: string | null;
+  note: string;
+}
+
+export interface BackupsState {
+  ok: boolean | null;
+  last_success_at: string | null;
+  age_hours: number | null;
+  count: number | null;
+  latest_size_bytes: number | null;
+  last_failure: string | null;
+  note: string;
+}
+
+export interface CpuLoad {
+  percent: number | null;
+  limit_cores: number | null;
+  load_average_1m: number | null;
+  scope: string;
+  note: string;
+}
+
+export interface MemoryLoad {
+  used_bytes: number | null;
+  limit_bytes: number | null;
+  percent: number | null;
+  scope: string;
+  note: string;
+}
+
+export interface DiskLoad {
+  used_bytes: number | null;
+  total_bytes: number | null;
+  percent: number | null;
+  note: string;
+}
+
+export interface SystemHealth {
+  at: string;
+  started_at: string;
+  uptime_seconds: number;
+  database: DatabaseState;
+  llm: LlmState;
+  backups: BackupsState;
+  load: { cpu: CpuLoad; memory: MemoryLoad; disk: DiskLoad };
+  errors_24h: number | null;
+}
+
+/** Одинаковые сбои, сведённые в одну строку отчёта. */
+export interface ErrorGroup {
+  kind: string;
+  message: string;
+  count: number;
+  last_at: string;
+}
+
+export interface ErrorRecord {
+  id: number;
+  at: string;
+  path: string | null;
+  method: string | null;
+  kind: string;
+  message: string;
+  traceback: string | null;
+  actor_login: string | null;
+}
+
+export interface ErrorReport {
+  since: string;
+  hours: number;
+  total: number;
+  groups: ErrorGroup[];
+  recent: ErrorRecord[];
+}

@@ -62,6 +62,15 @@ services:
       GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat}
       GIGACHAT_CA_BUNDLE: ${GIGACHAT_CA_BUNDLE:-}
       GIGACHAT_VERIFY_TLS: ${GIGACHAT_VERIFY_TLS:-true}
+    # Том с копиями подключён только на чтение. Администратор обязан следить
+    # за резервным копированием (ТЗ, раздел 8), а на сервер и в контейнер
+    # backup он не ходит — значит, отметки last-success и last-failure должно
+    # видеть приложение. Именно :ro: приложению нужны только даты и размеры
+    # файлов, самих дампов оно не открывает и писать в каталог не должно —
+    # иначе изъян в приложении дал бы доступ к содержимому всей базы на
+    # запись, а испорченная копия обнаружилась бы в день восстановления.
+    volumes:
+      - db-backups:/backups:ro
     command: >-
       sh -c "python scripts/migrate.py && python scripts/seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
