@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from sqlalchemy import JSON, Boolean, Column, DateTime
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import Float, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import Float, ForeignKey, Integer, LargeBinary, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -20,6 +20,20 @@ class TrainingMode(StrEnum):
 
     DISPATCHER = "dispatcher"
     OPERATOR = "operator"
+
+
+class CallOutcome(StrEnum):
+    """Что оператор Службы 112 обязан сделать с обращением.
+
+    Классификация — не единственный правильный исход, и экзаменационные
+    билеты это проверяют. Происшествие в другом субъекте Москва
+    не обслуживает: его передают по принадлежности, а не заводят карточку.
+    Обращение, которое происшествием не является, не регистрируют вовсе.
+    """
+
+    CLASSIFY = "classify"
+    REFER = "refer"
+    REJECT = "reject"
 
 
 class ScenarioSource(StrEnum):
@@ -109,6 +123,20 @@ class Scenario(Base, TimestampMixin):
     # Замечание преподавателя, по которому система переформирует сценарий.
     teacher_note: Mapped[str | None] = mapped_column(Text)
 
+    # Ожидаемый исход обращения. По умолчанию — классификация: так устроено
+    # подавляющее большинство сценариев, и прежние записи остаются верными.
+    expected_outcome: Mapped[CallOutcome] = mapped_column(
+        SAEnum(CallOutcome, native_enum=False, length=32),
+        default=CallOutcome.CLASSIFY,
+        # В столбце хранится имя элемента, а не значение: так устроены
+        # остальные перечисления схемы (OPERATOR, TICKET), и значение
+        # по умолчанию должно быть записано так же.
+        server_default=CallOutcome.CLASSIFY.name,
+    )
+    # Куда передавать при исходе «передача по принадлежности»: субъект
+    # Российской Федерации, чья система-112 обслуживает этот адрес.
+    referral_target: Mapped[str | None] = mapped_column(String(255))
+
     @property
     def is_approved(self) -> bool:
         return self.approved_at is not None
@@ -137,6 +165,15 @@ class TrainingSession(Base, TimestampMixin):
     # Чем он меньше, тем больше карточек висит одновременно и тем жёстче
     # проверяется умение расставлять приоритеты.
     call_interval_seconds: Mapped[int] = mapped_column(Integer, default=20)
+    # Критерии успешности занятия. Балл ниже порога или больше допустимого
+    # числа критических нарушений — работа не зачтена. Значения по умолчанию
+    # соответствуют прежнему поведению отчёта, где порога не было вовсе.
+    pass_score: Mapped[float] = mapped_column(
+        Float, default=0.7, server_default="0.7"
+    )
+    max_critical_violations: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
 
     teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
     teacher: Mapped[User] = relationship()
@@ -148,6 +185,41 @@ class TrainingSession(Base, TimestampMixin):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="session")
+
+
+class TrainingMaterial(Base, TimestampMixin):
+    """Методический материал справочной базы.
+
+    Техническое задание требует двух вещей сразу: обучающийся должен
+    просматривать инструкции и методические материалы, преподаватель —
+    создавать их и загружать дополнительные ресурсы. Поэтому материал
+    может быть как написанным текстом, так и приложенным файлом,
+    и одно другого не исключает.
+
+    Файл хранится в базе, а не в томе на диске: учебный комплекс работает
+    в изолированном контуре, материалы невелики, а резервная копия базы
+    тогда содержит и их — иначе восстановление вернуло бы ссылки на файлы,
+    которых уже нет.
+    """
+
+    __tablename__ = "training_material"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255))
+    summary: Mapped[str | None] = mapped_column(String(500))
+    body: Mapped[str | None] = mapped_column(Text)
+
+    file_name: Mapped[str | None] = mapped_column(String(255))
+    media_type: Mapped[str | None] = mapped_column(String(128))
+    content: Mapped[bytes | None] = mapped_column(LargeBinary)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+
+    # Черновик виден только автору: незаконченная методичка не должна
+    # попадать к обучающимся, как и неутверждённый сценарий.
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    author_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    author: Mapped[User] = relationship()
 
 
 class Attempt(Base, TimestampMixin):
@@ -178,6 +250,12 @@ class Attempt(Base, TimestampMixin):
     chosen_path: Mapped[list[str]] = mapped_column(JSON, default=list)
     entered_address: Mapped[str | None] = mapped_column(String(500))
     entered_description: Mapped[str | None] = mapped_column(Text)
+    # Какой исход выбрал обучающийся: классифицировать, передать
+    # по принадлежности или отказать в регистрации.
+    chosen_outcome: Mapped[CallOutcome | None] = mapped_column(
+        SAEnum(CallOutcome, native_enum=False, length=32)
+    )
+    chosen_referral_target: Mapped[str | None] = mapped_column(String(255))
 
     events: Mapped[list["StatusEvent"]] = relationship(
         back_populates="attempt",
@@ -225,3 +303,12 @@ class Evaluation(Base, TimestampMixin):
     llm_available: Mapped[bool] = mapped_column(Boolean, default=False)
     llm_summary: Mapped[str | None] = mapped_column(Text)
     grammar_issues: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    # Обратная связь преподавателя по этой работе — то, чего не даёт
+    # автоматический разбор: что именно сказать обучающемуся. Хранится
+    # вместе с автором и временем, потому что оценка, изменённая без следа
+    # в журнале, техническим заданием запрещена.
+    teacher_feedback: Mapped[str | None] = mapped_column(Text)
+    teacher_feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    teacher_feedback_by_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"))
+    teacher_feedback_by: Mapped[User | None] = relationship()
