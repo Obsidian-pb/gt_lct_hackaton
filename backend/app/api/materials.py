@@ -15,15 +15,26 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_teacher
 from app.core.db import get_session
+from app.models.audit import AuditAction
 from app.models.training import TrainingMaterial
 from app.models.user import User
+from app.services import audit
 
 router = APIRouter(prefix="/api/materials", tags=["Справочная база"])
 
@@ -177,6 +188,7 @@ def read(
 @router.post("", response_model=MaterialDetailOut, status_code=status.HTTP_201_CREATED)
 def create(
     payload: MaterialIn,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> MaterialDetailOut:
@@ -189,6 +201,16 @@ def create(
         author=user,
     )
     db.add(material)
+    db.flush()
+    audit.record(
+        db,
+        AuditAction.MATERIAL_CREATED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        detail={"title": material.title},
+        request=request,
+    )
     db.commit()
     return _to_detail(material, user)
 
@@ -197,6 +219,7 @@ def create(
 def edit(
     material_id: int,
     payload: MaterialPatch,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> MaterialDetailOut:
@@ -207,8 +230,20 @@ def edit(
     стирало бы текст материала.
     """
     material = _own(db, material_id, user)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changed = payload.model_dump(exclude_unset=True)
+    for key, value in changed.items():
         setattr(material, key, value)
+    audit.record(
+        db,
+        AuditAction.MATERIAL_UPDATED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        # Сохраняются имена изменённых полей, а не их содержимое: журнал
+        # должен показывать, что правили, не превращаясь в копию материала.
+        detail={"fields": sorted(changed)},
+        request=request,
+    )
     db.commit()
     return _to_detail(material, user)
 
@@ -216,16 +251,30 @@ def edit(
 @router.delete("/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove(
     material_id: int,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> None:
-    db.delete(_own(db, material_id, user))
+    material = _own(db, material_id, user)
+    # Запись делается до удаления: после него ни названия, ни номера
+    # уже не получить, а журнал обязан пережить сам материал.
+    audit.record(
+        db,
+        AuditAction.MATERIAL_DELETED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        detail={"title": material.title},
+        request=request,
+    )
+    db.delete(material)
     db.commit()
 
 
 @router.post("/{material_id}/publish", response_model=MaterialDetailOut)
 def publish(
     material_id: int,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> MaterialDetailOut:
@@ -238,6 +287,15 @@ def publish(
             "Нечего публиковать: в материале нет ни текста, ни приложенного файла",
         )
     material.published = True
+    audit.record(
+        db,
+        AuditAction.MATERIAL_PUBLISHED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        detail={"title": material.title},
+        request=request,
+    )
     db.commit()
     return _to_detail(material, user)
 
@@ -245,12 +303,22 @@ def publish(
 @router.post("/{material_id}/unpublish", response_model=MaterialDetailOut)
 def unpublish(
     material_id: int,
+    request: Request,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> MaterialDetailOut:
     """Снятие с публикации — для устаревшей инструкции, которую ещё переписывают."""
     material = _own(db, material_id, user)
     material.published = False
+    audit.record(
+        db,
+        AuditAction.MATERIAL_UNPUBLISHED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        detail={"title": material.title},
+        request=request,
+    )
     db.commit()
     return _to_detail(material, user)
 
@@ -258,6 +326,7 @@ def unpublish(
 @router.post("/{material_id}/file", response_model=MaterialDetailOut)
 async def upload(
     material_id: int,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
@@ -294,6 +363,15 @@ async def upload(
     material.media_type = media_type
     material.content = content
     material.size_bytes = len(content)
+    audit.record(
+        db,
+        AuditAction.MATERIAL_FILE_UPLOADED,
+        actor=user,
+        object_type="material",
+        object_id=material.id,
+        detail={"file_name": material.file_name, "size_bytes": material.size_bytes},
+        request=request,
+    )
     db.commit()
     return _to_detail(material, user)
 

@@ -190,3 +190,78 @@ def test_удаление_материала(client):
     material_id = create_material(client, teacher)
     assert client.delete(f"/api/materials/{material_id}", headers=teacher).status_code == 204
     assert client.get(f"/api/materials/{material_id}", headers=teacher).status_code == 404
+
+
+# --- Журнал аудита -----------------------------------------------------------
+#
+# ТЗ требует «аудита всех действий пользователей». Загрузка учебных материалов
+# — действие преподавателя: публикация меняет то, что видят обучающиеся,
+# удаление лишает их материала.
+
+
+def audit_actions(client, admin_headers: dict) -> list[str]:
+    response = client.get("/api/admin/audit", headers=admin_headers)
+    assert response.status_code == 200
+    return [row["action"] for row in response.json()]
+
+
+def test_действия_со_справочной_базой_попадают_в_журнал(client):
+    teacher = token(client, "teacher")
+    admin = token(client, "root")
+
+    material = client.post(
+        "/api/materials",
+        json={"title": "Памятка по передаче вызова", "body": "Текст памятки."},
+        headers=teacher,
+    ).json()
+    client.patch(
+        f"/api/materials/{material['id']}",
+        json={"summary": "Коротко о главном"},
+        headers=teacher,
+    )
+    client.post(f"/api/materials/{material['id']}/publish", headers=teacher)
+    client.post(f"/api/materials/{material['id']}/unpublish", headers=teacher)
+    client.delete(f"/api/materials/{material['id']}", headers=teacher)
+
+    actions = audit_actions(client, admin)
+    for expected in (
+        "Создан учебный материал",
+        "Изменён учебный материал",
+        "Учебный материал опубликован",
+        "Учебный материал снят с публикации",
+        "Удалён учебный материал",
+    ):
+        assert expected in actions, f"в журнале нет события «{expected}»"
+
+
+def test_запись_об_удалении_переживает_материал(client):
+    """Название сохраняется в журнале: после удаления его больше неоткуда взять."""
+    teacher = token(client, "teacher")
+    admin = token(client, "root")
+    material = client.post(
+        "/api/materials", json={"title": "Устаревшая инструкция"}, headers=teacher
+    ).json()
+    client.delete(f"/api/materials/{material['id']}", headers=teacher)
+
+    events = client.get("/api/admin/audit", headers=admin).json()
+    deleted = [e for e in events if e["action"] == "Удалён учебный материал"]
+    assert deleted, "события удаления нет"
+    assert deleted[0]["detail"]["title"] == "Устаревшая инструкция"
+    assert deleted[0]["object_id"] == material["id"]
+
+
+def test_загрузка_файла_отмечается_отдельно(client):
+    teacher = token(client, "teacher")
+    admin = token(client, "root")
+    material = client.post(
+        "/api/materials", json={"title": "Схема опросной карты"}, headers=teacher
+    ).json()
+    client.post(
+        f"/api/materials/{material['id']}/file",
+        files={"file": ("схема.txt", b"line", "text/plain")},
+        headers=teacher,
+    )
+    events = client.get("/api/admin/audit", headers=admin).json()
+    uploaded = [e for e in events if e["action"] == "Загружен файл учебного материала"]
+    assert uploaded
+    assert uploaded[0]["detail"]["size_bytes"] == 4
