@@ -83,6 +83,14 @@ class Progress:
     advice: list[str]
 
 
+def _times(count: int) -> str:
+    """«1 раз», «2 раза», «5 раз» — иначе рекомендация читается как машинная."""
+    tail = count % 100
+    if 11 <= tail <= 14:
+        return f"{count} раз"
+    return f"{count} раз" if count % 10 in (0, 1, 5, 6, 7, 8, 9) else f"{count} раза"
+
+
 def _severity_rank(kind: ViolationKind) -> int:
     order = {Severity.CRITICAL: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
     return order[kind.severity]
@@ -107,7 +115,7 @@ def _advice(mistakes: list[Mistake], finished: int, overdue: int, total_pickups:
     # Разбираем сначала критические ошибки: они означают, что служба
     # не выехала бы на происшествие или карточка ушла в отдел контроля.
     for mistake in mistakes[:3]:
-        notes.append(f"«{mistake.title}» — {mistake.count} раз. {mistake.example}")
+        notes.append(f"«{mistake.title}» — {_times(mistake.count)}. {mistake.example}")
 
     if not notes:
         notes.append(

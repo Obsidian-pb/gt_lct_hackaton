@@ -21,6 +21,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.models.base import utcnow  # noqa: E402
 from app.models.training import (  # noqa: E402
     Attempt,
+    StatusEvent,
     Scenario,
     ScenarioSource,
     SessionState,
@@ -28,6 +29,7 @@ from app.models.training import (  # noqa: E402
     TrainingSession,
 )
 from app.models.user import DispatchService, Role, User  # noqa: E402
+from app.services import attempts as attempts_service  # noqa: E402
 from app.services.response_status import ResponseStatus as S  # noqa: E402
 
 SERVICE_NAME = "ДДС района Чертаново Южное"
@@ -196,6 +198,134 @@ CALLS = [
 ]
 
 
+# --- Прошедшие занятия -------------------------------------------------------
+# Без истории личный кабинет обучающегося пуст, и увидеть в нём нечего:
+# ни среднего балла, ни повторяющихся ошибок, ни динамики. Поэтому стенд
+# получает два завершённых занятия.
+#
+# Баллы здесь не проставлены руками. Задан ход работы — когда карточка открыта,
+# какие статусы проставлены и с какими комментариями, — а оценку считает тот же
+# оценщик, что работает на занятии. Иначе в кабинете стояли бы числа, которые
+# не следуют из правил проверки, и первая же придирка это вскрыла бы.
+
+# Ход работы: сколько секунд до открытия карточки, сколько заняла обработка
+# и какие статусы проставлены (статус, комментарий, секунда от поступления).
+SLOPPY = {
+    "Застревание в лифте": {
+        # Опоздание с взятием в работу и отказ без объяснения причины.
+        "pickup": 47,
+        "handling": 60,
+        "events": [(S.REJECTED, None, 50)],
+    },
+    "Сработала пожарная сигнализация": {
+        # Снова опоздание, и принята заявка, которую следовало отклонить:
+        # дом обслуживает управляющая компания.
+        "pickup": 38,
+        "handling": 90,
+        "events": [(S.ACCEPTED, None, 42)],
+    },
+    "Оборван провод во дворе": {
+        # Третье опоздание подряд и отказ от профильного происшествия,
+        # к тому же без комментария.
+        "pickup": 41,
+        "handling": 70,
+        "events": [(S.REJECTED, None, 45)],
+    },
+    "Прорыв трубы с горячей водой": {
+        # Заявка принята, но ход работ в карточку не вносился.
+        "pickup": 15,
+        "handling": 240,
+        "events": [(S.ACCEPTED, None, 20)],
+    },
+    "Посторонние граждане в подвале": {
+        # Статус не проставлен вовсе — карточка ушла в «Не оповещено».
+        "pickup": 12,
+        "handling": 150,
+        "events": [],
+    },
+}
+
+DILIGENT = {
+    "Застревание в лифте": {
+        "pickup": 11,
+        "handling": 65,
+        "events": [
+            (
+                S.REJECTED,
+                "Лифты в доме обслуживает другая организация, "
+                "информация передана в диспетчерскую «Практика».",
+                14,
+            )
+        ],
+    },
+    "Сработала пожарная сигнализация": {
+        "pickup": 9,
+        "handling": 70,
+        "events": [
+            (
+                S.REJECTED,
+                "Дом обслуживает управляющая компания «ПИК», "
+                "информация передана в диспетчерскую управляющей компании.",
+                12,
+            )
+        ],
+    },
+    "Оборван провод во дворе": {
+        "pickup": 13,
+        "handling": 95,
+        "events": [
+            (S.ACCEPTED, None, 16),
+            (S.RESPONSE_STARTED, None, 40),
+            (S.ARRIVED, None, 70),
+            (
+                S.WORK_COMPLETED,
+                "Провод принадлежит «Ростелеком», информация передана "
+                "по принадлежности, провод убран с прохода.",
+                92,
+            ),
+        ],
+    },
+    "Прорыв трубы с горячей водой": {
+        "pickup": 8,
+        "handling": 160,
+        "events": [
+            (S.ACCEPTED, None, 11),
+            (S.RESPONSE_STARTED, None, 35),
+            (S.ARRIVED, None, 80),
+            (S.WORK_IN_PROGRESS, "Работы ведёт аварийная бригада, на месте главный инженер.", 120),
+            (S.WORK_COMPLETED, "Течь устранена, подача горячей воды восстановлена.", 165),
+        ],
+    },
+    "Посторонние граждане в подвале": {
+        "pickup": 10,
+        "handling": 55,
+        "events": [(S.ACCEPTED, "Принято к реагированию, наряд направлен.", 13)],
+    },
+}
+
+
+def play(session, student, scenario, plan, issued_at):
+    """Проигрывает работу обучающегося и считает оценку штатным оценщиком."""
+    attempt = Attempt(
+        session=session,
+        student=student,
+        scenario=scenario,
+        issued_at=issued_at,
+        opened_at=issued_at + timedelta(seconds=plan["pickup"]),
+        finished_at=issued_at + timedelta(seconds=plan["pickup"] + plan["handling"]),
+    )
+    for status, comment, elapsed in plan["events"]:
+        attempt.events.append(
+            StatusEvent(status=str(status), comment=comment, elapsed_seconds=float(elapsed))
+        )
+    attempts_service.finish(attempt, now=attempt.finished_at)
+    evaluation = attempts_service.build_evaluation(attempt)
+    # Языковая модель при наполнении стенда не вызывается: разбор комментария
+    # догружается фоном во время занятия, а здесь ждать нечего.
+    evaluation.llm_pending = False
+    return attempt, evaluation
+
+
 def seed() -> None:
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.login == "teacher")):
@@ -340,6 +470,50 @@ def seed() -> None:
         draft.students = learners
         draft.scenarios = dispatcher_cards
         db.add(draft)
+
+        # Два прошедших занятия: по ним обучающийся видит свой прогресс,
+        # а преподаватель — динамику группы. Первое занятие проведено слабо,
+        # второе заметно лучше — в кабинете это видно как рост.
+        for number, (title, days_ago, plans) in enumerate(
+            (
+                ("Занятие: статусы реагирования, первый подход", 9, SLOPPY),
+                ("Занятие: статусы реагирования, повторно", 2, DILIGENT),
+            )
+        ):
+            past_start = started - timedelta(days=days_ago)
+            past = TrainingSession(
+                title=title,
+                mode=TrainingMode.DISPATCHER,
+                teacher=teacher,
+                state=SessionState.FINISHED,
+                pickup_deadline_seconds=30,
+                handling_deadline_seconds=180,
+                call_interval_seconds=60,
+                started_at=past_start,
+                finished_at=past_start + timedelta(minutes=30),
+            )
+            past.students = learners
+            past.scenarios = dispatcher_cards
+            db.add(past)
+            db.flush()
+
+            for student in learners:
+                for offset, scenario in enumerate(dispatcher_cards):
+                    plan = plans.get(scenario.title)
+                    if plan is None:
+                        continue
+                    # Второй обучающийся ошибается реже: в отчёте преподавателя
+                    # должна быть видна разница между людьми, а не один уровень.
+                    if student is learners[1] and plans is SLOPPY and offset % 2:
+                        plan = DILIGENT[scenario.title]
+                    attempt, evaluation = play(
+                        past,
+                        student,
+                        scenario,
+                        plan,
+                        past_start + timedelta(seconds=offset * 60),
+                    )
+                    db.add_all([attempt, evaluation])
 
         db.commit()
 
