@@ -188,6 +188,27 @@ class OpenAICompatibleProvider:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def probe(self) -> str:
+        """Проверка связи: самый дешёвый запрос, какой понимает модель.
+
+        Именно `/chat/completions`, а не `/models`: список моделей отдают
+        не все локальные серверы, и он не показал бы главного — принят ли
+        ключ и существует ли модель с указанным именем. Ошибки наружу
+        не глушатся намеренно, их разбирает вызывающий.
+        """
+        response = await self._client.post(
+            "/chat/completions",
+            json={
+                "model": self._model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+            headers=await self._auth_headers(),
+        )
+        response.raise_for_status()
+        data = response.json()
+        return str(data.get("model") or self._model)
+
     async def _complete(self, system: str, user: str) -> dict | None:
         payload: dict = {
             "model": self._model,

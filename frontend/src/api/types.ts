@@ -484,3 +484,48 @@ export interface ErrorReport {
   groups: ErrorGroup[];
   recent: ErrorRecord[];
 }
+
+// --- Конфигурация комплекса -------------------------------------------------
+
+/**
+ * Настройка языковой модели. Ключа доступа здесь нет и не будет: сервер
+ * отдаёт только признак `api_key_set`, прочитать сам ключ нельзя никому.
+ */
+export interface LlmSettings {
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key_set: boolean;
+  disable_thinking: boolean;
+  /** Уходят ли тексты обучающихся за пределы комплекса. */
+  external: boolean;
+  timeout_seconds: number;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface LoggingSettings {
+  audit_retention_days: number;
+  level: string;
+  /** Нижняя граница из ТЗ: журнал безопасности хранится не менее полугода. */
+  min_audit_retention_days: number;
+  levels: string[];
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface SystemSettings {
+  llm: LlmSettings;
+  logging: LoggingSettings;
+  providers: string[];
+}
+
+/** Итог проверки связи с моделью — с объяснением, что именно не так. */
+export interface LlmTestResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  external: boolean;
+  detail: string;
+  elapsed_ms: number;
+}

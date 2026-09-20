@@ -14,6 +14,7 @@
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,11 +25,13 @@ from app.api.deps import require_admin
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.security import hash_password
+from app.llm import is_external, probe_llm, reset_llm_provider
 from app.models.audit import AuditAction, AuditEvent, ErrorEvent
 from app.models.training import Attempt, Scenario, SessionState, TrainingSession
 from app.models.user import DispatchService, Role, User
-from app.services import audit, health
+from app.services import audit, health, system_settings
 from app.services.ekp import get_ekp
+from app.services.system_settings import LlmConfig
 
 router = APIRouter(prefix="/api/admin", tags=["Кабинет администратора"])
 
@@ -311,7 +314,9 @@ def system(
         return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
     return SystemOut(
-        llm_provider=settings.llm_provider,
+        # Действующий провайдер, а не значение переменной окружения: сводка
+        # обязана показывать то, чем комплекс работает сейчас.
+        llm_provider=system_settings.llm_config(db).provider,
         ekp_rules=len(get_ekp()),
         response_deadline_seconds=settings.default_response_deadline_seconds,
         users_total=count(User),
@@ -511,4 +516,299 @@ def error_report(
             for row in groups
         ],
         recent=[ErrorOut.model_validate(e) for e in recent],
+    )
+
+
+# --- Конфигурация комплекса --------------------------------------------------
+#
+# Раздел закрывает требование ТЗ «конфигурировать параметры журналирования»
+# и делает выполнимым главное условие поставки: комплекс работает и в
+# изолированном контуре с локальной моделью, и с внешним API. Переключение
+# правкой `.env` с перезапуском контейнера администратору учебного комплекса
+# недоступно — у него есть только браузер.
+
+Provider = Literal["stub", "local", "openai", "gigachat"]
+
+
+class LlmSettingsOut(BaseModel):
+    """Настройка модели в том виде, в каком её можно показать.
+
+    Ключа доступа здесь нет и быть не может — ни при чтении, ни в ответе
+    на сохранение: прочитать его не должен даже тот, кто его задал.
+    Остаётся только признак «задан».
+    """
+
+    provider: str
+    base_url: str
+    model: str
+    api_key_set: bool
+    disable_thinking: bool
+    # Уходят ли тексты обучающихся за пределы комплекса — на это опирается
+    # предупреждение в интерфейсе.
+    external: bool
+    timeout_seconds: float
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+class LoggingSettingsOut(BaseModel):
+    audit_retention_days: int
+    level: str
+    # Нижняя граница из ТЗ и перечень уровней отдаются вместе со значением:
+    # ограничение должно быть видно в интерфейсе до попытки сохранить,
+    # а не только в тексте отказа.
+    min_audit_retention_days: int
+    levels: list[str]
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+class SettingsOut(BaseModel):
+    llm: LlmSettingsOut
+    logging: LoggingSettingsOut
+    providers: list[str]
+
+
+class LlmSettingsIn(BaseModel):
+    provider: Provider
+    base_url: str = Field(default="", max_length=500)
+    model: str = Field(default="", max_length=200)
+    # Пустой ключ означает «не менять». Иначе администратор, поправивший
+    # адрес, стирал бы ключ, сам того не заметив. Для стирания есть
+    # отдельное действие — DELETE /settings/llm/key.
+    api_key: str = Field(default="", max_length=1000)
+    disable_thinking: bool = False
+
+
+class LoggingSettingsIn(BaseModel):
+    audit_retention_days: int
+    level: Literal["ERROR", "WARNING", "INFO", "DEBUG"]
+
+
+class LlmTestIn(BaseModel):
+    """Настройка для проверки связи. Незаполненное берётся из сохранённой."""
+
+    provider: Provider | None = None
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    disable_thinking: bool | None = None
+
+
+class LlmTestOut(BaseModel):
+    ok: bool
+    provider: str
+    model: str
+    external: bool
+    detail: str
+    elapsed_ms: int
+
+
+def _llm_out(db: Session, config: LlmConfig) -> LlmSettingsOut:
+    who = system_settings.authorship(db, system_settings.LLM_KEY)
+    return LlmSettingsOut(
+        provider=config.provider,
+        base_url=config.base_url,
+        model=config.model,
+        api_key_set=bool(config.api_key),
+        disable_thinking=config.disable_thinking,
+        external=is_external(config),
+        timeout_seconds=config.timeout_seconds,
+        updated_at=who.at,
+        updated_by=who.by,
+    )
+
+
+def _logging_out(db: Session, config: system_settings.LoggingConfig) -> LoggingSettingsOut:
+    who = system_settings.authorship(db, system_settings.LOGGING_KEY)
+    return LoggingSettingsOut(
+        audit_retention_days=config.audit_retention_days,
+        level=config.level,
+        min_audit_retention_days=system_settings.MIN_AUDIT_RETENTION_DAYS,
+        levels=list(system_settings.LOG_LEVELS),
+        updated_at=who.at,
+        updated_by=who.by,
+    )
+
+
+def _check_llm_payload(payload: LlmSettingsIn) -> None:
+    """Проверяет, что настройки хватит для обращения к модели.
+
+    Сохранить полупустую настройку означало бы получить молчаливый отказ
+    смысловой проверки на занятии: там недоступность модели намеренно
+    не прерывает оценку, и заметить её было бы неоткуда.
+    """
+    if payload.provider == "stub":
+        return
+    if not payload.model.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Укажите имя модели — то, как её называет сервер модели",
+        )
+    if payload.provider == "gigachat":
+        # Адрес GigaChat задан самим сервисом, проверять в нём нечего.
+        return
+    if not payload.base_url.strip().startswith(("http://", "https://")):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Адрес модели должен начинаться с http:// или https:// "
+            "и оканчиваться на /v1",
+        )
+
+
+@router.get("/settings", response_model=SettingsOut)
+def read_settings(
+    db: Session = Depends(get_session), admin: User = Depends(require_admin)
+) -> SettingsOut:
+    return SettingsOut(
+        llm=_llm_out(db, system_settings.llm_config(db)),
+        logging=_logging_out(db, system_settings.logging_config(db)),
+        providers=list(system_settings.PROVIDERS),
+    )
+
+
+# Обработчик асинхронный намеренно, хотя работает с обычной сессией базы:
+# сброс кеша провайдера откладывает закрытие прежнего HTTP-клиента задачей
+# цикла событий, а в обработчике-функции FastAPI выполняется в отдельном
+# потоке, где цикла нет и закрывать клиент было бы нечем.
+@router.put("/settings/llm", response_model=LlmSettingsOut)
+async def update_llm_settings(
+    payload: LlmSettingsIn,
+    request: Request,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> LlmSettingsOut:
+    _check_llm_payload(payload)
+    config, key_changed = system_settings.save_llm(
+        db,
+        provider=payload.provider,
+        base_url=payload.base_url.strip(),
+        model=payload.model.strip(),
+        api_key=payload.api_key,
+        disable_thinking=payload.disable_thinking,
+        actor=admin,
+    )
+    audit.record(
+        db,
+        AuditAction.SETTINGS_LLM_UPDATED,
+        actor=admin,
+        object_type="setting",
+        detail={
+            "provider": config.provider,
+            "base_url": config.base_url,
+            "model": config.model,
+            "disable_thinking": str(config.disable_thinking),
+            # В журнал попадает только факт смены ключа: сам ключ не должен
+            # оказаться в записи, которая живёт полгода и читается с экрана.
+            "ключ": "изменён" if key_changed else "прежний",
+            "внешний контур": "да" if is_external(config) else "нет",
+        },
+        request=request,
+    )
+    db.commit()
+    # Кеш сбрасывается после фиксации: следующее обращение к модели должно
+    # собрать провайдера уже по сохранённой настройке, без перезапуска.
+    reset_llm_provider()
+    return _llm_out(db, config)
+
+
+@router.post("/settings/llm/key/clear", response_model=LlmSettingsOut)
+async def clear_llm_key(
+    request: Request,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> LlmSettingsOut:
+    """Явное стирание ключа доступа.
+
+    Отдельным действием, а не пустым полем формы: пустое поле означает
+    «не менять», и без такого действия стереть ключ было бы нечем.
+
+    Метод POST, а не DELETE, намеренно: в кабинете администратора удаляющих
+    методов нет вовсе (см. test_admin_limits), и заводить первый ради смены
+    настройки — значит размывать это правило. Стирается здесь не данные
+    комплекса, а один реквизит доступа.
+    """
+    config = system_settings.clear_llm_key(db, actor=admin)
+    audit.record(
+        db,
+        AuditAction.SETTINGS_LLM_KEY_CLEARED,
+        actor=admin,
+        object_type="setting",
+        detail={"provider": config.provider},
+        request=request,
+    )
+    db.commit()
+    reset_llm_provider()
+    return _llm_out(db, config)
+
+
+@router.put("/settings/logging", response_model=LoggingSettingsOut)
+def update_logging_settings(
+    payload: LoggingSettingsIn,
+    request: Request,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> LoggingSettingsOut:
+    if error := system_settings.retention_error(payload.audit_retention_days):
+        # Отказ с причиной, а не безымянная ошибка проверки формы:
+        # администратор должен узнать, что полугодовой срок — требование ТЗ.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, error)
+
+    config = system_settings.save_logging(
+        db,
+        audit_retention_days=payload.audit_retention_days,
+        level=payload.level,
+        actor=admin,
+    )
+    audit.record(
+        db,
+        AuditAction.SETTINGS_LOGGING_UPDATED,
+        actor=admin,
+        object_type="setting",
+        detail={
+            "глубина хранения, суток": str(config.audit_retention_days),
+            "подробность": config.level,
+        },
+        request=request,
+    )
+    db.commit()
+    return _logging_out(db, config)
+
+
+@router.post("/llm/test", response_model=LlmTestOut)
+async def test_llm(
+    payload: LlmTestIn,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> LlmTestOut:
+    """Проверка связи с моделью, в том числе на ещё не сохранённой настройке.
+
+    Без неё администратор сохранил бы неверный адрес и узнал об этом только
+    по итогам занятия: смысловой разбор комментариев при недоступной модели
+    не прерывает оценку, а молча из неё выпадает.
+    """
+    saved = system_settings.llm_config(db)
+    config = LlmConfig(
+        provider=payload.provider or saved.provider,
+        base_url=saved.base_url if payload.base_url is None else payload.base_url.strip(),
+        model=saved.model if payload.model is None else payload.model.strip(),
+        # Пустой ключ и здесь означает «взять сохранённый»: проверять связь
+        # приходится и после правки одного лишь адреса, а ключ из базы
+        # в форму не возвращается — наружу его не отдают.
+        api_key=(payload.api_key or "").strip() or saved.api_key,
+        disable_thinking=(
+            saved.disable_thinking
+            if payload.disable_thinking is None
+            else payload.disable_thinking
+        ),
+        timeout_seconds=saved.timeout_seconds,
+    )
+    result = await probe_llm(config)
+    return LlmTestOut(
+        ok=result.ok,
+        provider=config.provider,
+        model=config.model,
+        external=is_external(config),
+        detail=result.detail,
+        elapsed_ms=result.elapsed_ms,
     )

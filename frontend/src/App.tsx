@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-do
 import { useAuth } from './auth';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminSystemPage } from './pages/AdminSystemPage';
+import { AdminSettingsPage } from './pages/AdminSettingsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { CardListPage } from './pages/CardListPage';
 import { CardPage } from './pages/CardPage';
@@ -38,6 +39,9 @@ function Header({ role }: { role: string }) {
             </NavLink>
             <NavLink to="/system" className={({ isActive }) => (isActive ? 'active' : '')}>
               Состояние
+            </NavLink>
+            <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Конфигурация
             </NavLink>
           </>
         ) : role === 'teacher' ? (
@@ -111,6 +115,7 @@ export default function App() {
               <Route path="/users" element={<AdminUsersPage />} />
               <Route path="/audit" element={<AdminAuditPage />} />
               <Route path="/system" element={<AdminSystemPage />} />
+              <Route path="/settings" element={<AdminSettingsPage />} />
               <Route path="*" element={<Navigate to="/users" replace />} />
             </>
           ) : user.role === 'teacher' ? (

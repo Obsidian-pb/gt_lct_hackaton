@@ -348,3 +348,42 @@ export const monitoringApi = {
   /** Отчёт об ошибках и сбоях за последние `hours` часов. */
   errors: (hours: number) => request<ErrorReport>(`/api/admin/errors?hours=${hours}`),
 };
+
+// --- Конфигурация комплекса -------------------------------------------------
+
+import type { LlmSettings, LlmTestResult, LoggingSettings, SystemSettings } from './types';
+
+export const settingsApi = {
+  read: () => request<SystemSettings>('/api/admin/settings'),
+  /** Пустой api_key означает «не менять»: ключ обратно в форму не приходит. */
+  saveLlm: (body: {
+    provider: string;
+    base_url: string;
+    model: string;
+    api_key: string;
+    disable_thinking: boolean;
+  }) =>
+    request<LlmSettings>('/api/admin/settings/llm', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  clearLlmKey: () =>
+    request<LlmSettings>('/api/admin/settings/llm/key/clear', { method: 'POST' }),
+  saveLogging: (body: { audit_retention_days: number; level: string }) =>
+    request<LoggingSettings>('/api/admin/settings/logging', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  /** Проверка связи на ещё не сохранённой настройке — до её применения. */
+  testLlm: (body: {
+    provider: string;
+    base_url: string;
+    model: string;
+    api_key: string;
+    disable_thinking: boolean;
+  }) =>
+    request<LlmTestResult>('/api/admin/llm/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+};
