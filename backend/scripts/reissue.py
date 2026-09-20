@@ -34,6 +34,13 @@ def reissue() -> None:
             attempt.opened_at = None
             attempt.finished_at = None
             attempt.card_status = CardStatus.REGISTERED
+            # Заполненная оператором 112 карточка тоже очищается, иначе
+            # следующий обучающийся получит вызов с чужой классификацией
+            # и чужим адресом уже в полях.
+            attempt.chosen_group = None
+            attempt.chosen_path = []
+            attempt.entered_address = None
+            attempt.entered_description = None
         db.commit()
         print(f"Перевыдано карточек: {len(attempts)}. Отсчёт норматива начат заново.")
 
