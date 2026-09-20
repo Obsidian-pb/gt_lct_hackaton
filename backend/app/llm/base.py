@@ -54,6 +54,15 @@ class GeneratedScenario:
 class LLMProvider(Protocol):
     name: str
 
+    async def probe(self) -> str:
+        """Проверка связи: короткое обращение к модели.
+
+        В отличие от остальных методов ошибку не глушит — администратору,
+        который настраивает модель из интерфейса, нужна причина отказа.
+        Возвращает имя ответившей модели.
+        """
+        ...
+
     async def review_comment(
         self, *, comment: str, required_points: list[str], context: str
     ) -> CommentReview: ...

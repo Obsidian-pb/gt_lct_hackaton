@@ -20,6 +20,10 @@ from app.llm.base import CommentReview, GeneratedScenario
 class StubProvider:
     name = "stub"
 
+    async def probe(self) -> str:
+        """Проверять нечего: обращаться не к кому, и это не ошибка."""
+        return "без модели"
+
     async def review_comment(
         self, *, comment: str, required_points: list[str], context: str
     ) -> CommentReview:

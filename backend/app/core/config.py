@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     gigachat_ca_bundle: str = ""
     gigachat_verify_tls: bool = True
 
+    # --- Журналирование ----------------------------------------------------
+    # Глубина хранения журнала аудита. Шесть месяцев — нижняя граница из ТЗ,
+    # ниже её значение не принимается ни из окружения, ни из интерфейса.
+    audit_retention_days: int = 180
+    # Подробность журнала приложения: ERROR, WARNING, INFO или DEBUG.
+    log_level: str = "INFO"
+
     ekp_path: Path = BASE_DIR / "data" / "ekp.json"
 
 
