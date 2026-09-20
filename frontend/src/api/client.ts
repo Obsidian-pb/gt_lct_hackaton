@@ -57,6 +57,30 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Файл выгрузки: не JSON, но заголовок авторизации нужен такой же. */
+async function download(path: string, fallbackName: string): Promise<void> {
+  const token = getToken();
+  const response = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new ApiError(`Не удалось выгрузить отчёт (${response.status})`);
+
+  // Имя файла задаёт сервер: в нём номер занятия и дата.
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const ascii = /filename="([^"]+)"/.exec(disposition);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = ascii ? ascii[1] : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Память под blob браузер сам не освобождает, но освобождать её сразу
+  // нельзя: часть браузеров не успевает начать сохранение и обрывает его.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export async function login(username: string, password: string): Promise<void> {
   const body = new URLSearchParams({ username, password });
   const response = await fetch(`${BASE}/api/auth/token`, { method: 'POST', body });
@@ -141,6 +165,8 @@ export const api = {
   monitorSession: (id: number) =>
     request<SessionMonitor>(`/api/teacher/sessions/${id}/monitor`),
   report: (id: number) => request<Report>(`/api/teacher/sessions/${id}/report`),
+  downloadReport: (id: number, format: 'csv' | 'pdf') =>
+    download(`/api/teacher/sessions/${id}/report.${format}`, `report-session-${id}.${format}`),
 
   progress: (studentId?: number) =>
     request<PersonalProgress>(

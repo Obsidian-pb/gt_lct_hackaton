@@ -1,6 +1,6 @@
 """Кабинет преподавателя: настройка среды, сценарии, отчёт о занятии."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ from app.schemas.teacher import (
     StudentResultOut,
 )
 from app.services import audit
+from app.services import export as export_service
 from app.services import report as report_service
 from app.services import sessions as session_service
 from app.services.ekp import get_ekp
@@ -297,20 +298,24 @@ def delete(
     db.commit()
 
 
+def _build_report(session_id: int, db: Session) -> report_service.SessionReport:
+    """Готовый отчёт по занятию — один источник для экрана и для выгрузок."""
+    training = db.get(TrainingSession, session_id)
+    if training is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие не найдено")
+
+    attempts = db.scalars(select(Attempt).where(Attempt.session_id == session_id)).all()
+    return report_service.build(training, list(attempts))
+
+
 @router.get("/sessions/{session_id}/report", response_model=ReportOut)
 def session_report(
     session_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
 ) -> ReportOut:
-    training = db.get(TrainingSession, session_id)
-    if training is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Занятие не найдено")
-
-    attempts = db.scalars(
-        select(Attempt).where(Attempt.session_id == session_id)
-    ).all()
-    data = report_service.build(training, list(attempts))
+    data = _build_report(session_id, db)
+    training = data.session
     return ReportOut(
         session_id=training.id,
         title=training.title,
@@ -339,6 +344,40 @@ def session_report(
         violations=dict(data.violations),
         grammar_issues=data.grammar_issues,
         insights=data.insights,
+    )
+
+
+@router.get("/sessions/{session_id}/report.csv", response_class=Response)
+def session_report_csv(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> Response:
+    """Выгрузка отчёта в CSV — для сводной статистики во внешних системах."""
+    data = _build_report(session_id, db)
+    return Response(
+        content=export_service.build_csv(data),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": export_service.content_disposition(data, "csv")
+        },
+    )
+
+
+@router.get("/sessions/{session_id}/report.pdf", response_class=Response)
+def session_report_pdf(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> Response:
+    """Выгрузка отчёта в PDF — документ для подшивки к занятию."""
+    data = _build_report(session_id, db)
+    return Response(
+        content=export_service.build_pdf(data),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": export_service.content_disposition(data, "pdf")
+        },
     )
 
 

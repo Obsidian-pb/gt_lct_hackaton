@@ -42,6 +42,25 @@ export function TeacherReportPage() {
   const [sessionId, setSessionId] = useState<number | null>(requested);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Пока файл готовится, кнопки заблокированы: PDF на большом занятии
+  // собирается не мгновенно, а повторные щелчки скачали бы его дважды.
+  const [saving, setSaving] = useState<'csv' | 'pdf' | null>(null);
+  // Неудача выгрузки не должна прятать сам отчёт, поэтому она хранится
+  // отдельно от ошибки загрузки страницы.
+  const [savingError, setSavingError] = useState<string | null>(null);
+
+  async function save(format: 'csv' | 'pdf') {
+    if (sessionId == null) return;
+    setSaving(format);
+    setSavingError(null);
+    try {
+      await api.downloadReport(sessionId, format);
+    } catch (e) {
+      setSavingError(e instanceof Error ? e.message : 'Не удалось выгрузить отчёт');
+    } finally {
+      setSaving(null);
+    }
+  }
 
   useEffect(() => {
     api
@@ -89,6 +108,16 @@ export function TeacherReportPage() {
           </select>
         </div>
       )}
+
+      <div className="actions">
+        <button className="btn btn--ghost" disabled={saving !== null} onClick={() => save('csv')}>
+          {saving === 'csv' ? 'Готовим CSV…' : 'Выгрузить в CSV'}
+        </button>
+        <button className="btn btn--ghost" disabled={saving !== null} onClick={() => save('pdf')}>
+          {saving === 'pdf' ? 'Готовим PDF…' : 'Выгрузить в PDF'}
+        </button>
+      </div>
+      {savingError && <div className="alert">{savingError}</div>}
 
       <div className="stats">
         <Stat label="Карточек выдано" value={String(report.total_attempts)} />
