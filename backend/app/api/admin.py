@@ -13,7 +13,7 @@
 копирования» здесь просто нечему нарушить.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,10 +24,10 @@ from app.api.deps import require_admin
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.security import hash_password
-from app.models.audit import AuditAction, AuditEvent
+from app.models.audit import AuditAction, AuditEvent, ErrorEvent
 from app.models.training import Attempt, Scenario, SessionState, TrainingSession
 from app.models.user import DispatchService, Role, User
-from app.services import audit
+from app.services import audit, health
 from app.services.ekp import get_ekp
 
 router = APIRouter(prefix="/api/admin", tags=["Кабинет администратора"])
@@ -321,4 +321,194 @@ def system(
         sessions_total=count(TrainingSession),
         attempts_total=count(Attempt),
         audit_events=count(AuditEvent),
+    )
+
+
+# --- Состояние комплекса -----------------------------------------------------
+#
+# Раздел только на чтение. Он отвечает на один вопрос — «исправен ли комплекс
+# прямо сейчас» — и ничем не управляет: настройки живут отдельно, а смешивать
+# наблюдение с вмешательством на странице, которую открывают при подозрении на
+# аварию, — верный способ усугубить аварию.
+
+
+class DatabaseOut(BaseModel):
+    ok: bool
+    response_ms: float | None
+    note: str
+
+
+class LlmOut(BaseModel):
+    provider: str
+    model: str
+    # None — связь ещё проверяется: проверка идёт фоном, см. services/health.
+    ok: bool | None
+    checked_at: datetime | None
+    note: str
+
+
+class BackupsOut(BaseModel):
+    ok: bool | None
+    last_success_at: datetime | None
+    age_hours: float | None
+    count: int | None
+    latest_size_bytes: int | None
+    last_failure: str | None
+    note: str
+
+
+class CpuOut(BaseModel):
+    percent: float | None
+    limit_cores: float | None
+    load_average_1m: float | None
+    scope: str
+    note: str
+
+
+class MemoryOut(BaseModel):
+    used_bytes: int | None
+    limit_bytes: int | None
+    percent: float | None
+    scope: str
+    note: str
+
+
+class DiskOut(BaseModel):
+    used_bytes: int | None
+    total_bytes: int | None
+    percent: float | None
+    note: str
+
+
+class LoadOut(BaseModel):
+    cpu: CpuOut
+    memory: MemoryOut
+    disk: DiskOut
+
+
+class HealthOut(BaseModel):
+    at: datetime
+    started_at: datetime
+    uptime_seconds: float
+    database: DatabaseOut
+    llm: LlmOut
+    backups: BackupsOut
+    load: LoadOut
+    # None, если сбои не удалось сосчитать: база и есть отказавший компонент.
+    errors_24h: int | None
+
+
+@router.get("/health", response_model=HealthOut)
+def health_state(
+    db: Session = Depends(get_session), admin: User = Depends(require_admin)
+) -> HealthOut:
+    """Состояние компонентов и нагрузка на сервер в реальном времени.
+
+    Отдельно от `/api/health`: там служебная проверка для Docker, которая
+    обязана быть быстрой, безымянной и не ходить никуда лишний раз. Здесь —
+    сводка для человека, и её видит только администратор: время отклика базы,
+    пути и размеры копий — это устройство сервера, обучающемуся и
+    преподавателю знать его незачем.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    database = health.database(db)
+    errors_24h: int | None = None
+    if database["ok"]:
+        errors_24h = (
+            db.scalar(
+                select(func.count()).select_from(ErrorEvent).where(ErrorEvent.at >= since)
+            )
+            or 0
+        )
+
+    return HealthOut(
+        at=datetime.now(timezone.utc),
+        started_at=health.STARTED_AT,
+        uptime_seconds=health.uptime_seconds(),
+        database=DatabaseOut(**database),
+        llm=LlmOut(**health.llm()),
+        backups=BackupsOut(**health.backups()),
+        load=LoadOut(**health.load()),
+        errors_24h=errors_24h,
+    )
+
+
+class ErrorGroupOut(BaseModel):
+    kind: str
+    message: str
+    count: int
+    last_at: datetime
+
+
+class ErrorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    at: datetime
+    path: str | None
+    method: str | None
+    kind: str
+    message: str
+    traceback: str | None
+    actor_login: str | None
+
+
+class ErrorReportOut(BaseModel):
+    since: datetime
+    hours: int
+    total: int
+    groups: list[ErrorGroupOut]
+    recent: list[ErrorOut]
+
+
+@router.get("/errors", response_model=ErrorReportOut)
+def error_report(
+    hours: int = Query(default=24, ge=1, le=24 * 90),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> ErrorReportOut:
+    """Отчёт об ошибках и сбоях за период (ТЗ, раздел 8).
+
+    Главное в отчёте — сводка, а не лента: один и тот же отказ за час даёт
+    сотни записей, и по ленте видно только последнюю минуту. Поэтому сбои
+    сгруппированы по типу и тексту — так сразу видно, что именно повторяется
+    и не прекратилось ли оно. Лента последних записей идёт следом: по ней
+    администратор называет разработчику время, путь и трассировку.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    occurrences = func.count().label("occurrences")
+    last_at = func.max(ErrorEvent.at).label("last_at")
+    groups = db.execute(
+        select(ErrorEvent.kind, ErrorEvent.message, occurrences, last_at)
+        .where(ErrorEvent.at >= since)
+        .group_by(ErrorEvent.kind, ErrorEvent.message)
+        .order_by(occurrences.desc(), last_at.desc())
+        .limit(50)
+    ).all()
+    recent = db.scalars(
+        select(ErrorEvent)
+        .where(ErrorEvent.at >= since)
+        .order_by(ErrorEvent.at.desc(), ErrorEvent.id.desc())
+        .limit(limit)
+    ).all()
+    total = (
+        db.scalar(select(func.count()).select_from(ErrorEvent).where(ErrorEvent.at >= since))
+        or 0
+    )
+
+    return ErrorReportOut(
+        since=since,
+        hours=hours,
+        total=total,
+        groups=[
+            ErrorGroupOut(
+                kind=row.kind,
+                message=row.message,
+                count=row.occurrences,
+                last_at=row.last_at,
+            )
+            for row in groups
+        ],
+        recent=[ErrorOut.model_validate(e) for e in recent],
     )

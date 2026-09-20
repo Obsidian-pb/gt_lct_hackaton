@@ -335,3 +335,16 @@ export const groupsApi = {
   remove: (id: number) =>
     request<void>(`/api/teacher/groups/${id}`, { method: 'DELETE' }),
 };
+
+// --- Состояние комплекса ----------------------------------------------------
+// Файл общий и правится только дописыванием в конец, поэтому раздел вынесен
+// отдельным объектом, а его типы импортированы отдельной строкой.
+
+import type { ErrorReport, SystemHealth } from './types';
+
+export const monitoringApi = {
+  /** Состояние компонентов и нагрузка на сервер на текущий момент. */
+  health: () => request<SystemHealth>('/api/admin/health'),
+  /** Отчёт об ошибках и сбоях за последние `hours` часов. */
+  errors: (hours: number) => request<ErrorReport>(`/api/admin/errors?hours=${hours}`),
+};
