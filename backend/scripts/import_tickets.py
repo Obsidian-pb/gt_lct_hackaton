@@ -27,6 +27,7 @@ from sqlalchemy import select  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
 from app.models.base import utcnow  # noqa: E402
 from app.models.training import (  # noqa: E402
+    CallOutcome,
     Scenario,
     ScenarioSource,
     TrainingMode,
@@ -42,6 +43,49 @@ MATCHES = BACKEND_DIR / "data" / "ticket_rules.json"
 # отвергнута: задымление в торговом центре, названное пожаром, её проходило,
 # потому что слова про торговый центр совпадали, а тип был неверный.
 VERIFIED_MARKS = {"выверено", "исправлено"}
+
+# Вызовы-ловушки: правильное действие по ним — не классификация.
+#
+# Восемнадцать происходят в других субъектах: Москва их не обслуживает,
+# вызов передаётся по принадлежности. Один не является происшествием
+# для Системы-112 и не регистрируется вовсе.
+#
+# Пометка в расшифровке сделана человеком и записана свободно — «Рязань»,
+# «не зона ответственности Москвы». Здесь она приводится к названию субъекта,
+# которое обучающийся и должен назвать. Соответствие задано поимённо, а не
+# выведено разбором строки: ошибиться тут значит научить неверному,
+# и лучше упасть при импорте, чем завести неправильный эталон.
+NOT_AN_INCIDENT = "не является происшествием"
+
+TRAP_SUBJECTS = {
+    "Московская область": "Московская область",
+    "Тульская область": "Тульская область",
+    "Рязанская область": "Рязанская область",
+    "Владимирская область": "Владимирская область",
+    "Волгоградская область": "Волгоградская область",
+    # Записано городом, а обслуживает субъект.
+    "Рязань": "Рязанская область",
+    # Пометка без названия; субъект виден в адресе вызова.
+    "не зона ответственности Москвы": "Волгоградская область",
+}
+
+
+def trap_outcome(call: dict) -> tuple[CallOutcome, str | None]:
+    """Определяет эталонный исход по пометке расшифровщика."""
+    trap = (call.get("trap") or "").strip()
+    if not trap:
+        return CallOutcome.CLASSIFY, None
+    if NOT_AN_INCIDENT in trap:
+        return CallOutcome.REJECT, None
+
+    tail = trap.split("—", 1)[1].strip() if "—" in trap else trap
+    subject = TRAP_SUBJECTS.get(tail)
+    if subject is None:
+        raise SystemExit(
+            f"Неизвестная пометка ловушки: «{trap}». Добавьте субъект "
+            f"в TRAP_SUBJECTS, иначе вызов получит неверный эталон."
+        )
+    return CallOutcome.REFER, subject
 
 
 def main(dry_run: bool) -> None:
@@ -76,13 +120,31 @@ def main(dry_run: bool) -> None:
                 title = f"Билет {ticket['ticket']}, вызов {call['no']}"
                 match = matches.get((ticket["ticket"], call["no"]))
                 key = (ticket["ticket"], call["no"])
-                if match is None or not match.get("rule_number") or key in existing:
+                if key in existing:
                     skipped += 1
                     continue
 
-                rule = ekp.rule(match["rule_number"])
+                outcome, subject = trap_outcome(call)
+                # Ловушке правило классификатора не нужно: в московском ЕКП
+                # происшествия из другого субъекта нет и быть не может.
+                if outcome is CallOutcome.CLASSIFY and (
+                    match is None or not match.get("rule_number")
+                ):
+                    skipped += 1
+                    continue
+
+                rule_number = (
+                    ekp.rule(match["rule_number"]).number
+                    if outcome is CallOutcome.CLASSIFY
+                    else None
+                )
                 existing.add(key)
-                confident = match.get("verified") in VERIFIED_MARKS
+                # У ловушки эталон — не подобранное машиной правило, а решение
+                # не заводить карточку, и оно следует прямо из текста вызова.
+                confident = (
+                    outcome is not CallOutcome.CLASSIFY
+                    or match.get("verified") in VERIFIED_MARKS
+                )
                 # Уточнённый адрес оператор выясняет в разговоре, поэтому
                 # в карточку он попадает как подсказка, а не как данность.
                 address = call["address"]
@@ -93,13 +155,17 @@ def main(dry_run: bool) -> None:
                     title=title,
                     mode=TrainingMode.OPERATOR,
                     incident_type="",  # оператор определяет тип сам
-                    ekp_rule_number=rule.number,
+                    ekp_rule_number=rule_number,
+                    expected_outcome=outcome,
+                    referral_target=subject,
                     address=address,
                     description=call["situation"],
                     caller=call["situation"].split(",")[-1].strip()[:250],
                     target_service=service,
                     expected_primary_status="Принята",
-                    difficulty=2 if confident else 3,
+                    # Ловушки сложнее рядовых вызовов: обучающийся должен
+                    # заметить, что происшествие не наше, до всякой опросной карты.
+                    difficulty=3 if outcome is not CallOutcome.CLASSIFY else (2 if confident else 3),
                     deadline_seconds=180,
                     source=ScenarioSource.TICKET,
                     author=teacher,
