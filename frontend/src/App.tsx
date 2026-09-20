@@ -6,6 +6,8 @@ import { AdminUsersPage } from './pages/AdminUsersPage';
 import { CardListPage } from './pages/CardListPage';
 import { CardPage } from './pages/CardPage';
 import { LoginPage } from './pages/LoginPage';
+import { MaterialsManagePage } from './pages/MaterialsManagePage';
+import { MaterialsPage } from './pages/MaterialsPage';
 import { OperatorCallPage } from './pages/OperatorCallPage';
 import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { StudentProgressPage } from './pages/StudentProgressPage';
@@ -44,6 +46,9 @@ function Header({ role }: { role: string }) {
             <NavLink to="/report" className={({ isActive }) => (isActive ? 'active' : '')}>
               Отчёт
             </NavLink>
+            <NavLink to="/materials" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Справочная база
+            </NavLink>
           </>
         ) : (
           <>
@@ -55,6 +60,9 @@ function Header({ role }: { role: string }) {
             </NavLink>
             <NavLink to="/progress" className={({ isActive }) => (isActive ? 'active' : '')}>
               Мои результаты
+            </NavLink>
+            <NavLink to="/materials" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Справочная база
             </NavLink>
           </>
         )}
@@ -102,6 +110,7 @@ export default function App() {
               <Route path="/sessions" element={<TeacherSessionsPage />} />
               <Route path="/sessions/:id" element={<TeacherSessionPage />} />
               <Route path="/report" element={<TeacherReportPage />} />
+              <Route path="/materials" element={<MaterialsManagePage />} />
               <Route path="*" element={<Navigate to="/scenarios" replace />} />
             </>
           ) : (
@@ -111,6 +120,7 @@ export default function App() {
               <Route path="/calls" element={<OperatorCallsPage />} />
               <Route path="/calls/:id" element={<OperatorCallPage />} />
               <Route path="/progress" element={<StudentProgressPage />} />
+              <Route path="/materials" element={<MaterialsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}

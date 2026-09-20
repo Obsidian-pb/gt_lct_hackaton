@@ -195,3 +195,67 @@ export const api = {
     ),
   auditActions: () => request<string[]>('/api/admin/audit/actions'),
 };
+
+// Импорт типов справочной базы стоит здесь, а не в общем списке наверху:
+// раздел добавлен отдельным блоком, и так его правки не пересекаются
+// с правками остальных разделов в этом же файле.
+import type { Material, MaterialDetail } from './types';
+
+/**
+ * Справочная база учебных материалов.
+ *
+ * Загрузка файла идёт мимо `request`: там к телу подставляется
+ * Content-Type application/json, а multipart обязан нести границу частей,
+ * и её проставляет сам браузер — свой заголовок её бы затёр.
+ */
+async function uploadMaterialFile(id: number, file: File): Promise<MaterialDetail> {
+  const token = getToken();
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${BASE}/api/materials/${id}/file`, {
+    method: 'POST',
+    body: form,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    let detail = `Ошибка ${response.status}`;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      // Тело может быть пустым — оставляем текст по умолчанию.
+    }
+    throw new ApiError(detail);
+  }
+  return (await response.json()) as MaterialDetail;
+}
+
+export const materialsApi = {
+  list: () => request<Material[]>('/api/materials'),
+  read: (id: number) => request<MaterialDetail>(`/api/materials/${id}`),
+  create: (body: { title: string; summary: string | null; body: string | null }) =>
+    request<MaterialDetail>('/api/materials', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: Record<string, unknown>) =>
+    request<MaterialDetail>(`/api/materials/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  remove: async (id: number): Promise<void> => {
+    const token = getToken();
+    const response = await fetch(`${BASE}/api/materials/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    // Ответ на удаление пустой (204), и `request` споткнулся бы о разбор JSON.
+    if (!response.ok) throw new ApiError(`Не удалось удалить материал (${response.status})`);
+  },
+  publish: (id: number) =>
+    request<MaterialDetail>(`/api/materials/${id}/publish`, { method: 'POST' }),
+  unpublish: (id: number) =>
+    request<MaterialDetail>(`/api/materials/${id}/unpublish`, { method: 'POST' }),
+  upload: uploadMaterialFile,
+  // Имя файла приходит с сервера в Content-Disposition; запасное нужно
+  // только на случай, если заголовок потеряется на обратном прокси.
+  download: (id: number, fallbackName: string) =>
+    download(`/api/materials/${id}/file`, fallbackName),
+};

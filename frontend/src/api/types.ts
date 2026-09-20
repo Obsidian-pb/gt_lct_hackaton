@@ -287,3 +287,26 @@ export interface PersonalProgress {
   works: Work[];
   advice: string[];
 }
+
+/**
+ * Материал справочной базы в списке. Текста здесь нет: список открывают,
+ * чтобы выбрать нужное, а не чтобы прочитать всё подряд.
+ */
+export interface Material {
+  id: number;
+  title: string;
+  summary: string | null;
+  file_name: string | null;
+  media_type: string | null;
+  size_bytes: number | null;
+  published: boolean;
+  author_id: number;
+  author_name: string;
+  created_at: string;
+  /** Правку и публикацию сервер разрешает только автору материала. */
+  is_mine: boolean;
+}
+
+export interface MaterialDetail extends Material {
+  body: string | null;
+}
