@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>Что взяли из разбора карточки</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&display=swap">
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+img { max-width: 100%; }
+
+  :root {
+    --ground: #f5f6f8;
+    --surface: #ffffff;
+    --ink: #10151b;
+    --muted: #5a6672;
+    --line: #dde1e7;
+    --accent: #1a4f8a;
+    --accent-soft: #e7eef7;
+    --ok: #1f7a41;
+    --warn: #9a5b00;
+    --danger: #a82b22;
+
+    --serif: "IBM Plex Serif", Georgia, serif;
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1319;
+      --surface: #161c24;
+      --ink: #e7ebf0;
+      --muted: #98a4b2;
+      --line: #28313d;
+      --accent: #7aaae0;
+      --accent-soft: #1a2635;
+      --ok: #6cc38b;
+      --warn: #d9a04a;
+      --danger: #e8837a;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0f1319;
+    --surface: #161c24;
+    --ink: #e7ebf0;
+    --muted: #98a4b2;
+    --line: #28313d;
+    --accent: #7aaae0;
+    --accent-soft: #1a2635;
+    --ok: #6cc38b;
+    --warn: #d9a04a;
+    --danger: #e8837a;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: 40px 72px;
+  }
+
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(30px, 6vw, 42px);
+    line-height: 1.15;
+    margin: 6px 0 0;
+    text-wrap: balance;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-size: 22px;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; max-width: 66ch; }
+
+  section { display: flex; flex-direction: column; gap: 14px; }
+
+  .lede { font-size: 17px; color: var(--muted); }
+
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
+
+  /* Таблицы — основной носитель фактов, поэтому им отдан весь контраст. */
+  .scroll { overflow-x: auto; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  thead th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--ink);
+  }
+
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+
+  /* Предложение — единственный блок с заливкой: он один требует решения. */
+  .proposal {
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  .fact { background: var(--surface); padding: 14px 16px; }
+  .fact__value { font-family: var(--mono); font-size: 22px; font-weight: 500; }
+  .fact__label { font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+  ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; max-width: 66ch; }
+
+  footer { color: var(--muted); font-size: 13px; }
+  footer p { max-width: 66ch; }
+
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Замечания, эпизод 2 · 23 сентября 2026 · до сдачи 6 дней</div>
+    <h1>Что взяли из разбора карточки</h1>
+  </header>
+
+  <p class="lede">
+    21 сентября в <code>workflow/database_remarks.md</code> появился разбор
+    полей карточки происшествия. Разобрали его по пунктам и часть перенесли
+    к себе. Ниже — что взяли, откуда взялись данные, чего не взяли и почему,
+    и ответ на один вопрос, помеченный в разборе как непонятный.
+  </p>
+
+  <hr class="rule">
+
+  <section>
+    <div class="eyebrow">01 · Что взяли</div>
+    <h2>Заявитель: статус и три телефона</h2>
+    <p>
+      Эти два места у нас были слабее всего: заявитель хранился одной строкой
+      «ФИО, телефон», статуса не было вовсе.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Поле</th><th>Было</th><th>Стало</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Заявитель</td>
+            <td>строка «ФИО, телефон»</td>
+            <td>имя отдельно, статус: участник, очевидец, родственник</td>
+          </tr>
+          <tr>
+            <td>Телефоны</td>
+            <td>один, внутри той же строки</td>
+            <td>три: определившийся (АОН), со слов заявителя, для связи на месте</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      В карточке оператора появилось поле «Телефон для связи с заявителем»
+      и новое нарушение <span class="mono">O11</span> — номер не записан или
+      записан чужой.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">02 · Зачем это в тренажёре</div>
+    <h2>Разница между АОН и номером со слов — это упражнение</h2>
+    <p>
+      Три телефона нужны не ради полноты полей. Человек звонит с чужого
+      телефона и просит перезвонить на свой: определившийся номер и названный
+      не совпадают, и записать нужно названный — на определившийся его уже
+      не застать. Это правило теперь в коде, и на него есть проверка.
+    </p>
+    <p>
+      Статус работает так же: участник сообщает о себе, очевидец видит со
+      стороны и может ошибаться в деталях, родственник передаёт с чужих слов
+      и часто не на месте — тогда и нужен третий телефон, для связи на месте.
+    </p>
+    <p>
+      Форму записи номера не проверяем:
+      <span class="mono">916-126-34-71</span>,
+      <span class="mono">8 916 1263471</span> и
+      <span class="mono">+7 (916) 126-34-71</span> — один абонент. Оператор
+      записывает на слух, и придираться к разделителям значит проверять
+      не то.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">03 · Откуда данные</div>
+    <h2>Из расшифровок билетов, а не придуманы</h2>
+    <div class="facts">
+      <div class="fact"><div class="fact__value">96 / 96</div><div class="fact__label">вызовов, где нашёлся телефон заявителя</div></div>
+      <div class="fact"><div class="fact__value">52 / 96</div><div class="fact__label">где удалось определить статус</div></div>
+      <div class="fact"><div class="fact__value">65 / 96</div><div class="fact__label">где в тексте есть имя заявителя</div></div>
+    </div>
+    <p>
+      Статус в билетах записан по-человечески: «(очевидец)», «(прохожий)»,
+      «вызывает супруг», «дочь», «вызывает себе». По этим словам он
+      и определяется — родственник в 22 вызовах, очевидец в 18, участник в 2.
+    </p>
+    <p>
+      Где в расшифровке этого нет — осталось пусто. Подставлять выдуманное
+      нельзя: имя заявителя обучающийся как раз и должен спросить сам, это
+      часть работы оператора.
+    </p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="eyebrow">04 · Ответ на вопрос из разбора</div>
+    <h2>«Дополнительно» — это признаки классификатора</h2>
+    <p>
+      В разборе против блока «Дополнительно» стоит пометка: <i>«тут не понятно
+      — возможно, должны быть булевы поля»</i>, и перечислены три: пострадавшие;
+      нет на месте / отказ от скорой; нет доступа / заблокированные.
+    </p>
+    <p>
+      Это не догадка — это признаки из самого классификатора, и они там уже
+      есть. Всего их семнадцать:
+    </p>
+    <p class="mono" style="font-size: 13px; line-height: 1.8;">
+      пострадавшие · пострадавшие_не_на_месте · нет_доступа · пожар ·
+      газификация · массовое · мед_помощь · угроза_людям · эвакуация ·
+      правонарушение · автомобильный · пешеходный_переход ·
+      перекрытие_движения · тоннель · стройка · объект_из_перечня ·
+      объект_связи
+    </p>
+    <p>
+      И это не просто отметки: <b>они меняют состав оповещаемых служб</b>.
+      У пожара мусора без пострадавших едет только МЧС. Поставьте
+      «пострадавшие» — добавляются МВД и ЦЭМП. Поставьте
+      «пострадавшие не на месте» — скорая, наоборот, исключается.
+    </p>
+    <p>
+      Разбор классификатора у нас готов: 1283 правила, 23 группы, 58 служб,
+      эти 17 признаков. Забирается одним файлом.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">05 · Чего не взяли</div>
+    <h2>Два пункта с оговорками</h2>
+    <ul>
+      <li>
+        <b>Формализация адреса по базе Яндекса и точка на карте.</b> Поля
+        завести можно, а вот геокодер — нет: ТЗ требует работы в изолированном
+        контуре без доступа к внешним сетям. Значит, заполняться они будут
+        руками, и стоит решить, нужны ли они в таком виде.
+      </li>
+      <li>
+        <b>«Информация из карточки ВИС».</b> В разборе рядом стоит
+        <i>«что бы это ни значило»</i>. В техническом задании и в памятке
+        по АРМ-112 такого термина нет — проверяли поиском по обоим документам.
+        Заводить поле под неизвестную сущность рано: стоит уточнить
+        у заказчика.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="eyebrow">06 · Что осталось из разбора</div>
+    <h2>Адрес по частям</h2>
+    <p>
+      Четырнадцать полей вместо одной строки: субъект, округ, район, улица,
+      дом, корпус, строение, квартира, подъезд, этаж, код домофона.
+      Это самая ценная часть разбора для нашей задачи — и самая дорогая.
+    </p>
+    <p>
+      Причина ценности конкретная. Среди экзаменационных вызовов есть такой:
+      «ул. Станционная, дом 28» — города нет вовсе, и правильное действие
+      оператора не угадать регион, а уточнить его у заявителя. С адресом
+      одной строкой мы проверяем это грубо; с разложенным по полям видно,
+      что именно оператор не выяснил.
+    </p>
+  </section>
+
+  <div class="proposal">
+    <div class="eyebrow">Состояние на сейчас</div>
+    <p>
+      Комплекс развёрнут, 261 тест проходит, сверка с техническим заданием —
+      88 требований выполнено, 11 частично, 9 нет (из них семь — объявленные
+      ограничения вроде SIP-телефонии). Код в ветке
+      <span class="mono">ivb/trainer</span>; <code>work</code> не тронут.
+    </p>
+    <p>
+      Готов забрать разложенный адрес следующим шагом — или отдать разбор
+      классификатора, если он пригодится в общей схеме. Скажите, что полезнее.
+    </p>
+  </div>
+
+  <footer>
+    <p>
+      Первая записка — <a href="112_remarks_episode1.html">эпизод 1</a>:
+      состояние двух заделов и предложение, как их сложить.
+    </p>
+  </footer>
+</main>
+</body>
+</html>
