@@ -99,7 +99,7 @@ class ClassifierVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class EventType(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "event_types"
     __table_args__ = (
-        CheckConstraint("code BETWEEN 1 AND 9", name="code_range"),
+        CheckConstraint("code BETWEEN 1 AND 99", name="code_range"),
         {"schema": "catalog"},
     )
 
@@ -137,7 +137,7 @@ class EventFeature2(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("catalog.event_features_1.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(1024))
     description: Mapped[str | None] = mapped_column(Text)
 
 
@@ -153,7 +153,7 @@ class EventFeature3(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("catalog.event_features_2.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(1024))
     description: Mapped[str | None] = mapped_column(Text)
 
 
@@ -193,6 +193,9 @@ class EventClass(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Bas
     event_feature_3_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("catalog.event_features_3.id", ondelete="RESTRICT")
     )
+    feature_1_label: Mapped[str | None] = mapped_column(String(1024))
+    feature_2_label: Mapped[str | None] = mapped_column(String(1024))
+    feature_3_label: Mapped[str | None] = mapped_column(String(1024))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     ekp35_type: Mapped[str | None] = mapped_column(String(512))

@@ -44,8 +44,10 @@ Thumbs.db
 postgres_data/
 pgdata/
 docker-compose.override.yml
+*.yml
 
 # Temporary files
 tmp/
 temp/
 *.tmp
+~$*.xlsx

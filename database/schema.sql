@@ -978,5 +978,23 @@ CREATE TRIGGER trg_event_classes_assign_event_number
 
 UPDATE alembic_version SET version_num='0004_rename_event_feature_1' WHERE alembic_version.version_num = '0003_incident_card_details';
 
+-- Running upgrade 0004_rename_event_feature_1 -> 0005_classifier_import_fields
+
+ALTER TABLE catalog.event_types DROP CONSTRAINT ck_event_types_code_range;
+
+ALTER TABLE catalog.event_types ADD CONSTRAINT ck_event_types_code_range CHECK (code BETWEEN 1 AND 99);
+
+ALTER TABLE catalog.event_features_2 ALTER COLUMN name DROP NOT NULL;
+
+ALTER TABLE catalog.event_features_3 ALTER COLUMN name DROP NOT NULL;
+
+ALTER TABLE catalog.event_classes ADD COLUMN feature_1_label VARCHAR(1024);
+
+ALTER TABLE catalog.event_classes ADD COLUMN feature_2_label VARCHAR(1024);
+
+ALTER TABLE catalog.event_classes ADD COLUMN feature_3_label VARCHAR(1024);
+
+UPDATE alembic_version SET version_num='0005_classifier_import_fields' WHERE alembic_version.version_num = '0004_rename_event_feature_1';
+
 COMMIT;
 

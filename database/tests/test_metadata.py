@@ -52,6 +52,9 @@ def test_event_classifier_structure_is_registered() -> None:
         "event_feature_1_id",
         "event_feature_2_id",
         "event_feature_3_id",
+        "feature_1_label",
+        "feature_2_label",
+        "feature_3_label",
         "main_service_id",
     } <= set(event_class.columns.keys())
 

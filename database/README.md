@@ -11,6 +11,9 @@
 - `alembic/versions/0001_initial_schema.py` — начальная миграция;
 - `alembic/versions/0002_classifier_structure.py` — классификатор происшествий;
 - `alembic/versions/0003_incident_card_details.py` — обязательные поля карточки;
+- `alembic/versions/0004_rename_event_feature_1.py` — первый признак классификатора;
+- `alembic/versions/0005_classifier_import_fields.py` — поля расшифровок и диапазон групп;
+- `scripts/import_classifier.py` — проверка и импорт классификатора из Excel;
 - `scripts/export_schema.py` — повторная генерация SQL-файла из миграции.
 
 Модель поддерживает динамические JSONB-карточки, проверяемые преподавателем,
@@ -25,8 +28,14 @@
 Классификатор хранится как иерархия `event_types → event_features_1 →
 event_features_2 → event_features_3`. Итоговый `event_number` в
 `event_classes` база рассчитывает автоматически по формуле
-`Г × 1 000 000 + группа × 10 000 + признак 2 × 100 + признак 3`.
+`Г × 1 000 000 + признак 1 × 10 000 + признак 2 × 100 + признак 3`.
 После создания номер и определяющая его комбинация неизменяемы.
+
+Название группы происшествий хранится в `event_types.name`. Точные
+расшифровки признаков конкретного события из столбцов G–I исходного
+классификатора хранятся в `event_classes.feature_1_label`,
+`feature_2_label` и `feature_3_label`. Пустая расшифровка сохраняется как
+`NULL`.
 
 Таблица `classifier_versions` и связь `classifier_version_events` позволяют
 зафиксировать полную версию справочника, которая действовала во время учебной
@@ -55,6 +64,31 @@ python -m pip install -e .
 $env:DATABASE_URL = "postgresql+asyncpg://user:password@localhost/system112_trainer"
 python -m alembic upgrade head
 ```
+
+Перед импортом файл проверяется без записи в базу:
+
+```powershell
+python scripts/import_classifier.py
+```
+
+Для загрузки проверенных данных:
+
+```powershell
+$env:DATABASE_URL = "postgresql+asyncpg://user:password@localhost/database"
+python scripts/import_classifier.py --apply
+```
+
+Если PostgreSQL доступен только из Docker-контейнера, можно сформировать
+повторно запускаемый SQL-файл:
+
+```powershell
+python scripts/import_classifier.py --sql-output classifier_import.sql
+```
+
+Импортёр использует только коды A–D, названия групп происшествий и
+расшифровки G–I. Строки с пометкой `Не отображается оператору 112` не
+загружаются. Повторный запуск обновляет существующие записи и не создаёт
+дубликаты.
 
 Для автономного создания базы можно выполнить `schema.sql` через
 `psql`. Схемы `auth`, `catalog`, `content`, `training` и `audit` создаются

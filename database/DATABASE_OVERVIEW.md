@@ -33,6 +33,12 @@
 Г × 1 000 000 + признак 1 × 10 000 + признак 2 × 100 + признак 3
 ```
 
+В `event_types.name` хранится расшифровка группы происшествия `Г`. Поля
+`event_classes.feature_1_label`, `feature_2_label` и `feature_3_label`
+сохраняют точные расшифровки признаков конкретного события. Они могут
+отличаться у разных комбинаций кодов, поэтому не вычисляются по одному коду
+признака. Отсутствующая расшифровка хранится как `NULL`.
+
 ### `content` — шаблоны и карточки
 
 - `event_templates` — темы и инструкции для генерации карточек;
@@ -159,6 +165,9 @@ erDiagram
         uuid event_feature_1_id FK
         uuid event_feature_2_id FK
         uuid event_feature_3_id FK
+        string feature_1_label
+        string feature_2_label
+        string feature_3_label
         uuid main_service_id FK
     }
     classifier_versions {
