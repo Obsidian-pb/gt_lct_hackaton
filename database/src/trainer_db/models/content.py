@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Table,
     Text,
@@ -83,8 +85,11 @@ class EventTemplate(
         {"schema": "content"},
     )
 
-    event_class_id: Mapped[UUID] = mapped_column(
-        ForeignKey("catalog.event_classes.id", ondelete="CASCADE"), nullable=False
+    event_class_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_classes.id", ondelete="SET NULL")
+    )
+    event_type_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_types.id", ondelete="SET NULL")
     )
     topic: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -168,8 +173,29 @@ class ExerciseRevision(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("jsonb_typeof(source_payload) = 'object'", name="source_payload_object"),
         CheckConstraint("jsonb_typeof(trainee_card) = 'object'", name="trainee_card_object"),
         CheckConstraint("jsonb_typeof(ethalon_payload) = 'object'", name="ethalon_payload_object"),
+        CheckConstraint(
+            "classification_status IN ('proposed', 'matched', 'needs_review', 'confirmed')",
+            name="classification_status_values",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(classification_proposal) = 'object'",
+            name="classification_proposal_object",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(additional_attributes) = 'object'",
+            name="additional_attributes_object",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(service_overrides) = 'array'",
+            name="service_overrides_array",
+        ),
         Index("ix_exercise_revisions_source_gin", "source_payload", postgresql_using="gin"),
         Index("ix_exercise_revisions_ethalon_gin", "ethalon_payload", postgresql_using="gin"),
+        Index(
+            "ix_exercise_revisions_classification",
+            "classification_status",
+            "event_class_id",
+        ),
         {"schema": "content"},
     )
 
@@ -189,6 +215,26 @@ class ExerciseRevision(UUIDPrimaryKeyMixin, Base):
     ethalon_payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    event_class_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_classes.id", ondelete="SET NULL")
+    )
+    classification_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="proposed", server_default="proposed"
+    )
+    classification_proposal: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    additional_attributes: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    scenario_override: Mapped[str | None] = mapped_column(String(64))
+    main_service_override_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.services.id", ondelete="SET NULL")
+    )
+    service_overrides: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    override_comment: Mapped[str | None] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="draft", server_default="draft"
     )
@@ -207,4 +253,68 @@ class ExerciseRevision(UUIDPrimaryKeyMixin, Base):
 
     exercise: Mapped[Exercise] = relationship(
         back_populates="revisions", foreign_keys=[exercise_id]
+    )
+    card_details: Mapped[IncidentCardDetails | None] = relationship(
+        back_populates="exercise_revision",
+        cascade="all, delete-orphan",
+        single_parent=True,
+        uselist=False,
+    )
+
+
+class IncidentCardDetails(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "incident_card_details"
+    __table_args__ = (
+        UniqueConstraint("exercise_revision_id"),
+        CheckConstraint(
+            "latitude IS NULL OR latitude BETWEEN -90 AND 90",
+            name="latitude_range",
+        ),
+        CheckConstraint(
+            "longitude IS NULL OR longitude BETWEEN -180 AND 180",
+            name="longitude_range",
+        ),
+        {"schema": "content"},
+    )
+
+    exercise_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("content.exercise_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    registered_by_name: Mapped[str | None] = mapped_column(String(255))
+    controlled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    controlled_by_name: Mapped[str | None] = mapped_column(String(255))
+
+    aon_phone: Mapped[str | None] = mapped_column(String(32))
+    applicant_phone: Mapped[str | None] = mapped_column(String(32))
+    scene_phone: Mapped[str | None] = mapped_column(String(32))
+
+    applicant_full_name: Mapped[str | None] = mapped_column(String(255))
+    applicant_status: Mapped[str | None] = mapped_column(String(128))
+
+    country: Mapped[str | None] = mapped_column(String(128))
+    federal_subject: Mapped[str | None] = mapped_column(String(255))
+    locality: Mapped[str | None] = mapped_column(String(255))
+    address_object: Mapped[str | None] = mapped_column(String(255))
+    administrative_district: Mapped[str | None] = mapped_column(String(255))
+    district: Mapped[str | None] = mapped_column(String(255))
+    street: Mapped[str | None] = mapped_column(String(255))
+    house: Mapped[str | None] = mapped_column(String(32))
+    building: Mapped[str | None] = mapped_column(String(32))
+    structure: Mapped[str | None] = mapped_column(String(32))
+    apartment: Mapped[str | None] = mapped_column(String(32))
+    entrance: Mapped[str | None] = mapped_column(String(32))
+    floor: Mapped[str | None] = mapped_column(String(32))
+    intercom_code: Mapped[str | None] = mapped_column(String(64))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    descriptive_address: Mapped[str | None] = mapped_column(Text)
+
+    incident_description: Mapped[str | None] = mapped_column(Text)
+    vis_information: Mapped[str | None] = mapped_column(Text)
+    control_notes: Mapped[str | None] = mapped_column(Text)
+
+    exercise_revision: Mapped[ExerciseRevision] = relationship(
+        back_populates="card_details"
     )

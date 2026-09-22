@@ -120,6 +120,9 @@ class TrainingSession(
     scoring_profile_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("training.scoring_profiles.id", ondelete="SET NULL")
     )
+    classifier_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.classifier_versions.id", ondelete="RESTRICT")
+    )
     requested_card_count: Mapped[int] = mapped_column(Integer, nullable=False)
     starting_difficulty: Mapped[str] = mapped_column(String(16), nullable=False)
     current_difficulty: Mapped[str] = mapped_column(String(16), nullable=False)

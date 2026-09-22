@@ -545,5 +545,438 @@ INSERT INTO training.scoring_rules
 
 INSERT INTO alembic_version (version_num) VALUES ('0001_initial_schema') RETURNING alembic_version.version_num;
 
+-- Running upgrade 0001_initial_schema -> 0002_classifier_structure
+
+CREATE TABLE catalog.classifier_versions (
+    id UUID NOT NULL, 
+    version_number INTEGER NOT NULL, 
+    name VARCHAR(255) NOT NULL, 
+    source_name VARCHAR(512), 
+    description TEXT, 
+    is_active BOOLEAN DEFAULT false NOT NULL, 
+    published_by UUID, 
+    published_at TIMESTAMP WITH TIME ZONE, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_classifier_versions PRIMARY KEY (id), 
+    CONSTRAINT uq_classifier_versions_version_number UNIQUE (version_number), 
+    CONSTRAINT ck_classifier_versions_version_number_positive CHECK (version_number > 0), 
+    CONSTRAINT fk_classifier_versions_published_by_users FOREIGN KEY(published_by) REFERENCES auth.users (id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX uq_classifier_versions_active ON catalog.classifier_versions (is_active) WHERE is_active;
+
+CREATE TABLE catalog.event_types (
+    id UUID NOT NULL, 
+    code SMALLINT NOT NULL, 
+    name VARCHAR(255) NOT NULL, 
+    description TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_event_types PRIMARY KEY (id), 
+    CONSTRAINT uq_event_types_code UNIQUE (code), 
+    CONSTRAINT ck_event_types_code_range CHECK (code BETWEEN 1 AND 9)
+);
+
+CREATE TABLE catalog.event_groups (
+    id UUID NOT NULL, 
+    event_type_id UUID NOT NULL, 
+    code SMALLINT NOT NULL, 
+    statistics_name VARCHAR(512) NOT NULL, 
+    operator_label VARCHAR(512), 
+    description TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_event_groups PRIMARY KEY (id), 
+    CONSTRAINT uq_event_groups_event_type_id UNIQUE (event_type_id, code), 
+    CONSTRAINT ck_event_groups_code_range CHECK (code BETWEEN 0 AND 99), 
+    CONSTRAINT fk_event_groups_event_type_id_event_types FOREIGN KEY(event_type_id) REFERENCES catalog.event_types (id) ON DELETE CASCADE
+);
+
+CREATE TABLE catalog.event_features_2 (
+    id UUID NOT NULL, 
+    event_group_id UUID NOT NULL, 
+    code SMALLINT NOT NULL, 
+    name VARCHAR(1024) NOT NULL, 
+    description TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_event_features_2 PRIMARY KEY (id), 
+    CONSTRAINT uq_event_features_2_event_group_id UNIQUE (event_group_id, code), 
+    CONSTRAINT ck_event_features_2_code_range CHECK (code BETWEEN 0 AND 99), 
+    CONSTRAINT fk_event_features_2_event_group_id_event_groups FOREIGN KEY(event_group_id) REFERENCES catalog.event_groups (id) ON DELETE CASCADE
+);
+
+CREATE TABLE catalog.event_features_3 (
+    id UUID NOT NULL, 
+    event_feature_2_id UUID NOT NULL, 
+    code SMALLINT NOT NULL, 
+    name VARCHAR(1024) NOT NULL, 
+    description TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_event_features_3 PRIMARY KEY (id), 
+    CONSTRAINT uq_event_features_3_event_feature_2_id UNIQUE (event_feature_2_id, code), 
+    CONSTRAINT ck_event_features_3_code_range CHECK (code BETWEEN 0 AND 99), 
+    CONSTRAINT fk_event_features_3_event_feature_2_id_event_features_2 FOREIGN KEY(event_feature_2_id) REFERENCES catalog.event_features_2 (id) ON DELETE CASCADE
+);
+
+ALTER TABLE catalog.event_classes RENAME code TO legacy_code;
+
+ALTER TABLE catalog.event_classes DROP CONSTRAINT uq_event_classes_code;
+
+ALTER TABLE catalog.event_classes ALTER COLUMN legacy_code DROP NOT NULL;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT uq_event_classes_legacy_code UNIQUE (legacy_code);
+
+ALTER TABLE catalog.event_classes ADD COLUMN event_number BIGINT;
+
+ALTER TABLE catalog.event_classes ADD COLUMN event_type_id UUID;
+
+ALTER TABLE catalog.event_classes ADD COLUMN event_group_id UUID;
+
+ALTER TABLE catalog.event_classes ADD COLUMN event_feature_2_id UUID;
+
+ALTER TABLE catalog.event_classes ADD COLUMN event_feature_3_id UUID;
+
+ALTER TABLE catalog.event_classes ADD COLUMN ekp35_type VARCHAR(512);
+
+ALTER TABLE catalog.event_classes ADD COLUMN scenario_code VARCHAR(64);
+
+ALTER TABLE catalog.event_classes ADD COLUMN main_service_id UUID;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT fk_event_classes_event_type_id_event_types FOREIGN KEY(event_type_id) REFERENCES catalog.event_types (id) ON DELETE RESTRICT;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT fk_event_classes_event_group_id_event_groups FOREIGN KEY(event_group_id) REFERENCES catalog.event_groups (id) ON DELETE RESTRICT;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT fk_event_classes_event_feature_2_id_event_features_2 FOREIGN KEY(event_feature_2_id) REFERENCES catalog.event_features_2 (id) ON DELETE RESTRICT;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT fk_event_classes_event_feature_3_id_event_features_3 FOREIGN KEY(event_feature_3_id) REFERENCES catalog.event_features_3 (id) ON DELETE RESTRICT;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT fk_event_classes_main_service_id_services FOREIGN KEY(main_service_id) REFERENCES catalog.services (id) ON DELETE SET NULL;
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT uq_event_classes_components UNIQUE (event_type_id, event_group_id, event_feature_2_id, event_feature_3_id);
+
+ALTER TABLE catalog.event_classes ADD CONSTRAINT ck_event_classes_classification_complete CHECK (legacy_code IS NOT NULL OR (event_number IS NOT NULL AND event_type_id IS NOT NULL AND event_group_id IS NOT NULL AND event_feature_2_id IS NOT NULL AND event_feature_3_id IS NOT NULL));
+
+CREATE UNIQUE INDEX ix_event_classes_event_number ON catalog.event_classes (event_number);
+
+CREATE TABLE catalog.classifier_version_events (
+    classifier_version_id UUID NOT NULL, 
+    event_class_id UUID NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_classifier_version_events PRIMARY KEY (classifier_version_id, event_class_id), 
+    CONSTRAINT fk_classifier_version_events_classifier_version_id_clas_72a8 FOREIGN KEY(classifier_version_id) REFERENCES catalog.classifier_versions (id) ON DELETE CASCADE, 
+    CONSTRAINT fk_classifier_version_events_event_class_id_event_classes FOREIGN KEY(event_class_id) REFERENCES catalog.event_classes (id) ON DELETE CASCADE
+);
+
+CREATE TABLE catalog.event_class_services (
+    event_class_id UUID NOT NULL, 
+    service_id UUID NOT NULL, 
+    CONSTRAINT pk_event_class_services PRIMARY KEY (event_class_id, service_id), 
+    CONSTRAINT fk_event_class_services_event_class_id_event_classes FOREIGN KEY(event_class_id) REFERENCES catalog.event_classes (id) ON DELETE CASCADE, 
+    CONSTRAINT fk_event_class_services_service_id_services FOREIGN KEY(service_id) REFERENCES catalog.services (id) ON DELETE CASCADE
+);
+
+CREATE FUNCTION catalog.assign_event_number()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+            type_code integer;
+            group_code integer;
+            feature_2_code integer;
+            feature_3_code integer;
+        BEGIN
+            IF TG_OP = 'INSERT'
+               AND NEW.event_type_id IS NULL
+               AND NEW.event_group_id IS NULL
+               AND NEW.event_feature_2_id IS NULL
+               AND NEW.event_feature_3_id IS NULL THEN
+                RAISE EXCEPTION 'A new event class must contain classifier components';
+            END IF;
+
+            IF TG_OP = 'UPDATE'
+               AND OLD.event_number IS NOT NULL
+               AND (OLD.event_type_id, OLD.event_group_id, OLD.event_feature_2_id, OLD.event_feature_3_id)
+                   IS DISTINCT FROM
+                   (NEW.event_type_id, NEW.event_group_id, NEW.event_feature_2_id, NEW.event_feature_3_id) THEN
+                RAISE EXCEPTION 'An event number and its classifier components are immutable';
+            END IF;
+
+            IF NEW.event_type_id IS NULL
+               AND NEW.event_group_id IS NULL
+               AND NEW.event_feature_2_id IS NULL
+               AND NEW.event_feature_3_id IS NULL THEN
+                NEW.event_number := NULL;
+                RETURN NEW;
+            END IF;
+
+            IF NEW.event_type_id IS NULL
+               OR NEW.event_group_id IS NULL
+               OR NEW.event_feature_2_id IS NULL
+               OR NEW.event_feature_3_id IS NULL THEN
+                RAISE EXCEPTION 'All event classifier components must be specified';
+            END IF;
+
+            SELECT event_types.code, event_groups.code,
+                   event_features_2.code, event_features_3.code
+              INTO type_code, group_code, feature_2_code, feature_3_code
+              FROM catalog.event_types
+              JOIN catalog.event_groups
+                ON event_groups.event_type_id = event_types.id
+              JOIN catalog.event_features_2
+                ON event_features_2.event_group_id = event_groups.id
+              JOIN catalog.event_features_3
+                ON event_features_3.event_feature_2_id = event_features_2.id
+             WHERE event_types.id = NEW.event_type_id
+               AND event_groups.id = NEW.event_group_id
+               AND event_features_2.id = NEW.event_feature_2_id
+               AND event_features_3.id = NEW.event_feature_3_id;
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'Event classifier components do not form one hierarchy';
+            END IF;
+
+            NEW.event_number :=
+                type_code * 1000000
+                + group_code * 10000
+                + feature_2_code * 100
+                + feature_3_code;
+            RETURN NEW;
+        END;
+        $$;
+
+CREATE TRIGGER trg_event_classes_assign_event_number
+        BEFORE INSERT OR UPDATE OF event_number, event_type_id, event_group_id,
+            event_feature_2_id, event_feature_3_id
+        ON catalog.event_classes
+        FOR EACH ROW EXECUTE FUNCTION catalog.assign_event_number();
+
+CREATE FUNCTION catalog.prevent_classifier_code_change()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF NEW.code IS DISTINCT FROM OLD.code THEN
+                RAISE EXCEPTION 'Classifier codes are immutable; create a new entry instead';
+            END IF;
+            RETURN NEW;
+        END;
+        $$;
+
+CREATE TRIGGER trg_event_types_immutable_code
+            BEFORE UPDATE OF code ON catalog.event_types
+            FOR EACH ROW EXECUTE FUNCTION catalog.prevent_classifier_code_change();
+
+CREATE TRIGGER trg_event_groups_immutable_code
+            BEFORE UPDATE OF code ON catalog.event_groups
+            FOR EACH ROW EXECUTE FUNCTION catalog.prevent_classifier_code_change();
+
+CREATE TRIGGER trg_event_features_2_immutable_code
+            BEFORE UPDATE OF code ON catalog.event_features_2
+            FOR EACH ROW EXECUTE FUNCTION catalog.prevent_classifier_code_change();
+
+CREATE TRIGGER trg_event_features_3_immutable_code
+            BEFORE UPDATE OF code ON catalog.event_features_3
+            FOR EACH ROW EXECUTE FUNCTION catalog.prevent_classifier_code_change();
+
+ALTER TABLE content.event_templates DROP CONSTRAINT fk_event_templates_event_class_id_event_classes;
+
+ALTER TABLE content.event_templates ALTER COLUMN event_class_id DROP NOT NULL;
+
+ALTER TABLE content.event_templates ADD CONSTRAINT fk_event_templates_event_class_id_event_classes FOREIGN KEY(event_class_id) REFERENCES catalog.event_classes (id) ON DELETE SET NULL;
+
+ALTER TABLE content.event_templates ADD COLUMN event_type_id UUID;
+
+ALTER TABLE content.event_templates ADD CONSTRAINT fk_event_templates_event_type_id_event_types FOREIGN KEY(event_type_id) REFERENCES catalog.event_types (id) ON DELETE SET NULL;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN event_class_id UUID;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN classification_status VARCHAR(16) DEFAULT 'proposed' NOT NULL;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN classification_proposal JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN additional_attributes JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN scenario_override VARCHAR(64);
+
+ALTER TABLE content.exercise_revisions ADD COLUMN main_service_override_id UUID;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN service_overrides JSONB DEFAULT '[]'::jsonb NOT NULL;
+
+ALTER TABLE content.exercise_revisions ADD COLUMN override_comment TEXT;
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT fk_exercise_revisions_event_class_id_event_classes FOREIGN KEY(event_class_id) REFERENCES catalog.event_classes (id) ON DELETE SET NULL;
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT fk_exercise_revisions_main_service_override_id_services FOREIGN KEY(main_service_override_id) REFERENCES catalog.services (id) ON DELETE SET NULL;
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT ck_exercise_revisions_classification_status_values CHECK (classification_status IN ('proposed','matched','needs_review','confirmed'));
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT ck_exercise_revisions_classification_proposal_object CHECK (jsonb_typeof(classification_proposal) = 'object');
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT ck_exercise_revisions_additional_attributes_object CHECK (jsonb_typeof(additional_attributes) = 'object');
+
+ALTER TABLE content.exercise_revisions ADD CONSTRAINT ck_exercise_revisions_service_overrides_array CHECK (jsonb_typeof(service_overrides) = 'array');
+
+CREATE INDEX ix_exercise_revisions_classification ON content.exercise_revisions (classification_status, event_class_id);
+
+ALTER TABLE training.sessions ADD COLUMN classifier_version_id UUID;
+
+ALTER TABLE training.sessions ADD CONSTRAINT fk_sessions_classifier_version_id_classifier_versions FOREIGN KEY(classifier_version_id) REFERENCES catalog.classifier_versions (id) ON DELETE RESTRICT;
+
+UPDATE alembic_version SET version_num='0002_classifier_structure' WHERE alembic_version.version_num = '0001_initial_schema';
+
+-- Running upgrade 0002_classifier_structure -> 0003_incident_card_details
+
+CREATE TABLE content.incident_card_details (
+    id UUID NOT NULL, 
+    exercise_revision_id UUID NOT NULL, 
+    registered_by_name VARCHAR(255), 
+    controlled_at TIMESTAMP WITH TIME ZONE, 
+    controlled_by_name VARCHAR(255), 
+    aon_phone VARCHAR(32), 
+    applicant_phone VARCHAR(32), 
+    scene_phone VARCHAR(32), 
+    applicant_full_name VARCHAR(255), 
+    applicant_status VARCHAR(128), 
+    country VARCHAR(128), 
+    federal_subject VARCHAR(255), 
+    locality VARCHAR(255), 
+    address_object VARCHAR(255), 
+    administrative_district VARCHAR(255), 
+    district VARCHAR(255), 
+    street VARCHAR(255), 
+    house VARCHAR(32), 
+    building VARCHAR(32), 
+    structure VARCHAR(32), 
+    apartment VARCHAR(32), 
+    entrance VARCHAR(32), 
+    floor VARCHAR(32), 
+    intercom_code VARCHAR(64), 
+    latitude NUMERIC(9, 6), 
+    longitude NUMERIC(9, 6), 
+    descriptive_address TEXT, 
+    incident_description TEXT, 
+    vis_information TEXT, 
+    control_notes TEXT, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+    CONSTRAINT pk_incident_card_details PRIMARY KEY (id), 
+    CONSTRAINT uq_incident_card_details_exercise_revision_id UNIQUE (exercise_revision_id), 
+    CONSTRAINT ck_incident_card_details_latitude_range CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90), 
+    CONSTRAINT ck_incident_card_details_longitude_range CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180), 
+    CONSTRAINT fk_incident_card_details_exercise_revision_id_exercise__81fc FOREIGN KEY(exercise_revision_id) REFERENCES content.exercise_revisions (id) ON DELETE CASCADE
+);
+
+CREATE TRIGGER trg_incident_card_details_updated_at
+        BEFORE UPDATE ON content.incident_card_details
+        FOR EACH ROW EXECUTE FUNCTION audit.touch_updated_at();
+
+UPDATE alembic_version SET version_num='0003_incident_card_details' WHERE alembic_version.version_num = '0002_classifier_structure';
+
+-- Running upgrade 0003_incident_card_details -> 0004_rename_event_feature_1
+
+DROP TRIGGER IF EXISTS trg_event_classes_assign_event_number ON catalog.event_classes;
+
+ALTER TRIGGER trg_event_groups_immutable_code ON catalog.event_groups RENAME TO trg_event_features_1_immutable_code;
+
+ALTER TABLE catalog.event_groups RENAME TO event_features_1;
+
+ALTER TABLE catalog.event_features_2 RENAME event_group_id TO event_feature_1_id;
+
+ALTER TABLE catalog.event_classes RENAME event_group_id TO event_feature_1_id;
+
+ALTER TABLE catalog.event_features_1 RENAME CONSTRAINT pk_event_groups TO pk_event_features_1;
+
+ALTER TABLE catalog.event_features_1 RENAME CONSTRAINT uq_event_groups_event_type_id TO uq_event_features_1_event_type_id;
+
+ALTER TABLE catalog.event_features_1 RENAME CONSTRAINT ck_event_groups_code_range TO ck_event_features_1_code_range;
+
+ALTER TABLE catalog.event_features_1 RENAME CONSTRAINT fk_event_groups_event_type_id_event_types TO fk_event_features_1_event_type_id_event_types;
+
+ALTER TABLE catalog.event_features_2 RENAME CONSTRAINT uq_event_features_2_event_group_id TO uq_event_features_2_event_feature_1_id;
+
+ALTER TABLE catalog.event_features_2 RENAME CONSTRAINT fk_event_features_2_event_group_id_event_groups TO fk_event_features_2_event_feature_1_id_event_features_1;
+
+ALTER TABLE catalog.event_classes RENAME CONSTRAINT fk_event_classes_event_group_id_event_groups TO fk_event_classes_event_feature_1_id_event_features_1;
+
+CREATE OR REPLACE FUNCTION catalog.assign_event_number()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+            type_code integer;
+            feature_1_code integer;
+            feature_2_code integer;
+            feature_3_code integer;
+        BEGIN
+            IF TG_OP = 'INSERT'
+               AND NEW.event_type_id IS NULL
+               AND NEW.event_feature_1_id IS NULL
+               AND NEW.event_feature_2_id IS NULL
+               AND NEW.event_feature_3_id IS NULL THEN
+                RAISE EXCEPTION 'A new event class must contain classifier components';
+            END IF;
+
+            IF TG_OP = 'UPDATE'
+               AND OLD.event_number IS NOT NULL
+               AND (OLD.event_type_id, OLD.event_feature_1_id, OLD.event_feature_2_id, OLD.event_feature_3_id)
+                   IS DISTINCT FROM
+                   (NEW.event_type_id, NEW.event_feature_1_id, NEW.event_feature_2_id, NEW.event_feature_3_id) THEN
+                RAISE EXCEPTION 'An event number and its classifier components are immutable';
+            END IF;
+
+            IF NEW.event_type_id IS NULL
+               AND NEW.event_feature_1_id IS NULL
+               AND NEW.event_feature_2_id IS NULL
+               AND NEW.event_feature_3_id IS NULL THEN
+                NEW.event_number := NULL;
+                RETURN NEW;
+            END IF;
+
+            IF NEW.event_type_id IS NULL
+               OR NEW.event_feature_1_id IS NULL
+               OR NEW.event_feature_2_id IS NULL
+               OR NEW.event_feature_3_id IS NULL THEN
+                RAISE EXCEPTION 'All event classifier components must be specified';
+            END IF;
+
+            SELECT event_types.code, event_features_1.code,
+                   event_features_2.code, event_features_3.code
+              INTO type_code, feature_1_code, feature_2_code, feature_3_code
+              FROM catalog.event_types
+              JOIN catalog.event_features_1
+                ON event_features_1.event_type_id = event_types.id
+              JOIN catalog.event_features_2
+                ON event_features_2.event_feature_1_id = event_features_1.id
+              JOIN catalog.event_features_3
+                ON event_features_3.event_feature_2_id = event_features_2.id
+             WHERE event_types.id = NEW.event_type_id
+               AND event_features_1.id = NEW.event_feature_1_id
+               AND event_features_2.id = NEW.event_feature_2_id
+               AND event_features_3.id = NEW.event_feature_3_id;
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'Event classifier components do not form one hierarchy';
+            END IF;
+
+            NEW.event_number :=
+                type_code * 1000000
+                + feature_1_code * 10000
+                + feature_2_code * 100
+                + feature_3_code;
+            RETURN NEW;
+        END;
+        $$;
+
+CREATE TRIGGER trg_event_classes_assign_event_number
+        BEFORE INSERT OR UPDATE OF event_number, event_type_id, event_feature_1_id,
+            event_feature_2_id, event_feature_3_id
+        ON catalog.event_classes
+        FOR EACH ROW EXECUTE FUNCTION catalog.assign_event_number();
+
+UPDATE alembic_version SET version_num='0004_rename_event_feature_1' WHERE alembic_version.version_num = '0003_incident_card_details';
+
 COMMIT;
 
