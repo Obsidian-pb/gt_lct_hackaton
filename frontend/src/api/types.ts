@@ -129,11 +129,19 @@ export interface SurveyOption {
  */
 export type CallOutcome = 'classify' | 'refer' | 'reject';
 
+/**
+ * Кем заявитель приходится происшествию. Участник сообщает о себе, очевидец
+ * видит со стороны, родственник передаёт с чужих слов — и часто не на месте.
+ */
+export type CallerRole = 'participant' | 'witness' | 'relative';
+
 export interface Call {
   attempt_id: number;
   legend: string;
   reported_address: string;
   caller: string;
+  caller_role: CallerRole | null;
+  caller_phone_aon: string | null;
   issued_at: string;
   deadline_seconds: number;
   elapsed_seconds: number;
@@ -144,6 +152,7 @@ export interface Call {
   entered_description: string | null;
   chosen_outcome: CallOutcome | null;
   chosen_referral_target: string | null;
+  entered_caller_phone: string | null;
   audio_url: string | null;
 }
 

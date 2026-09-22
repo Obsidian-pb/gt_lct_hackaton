@@ -36,6 +36,21 @@ class CallOutcome(StrEnum):
     REJECT = "reject"
 
 
+class CallerRole(StrEnum):
+    """Кем заявитель приходится происшествию.
+
+    Участник, очевидец и родственник знают о происшествии разное: участник
+    сообщает о себе, очевидец видит со стороны и может ошибаться в деталях,
+    родственник передаёт с чужих слов и часто не на месте. Оператор обязан
+    это учитывать — от статуса зависит, каким сведениям верить и какой
+    телефон записывать для связи.
+    """
+
+    PARTICIPANT = "participant"
+    WITNESS = "witness"
+    RELATIVE = "relative"
+
+
 class ScenarioSource(StrEnum):
     MANUAL = "manual"
     GENERATED = "generated"
@@ -135,6 +150,28 @@ class Scenario(Base, TimestampMixin):
     address: Mapped[str] = mapped_column(String(500))
     description: Mapped[str] = mapped_column(Text)
     caller: Mapped[str] = mapped_column(String(255), default="")
+    # Кем заявитель приходится происшествию. Пусто у сценариев, заведённых
+    # до появления поля: выдумывать статус задним числом нельзя.
+    caller_role: Mapped[CallerRole | None] = mapped_column(
+        SAEnum(CallerRole, native_enum=False, length=32)
+    )
+    # Три телефона — так устроена настоящая карточка Системы-112.
+    # АОН определяется автоматически при поступлении вызова и оператору
+    # виден сразу. Номер со слов заявителя может от него отличаться:
+    # человек звонит с чужого телефона и просит перезвонить на свой.
+    # Телефон на месте нужен, когда заявитель сам не на месте происшествия.
+    caller_phone_aon: Mapped[str | None] = mapped_column(String(32))
+    caller_phone_stated: Mapped[str | None] = mapped_column(String(32))
+    caller_phone_onsite: Mapped[str | None] = mapped_column(String(32))
+
+    @property
+    def contact_phone(self) -> str | None:
+        """Номер, по которому связываться: со слов заявителя, иначе АОН.
+
+        Порядок именно такой: если заявитель назвал другой номер, значит
+        на АОН его не застать — он звонит с чужого телефона.
+        """
+        return self.caller_phone_stated or self.caller_phone_aon
 
     target_service_id: Mapped[int] = mapped_column(ForeignKey("dispatch_service.id"))
     target_service: Mapped[DispatchService] = relationship()
@@ -281,6 +318,8 @@ class Attempt(Base, TimestampMixin):
     chosen_path: Mapped[list[str]] = mapped_column(JSON, default=list)
     entered_address: Mapped[str | None] = mapped_column(String(500))
     entered_description: Mapped[str | None] = mapped_column(Text)
+    # Телефон для связи, записанный обучающимся со слов заявителя.
+    entered_caller_phone: Mapped[str | None] = mapped_column(String(32))
     # Какой исход выбрал обучающийся: классифицировать, передать
     # по принадлежности или отказать в регистрации.
     chosen_outcome: Mapped[CallOutcome | None] = mapped_column(

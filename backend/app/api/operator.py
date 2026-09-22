@@ -42,6 +42,11 @@ class CallOut(BaseModel):
     legend: str
     reported_address: str
     caller: str
+    # Статус заявителя и номер, определившийся автоматически, оператор видит
+    # сразу — как при поступлении вызова в рабочей системе. Остальное
+    # он выясняет в разговоре.
+    caller_role: str | None
+    caller_phone_aon: str | None
     issued_at: str
     deadline_seconds: int
     elapsed_seconds: float
@@ -52,6 +57,7 @@ class CallOut(BaseModel):
     entered_description: str | None
     chosen_outcome: str | None
     chosen_referral_target: str | None
+    entered_caller_phone: str | None
     # Готовая запись голоса заявителя, если для сценария она озвучена.
     audio_url: str | None
 
@@ -68,6 +74,7 @@ class ClassifyIn(BaseModel):
     path: list[str] = Field(default_factory=list)
     address: str = ""
     description: str = ""
+    caller_phone: str = ""
 
 
 class ClassificationOut(BaseModel):
@@ -131,6 +138,8 @@ def _call(attempt: Attempt) -> CallOut:
         legend=attempt.scenario.description,
         reported_address=attempt.scenario.address,
         caller=attempt.scenario.caller,
+        caller_role=str(attempt.scenario.caller_role) if attempt.scenario.caller_role else None,
+        caller_phone_aon=attempt.scenario.caller_phone_aon,
         issued_at=as_utc(attempt.issued_at).isoformat(),
         deadline_seconds=attempt.scenario.deadline_seconds or DEFAULT_CALL_DEADLINE_SECONDS,
         elapsed_seconds=(reference - as_utc(attempt.issued_at)).total_seconds(),
@@ -141,6 +150,7 @@ def _call(attempt: Attempt) -> CallOut:
         entered_description=attempt.entered_description,
         chosen_outcome=str(attempt.chosen_outcome) if attempt.chosen_outcome else None,
         chosen_referral_target=attempt.chosen_referral_target,
+        entered_caller_phone=attempt.entered_caller_phone,
         audio_url=_audio_url(attempt.scenario),
     )
 
@@ -223,6 +233,7 @@ def classify_call(
     attempt.chosen_path = list(payload.path)
     attempt.entered_address = payload.address.strip() or None
     attempt.entered_description = payload.description.strip() or None
+    attempt.entered_caller_phone = payload.caller_phone.strip() or None
     attempt.chosen_outcome = payload.outcome
     attempt.chosen_referral_target = payload.referral_target.strip() or None
     attempt.finished_at = now
@@ -237,11 +248,13 @@ def classify_call(
             elapsed_seconds=(now - as_utc(attempt.issued_at)).total_seconds(),
             outcome=payload.outcome,
             referral_target=payload.referral_target,
+            caller_phone=payload.caller_phone,
         ),
         Expected(
             outcome=scenario.expected_outcome,
             rule_number=scenario.ekp_rule_number,
             referral_target=scenario.referral_target,
+            contact_phone=scenario.contact_phone,
         ),
         deadline,
     )

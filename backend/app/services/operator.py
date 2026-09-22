@@ -37,6 +37,8 @@ class FilledCard:
     # без исхода — для них подразумевается классификация, как было раньше.
     outcome: CallOutcome = CallOutcome.CLASSIFY
     referral_target: str = ""
+    # Телефон для связи, записанный со слов заявителя.
+    caller_phone: str = ""
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,9 @@ class Expected:
     outcome: CallOutcome
     rule_number: int | None = None
     referral_target: str | None = None
+    # Номер, по которому силы реагирования смогут связаться с заявителем.
+    # None — у сценария телефон не задан, и спрашивать его не за что.
+    contact_phone: str | None = None
 
 
 @dataclass
@@ -76,7 +81,7 @@ class OperatorAssessment:
         penalty = sum(
             SEVERITY_PENALTY[v.kind.severity]
             for v in self.violations
-            if v.code in {"O5", "O6", "O9"}
+            if v.code in {"O5", "O6", "O9", "O11"}
         )
         paperwork = max(0.0, 1.0 - penalty / 2.0)
         overdue = 1.0 if self.elapsed_seconds > self.deadline_seconds else 0.0
@@ -127,6 +132,7 @@ def evaluate(
         result.violations.append(Violation("O5", "Адрес происшествия не внесён в карточку"))
     if not card.description.strip():
         result.violations.append(Violation("O6", "Описание происшествия не внесено"))
+    _check_phone(card, expected, result)
 
     # Превышение ориентира по времени снижает балл, но отдельным нарушением
     # не считается: разговор с заявителем может затянуться по его вине.
@@ -234,6 +240,47 @@ def _check_outcome(card: FilledCard, expected: Expected, result: OperatorAssessm
                     else "отклонено как не являющееся происшествием"
                 ),
                 evidence=card.address.strip() or None,
+            )
+        )
+
+
+def _digits(value: str) -> str:
+    """Только цифры: «916-126-34-71», «8 916 1263471» и «+7 916…» — один номер.
+
+    Придираться к форме записи телефона значит проверять не то: оператор
+    записывает номер на слух, и разделители у каждого свои.
+    """
+    digits = "".join(ch for ch in value if ch.isdigit())
+    # Междугородний и международный префиксы отбрасываются: 8 916… и 7 916…
+    # — тот же абонент.
+    if len(digits) == 11 and digits[0] in {"7", "8"}:
+        return digits[1:]
+    return digits
+
+
+def _check_phone(card: FilledCard, expected: Expected, result: OperatorAssessment) -> None:
+    """Записан ли телефон для связи, и тот ли.
+
+    Проверяется только там, где у сценария телефон есть: у части учебных
+    вызовов он не задан, и требовать его было бы придиркой к пустому месту.
+    """
+    if not expected.contact_phone:
+        return
+
+    answer = _digits(card.caller_phone)
+    if not answer:
+        result.violations.append(
+            Violation("O11", "Телефон для связи с заявителем не внесён в карточку")
+        )
+        return
+
+    if answer != _digits(expected.contact_phone):
+        result.violations.append(
+            Violation(
+                "O11",
+                f"Записан телефон {card.caller_phone.strip()}, "
+                f"заявитель назвал другой",
+                evidence=card.caller_phone.strip(),
             )
         )
 

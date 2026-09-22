@@ -261,3 +261,65 @@ def test_прежние_вызовы_с_номером_правила_работ
     result = evaluate(card(), FIRE_TRASH, DEFAULT_CALL_DEADLINE_SECONDS)
     assert result.violations == []
     assert result.score == 1.0
+
+
+# --- Телефон для связи -------------------------------------------------------
+#
+# Поля заявителя взяты из разбора карточки происшествия, который сделал
+# заказчик: три телефона и статус. Здесь проверяется главное из них —
+# записан ли номер, по которому силы реагирования свяжутся с заявителем.
+
+WITH_PHONE = Expected(
+    outcome=CallOutcome.CLASSIFY,
+    rule_number=FIRE_TRASH,
+    contact_phone="916-126-34-71",
+)
+
+
+def test_телефон_записан_верно():
+    result = evaluate(
+        card(caller_phone="916-126-34-71"), WITH_PHONE, DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert result.violations == []
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["8 916 126 34 71", "+7 (916) 126-34-71", "9161263471", " 916 126 3471 "],
+)
+def test_форма_записи_номера_не_важна(written):
+    """Оператор записывает номер на слух, разделители у каждого свои."""
+    result = evaluate(card(caller_phone=written), WITH_PHONE, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+
+
+def test_телефон_не_записан():
+    result = evaluate(card(caller_phone=""), WITH_PHONE, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert codes(result) == ["O11"]
+    assert "не внесён" in result.violations[0].detail
+
+
+def test_записан_чужой_номер():
+    result = evaluate(
+        card(caller_phone="916-000-00-00"), WITH_PHONE, DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert codes(result) == ["O11"]
+    assert "заявитель назвал другой" in result.violations[0].detail
+
+
+def test_телефон_не_спрашивается_если_его_нет_в_сценарии():
+    """У части учебных вызовов телефона нет — требовать его было бы придиркой."""
+    result = evaluate(card(caller_phone=""), FIRE_TRASH, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+
+
+def test_номер_со_слов_важнее_определившегося():
+    """Заявитель звонит с чужого телефона и называет свой — записывать его."""
+    from app.models.training import Scenario
+
+    scenario = Scenario(
+        caller_phone_aon="495-111-22-33", caller_phone_stated="916-126-34-71"
+    )
+    assert scenario.contact_phone == "916-126-34-71"
+    only_aon = Scenario(caller_phone_aon="495-111-22-33")
+    assert only_aon.contact_phone == "495-111-22-33"

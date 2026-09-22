@@ -27,6 +27,7 @@ from sqlalchemy import select  # noqa: E402
 from app.core.db import SessionLocal  # noqa: E402
 from app.models.base import utcnow  # noqa: E402
 from app.models.training import (  # noqa: E402
+    CallerRole,
     CallOutcome,
     Scenario,
     ScenarioSource,
@@ -70,6 +71,63 @@ TRAP_SUBJECTS = {
 }
 
 
+# Телефон в расшифровке стоит в конце реплики: «…, Иванова И. И., 916-126-34-71».
+# Это номер со слов заявителя — именно его оператор обязан записать для связи.
+PHONE = re.compile(r"(?<!\d)(?:\+?7|8)?[\s(-]*9\d{2}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}(?!\d)")
+
+
+# Кем заявитель приходится происшествию — это в расшифровках билетов есть,
+# только записано по-человечески: «(очевидец)», «вызывает супруг», «дочь»,
+# «вызывает себе». Слова взяты из самих текстов, а не придуманы.
+ROLE_WORDS: tuple[tuple[CallerRole, tuple[str, ...]], ...] = (
+    (
+        CallerRole.RELATIVE,
+        ("мама", "мать", "супруг", "жена", "муж", "дочь", "сын", "брат",
+         "сестра", "отец", "папа", "бабушка", "дедушка", "родственник", "внук"),
+    ),
+    (
+        CallerRole.WITNESS,
+        ("очевидец", "прохожий", "сосед", "работник", "продавец", "охранник",
+         "водитель автобуса", "свидетель", "случайный"),
+    ),
+    (CallerRole.PARTICIPANT, ("вызывает себе", "себе", "пострадавший сам")),
+)
+
+# Имя похоже на ФИО: одно-три слова с заглавной буквы.
+NAME_LIKE = re.compile(r"^[А-ЯЁ][а-яё-]+(\s+[А-ЯЁ][а-яё.-]*){0,2}$")
+
+
+def caller_role_from(text: str) -> CallerRole | None:
+    """Определяет статус заявителя по словам из расшифровки."""
+    lowered = text.lower()
+    for role, words in ROLE_WORDS:
+        if any(word in lowered for word in words):
+            return role
+    return None
+
+
+def caller_from(call: dict) -> tuple[str, str | None, CallerRole | None]:
+    """Выделяет из расшифровки имя заявителя, его телефон и статус."""
+    text = call["situation"]
+    found = PHONE.search(text)
+    phone = found.group(0).strip(" ,-") if found else None
+    head = text[: found.start()] if found else text
+
+    # Пояснение в скобках — это статус, а не часть имени: «Соколов И. П.
+    # (прохожий)». Его убираем из имени, но учитываем при определении роли.
+    tail = head.rstrip(" ,").split(",")[-1].strip()
+    role = caller_role_from(tail) or caller_role_from(text)
+    name = re.sub(r"\s*\([^)]*\)", "", tail).strip()
+    name = re.sub(r"^вызывает\s+", "", name, flags=re.I).strip()
+
+    # Если после чистки осталась не ФИО, а обрывок фразы — имени в вызове
+    # просто нет. Подставлять выдуманное нельзя: обучающийся спросит его
+    # у заявителя сам, это часть работы.
+    if not NAME_LIKE.match(name):
+        name = "Заявитель"
+    return name[:250], phone, role
+
+
 def trap_outcome(call: dict) -> tuple[CallOutcome, str | None]:
     """Определяет эталонный исход по пометке расшифровщика."""
     trap = (call.get("trap") or "").strip()
@@ -86,6 +144,38 @@ def trap_outcome(call: dict) -> tuple[CallOutcome, str | None]:
             f"в TRAP_SUBJECTS, иначе вызов получит неверный эталон."
         )
     return CallOutcome.REFER, subject
+
+
+def refresh_callers() -> None:
+    """Дополняет уже заведённые билеты сведениями о заявителе.
+
+    Статус и телефон появились в схеме позже импорта, и переимпортировать
+    билеты ради них нельзя: вместе с ними потерялись бы утверждения
+    преподавателя и привязанные работы обучающихся.
+    """
+    tickets = json.loads(TICKETS.read_text(encoding="utf-8"))
+    by_key = {
+        (t["ticket"], c["no"]): c for t in tickets["tickets"] for c in t["calls"]
+    }
+
+    with SessionLocal() as db:
+        updated = 0
+        for row in db.scalars(
+            select(Scenario).where(Scenario.source == ScenarioSource.TICKET)
+        ).all():
+            found = re.match(r"Билет (\d+), вызов (\d+)", row.title)
+            if not found:
+                continue
+            call = by_key.get((int(found.group(1)), int(found.group(2))))
+            if call is None:
+                continue
+            name, phone, role = caller_from(call)
+            row.caller = name
+            row.caller_phone_stated = phone
+            row.caller_role = role
+            updated += 1
+        db.commit()
+    print(f"Дополнено сведениями о заявителе: {updated} сценариев.")
 
 
 def main(dry_run: bool) -> None:
@@ -133,6 +223,7 @@ def main(dry_run: bool) -> None:
                     skipped += 1
                     continue
 
+                caller_name, caller_phone, caller_role = caller_from(call)
                 rule_number = (
                     ekp.rule(match["rule_number"]).number
                     if outcome is CallOutcome.CLASSIFY
@@ -160,7 +251,11 @@ def main(dry_run: bool) -> None:
                     referral_target=subject,
                     address=address,
                     description=call["situation"],
-                    caller=call["situation"].split(",")[-1].strip()[:250],
+                    caller=caller_name,
+                    # Номер записан со слов: автоматического определения
+                    # в расшифровке билета нет, и выдумывать его нельзя.
+                    caller_phone_stated=caller_phone,
+                    caller_role=caller_role,
                     target_service=service,
                     expected_primary_status="Принята",
                     # Ловушки сложнее рядовых вызовов: обучающийся должен
@@ -195,5 +290,14 @@ def main(dry_run: bool) -> None:
 
 if __name__ == "__main__":
     cli = argparse.ArgumentParser(description="Импорт билетов в учебные сценарии")
+    cli.add_argument(
+        "--refresh-callers",
+        action="store_true",
+        help="дополнить уже заведённые билеты сведениями о заявителе",
+    )
     cli.add_argument("--dry-run", action="store_true", help="показать итог без записи")
-    main(cli.parse_args().dry_run)
+    args = cli.parse_args()
+    if args.refresh_callers:
+        refresh_callers()
+    else:
+        main(args.dry_run)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Call, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
+import type { Call, CallerRole, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
 import { Timer } from '../components/Timer';
 
 /**
@@ -196,6 +196,7 @@ export function OperatorCallPage() {
   const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
   const [outcome, setOutcome] = useState<CallOutcome>('classify');
+  const [phone, setPhone] = useState('');
   const [referral, setReferral] = useState('');
   const [evaluation, setEvaluation] = useState<OperatorEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +247,7 @@ export function OperatorCallPage() {
           path,
           address,
           description,
+          caller_phone: phone,
         }),
       );
       setCall(await api.call(attemptId));
@@ -254,7 +256,7 @@ export function OperatorCallPage() {
     } finally {
       setBusy(false);
     }
-  }, [attemptId, group, path, address, description, outcome, referral]);
+  }, [attemptId, group, path, address, description, outcome, referral, phone]);
 
   if (error && !call) return <div className="alert">{error}</div>;
   if (!call) return <div className="empty">Загрузка вызова…</div>;
@@ -271,7 +273,15 @@ export function OperatorCallPage() {
         <div className="card__head">
           <div style={{ flex: 1 }}>
             <h1 className="card__type">Входящий вызов</h1>
-            <div className="card__meta">Заявитель: {call.caller}</div>
+            <div className="card__meta">
+              Заявитель: {call.caller}
+              {call.caller_role && ` · ${ROLE_NAMES[call.caller_role]}`}
+            </div>
+            {/* Номер определяется автоматически при поступлении вызова —
+                оператор видит его сразу, как в рабочей системе. */}
+            <div className="card__meta">
+              Определившийся номер: {call.caller_phone_aon ?? 'не определился'}
+            </div>
           </div>
           <Timer
             issuedAt={call.issued_at}
@@ -337,6 +347,16 @@ export function OperatorCallPage() {
         )}
 
         <div className="card__block">
+          <div className="field" style={{ maxWidth: 460 }}>
+            <label htmlFor="phone">Телефон для связи с заявителем</label>
+            <input
+              id="phone"
+              value={phone}
+              disabled={locked}
+              placeholder="Запишите номер со слов заявителя"
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
           <div className="field">
             <label htmlFor="address">Адрес происшествия</label>
             <input
@@ -378,6 +398,12 @@ export function OperatorCallPage() {
     </>
   );
 }
+
+const ROLE_NAMES: Record<CallerRole, string> = {
+  participant: 'участник происшествия',
+  witness: 'очевидец',
+  relative: 'родственник',
+};
 
 const OUTCOME_NAMES: Record<CallOutcome, string> = {
   classify: 'зарегистрировать происшествие',

@@ -141,6 +141,7 @@ export const api = {
       path: string[];
       address: string;
       description: string;
+      caller_phone?: string;
     },
   ) =>
     request<OperatorEvaluation>(`/api/operator/calls/${id}/classify`, {
