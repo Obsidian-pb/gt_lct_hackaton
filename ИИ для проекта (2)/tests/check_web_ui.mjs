@@ -12,7 +12,7 @@ try{
  const page=await browser.newPage({viewport:{width:1440,height:1050}});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await page.addInitScript(()=>{navigator.mediaDevices.getUserMedia=async()=>({getTracks:()=>[{stop(){}}]});window.SpeechRecognition=class{start(){this.onresult({results:[[{transcript:'Внутри есть люди?'}]]});this.onend();}abort(){};};});
  const idle=()=>page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
- await page.goto(url);await idle();
+ await page.goto(url+'/training');await idle();
  assert.equal(await page.getByRole('button',{name:'Начать обучение',exact:true}).isDisabled(),true);
  await page.locator('[data-page=tasks]').click();await idle();
  await page.locator('#level').selectOption('hard');await page.locator('[data-cmd=sample]').click();await idle();

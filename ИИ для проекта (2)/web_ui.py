@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
+import socket
 import threading
 import urllib.request
 import webbrowser
@@ -11,11 +12,33 @@ import webbrowser
 from ai_core import Engine, FIELDS, LEVELS, VERDICTS, validate_task
 from provider import GigaChat
 from dds import WORKFLOWS, ACTION_LABELS
+import card_factory
+import card_reference
 
 ROOT = Path(__file__).resolve().parent
 
 
 def dispatch(engine, action, p):
+    if action == 'teacher_overview':
+        return {
+            'sessions': [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'],
+                          'status': s['status'], 'workflow': s['task'].get('workflow', 'caller'),
+                          'created_at': s.get('created_at'),
+                          'grade': (s.get('teacher_decision') or {}).get('grade') if s['status'] == 'reviewed' else None}
+                         for s in engine.list_items('s')],
+            'tasks': [{key: t.get(key) for key in ('id', 'title', 'status', 'workflow', 'level')}
+                      for t in engine.list_items('t')],
+        }
+    if action == 'card_meta':
+        return card_factory.metadata()
+    if action == 'card_generate':
+        return card_factory.generate(engine.provider, p)
+    if action == 'card_reference':
+        return card_reference.generate(engine.provider, p)
+    if action == 'card_approve':
+        return card_factory.approve(p)
+    if action == 'card_validate':
+        return card_factory.validate_content(p.get('content'))
     if action == 'home':
         return {'count': len(engine.approved_tasks()), 'fields': FIELDS, 'levels': LEVELS, 'verdicts': VERDICTS,
                 'workflows': WORKFLOWS, 'action_labels': ACTION_LABELS,
@@ -80,7 +103,17 @@ def dispatch(engine, action, p):
     raise ValueError('Неизвестное действие.')
 
 
-def make_server(engine, port=8877):
+class LocalServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+
+    def server_bind(self):
+        # Windows otherwise permits two local copies to share the same port.
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def make_server(engine, port=8878):
     lock = threading.Lock()
     token = secrets.token_urlsafe(32)
 
@@ -106,11 +139,25 @@ def make_server(engine, port=8877):
                 self.respond(403, {'error': 'Доступ только через 127.0.0.1.'}); return
             if self.path == '/health':
                 self.respond(200, {'app': 'ai-project-ui', 'root': str(ROOT)}); return
-            names = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/app.css': ('app.css', 'text/css'), '/workflows.js': ('workflows.js', 'text/javascript')}
+            names = {'/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
+                     '/react/app.js': ('react/app.js', 'text/javascript'),
+                     '/welcome.css': ('welcome.css', 'text/css'),
+                     '/hero-background.svg': ('hero-background.svg', 'image/svg+xml'),
+                     '/hero-logo.svg': ('hero-logo.svg', 'image/svg+xml'),
+                     '/cards': ('react.html', 'text/html'),
+                     '/teacher.css': ('teacher.css', 'text/css'), '/teacher.js': ('teacher.js', 'text/javascript'),
+                     '/teacher-shell.js': ('teacher-shell.js', 'text/javascript'),
+                     '/training': ('index.html', 'text/html'), '/cards.js': ('cards.js', 'text/javascript'),
+                     '/making.css': ('making.css', 'text/css'), '/cards.css': ('cards.css', 'text/css'), '/app.js': ('app.js', 'text/javascript'),
+                     '/app.css': ('app.css', 'text/css'), '/workflows.js': ('workflows.js', 'text/javascript')}
             if self.path not in names:
                 self.respond(404, {'error': 'Не найдено'}); return
             name, mime = names[self.path]
             body = (ROOT / 'ui' / name).read_text(encoding='utf-8').replace('__TOKEN__', token)
+            if name == 'react.html':
+                styles = ['/welcome.css'] if self.path == '/' else (['/cards.css', '/teacher.css', '/making.css'] if self.path == '/cards' else ['/teacher.css'])
+                body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in styles))
+                body = body.replace('__BODY_CLASS__', '' if self.path == '/' else ('teacher-app cards-page' if self.path == '/cards' else 'teacher-app'))
             self.respond(200, body.encode(), mime + '; charset=utf-8')
 
         def do_POST(self):
@@ -134,14 +181,14 @@ def make_server(engine, port=8877):
             except Exception:
                 self.respond(500, {'error': 'Не удалось выполнить действие. Сохранённые работы доступны после обновления страницы.'})
 
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server = LocalServer(('127.0.0.1', port), Handler)
     server.daemon_threads = True
     return server
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=8877)
+    parser.add_argument('--port', type=int, default=8878)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir')
     args = parser.parse_args()

@@ -1,11 +1,20 @@
 """Browser test server with a fake provider and a disposable exercise directory."""
 import tempfile
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('tests').resolve()))
+from card_fake import FactoryFake
 from ai_core import Engine, FIELDS
 from web_ui import make_server
 
 
 class FakeProvider:
+    def __init__(self):
+        self.factory = FactoryFake()
+
     def generate(self, system, payload, temperature=.3, schema=None):
+        if 'incident_class' in payload or payload.get('operation') == 'card_reference':
+            return self.factory.generate(system, payload, temperature, schema)
         if 'reference' in payload:
             return {'summary': 'Проверьте сведения о людях внутри.', 'fields': {key: {'verdict': 'partial', 'comment': 'Нужно уточнение.', 'clarification': 'Сохраните неопределённость.', 'evidence': []} for key in payload.get('field_labels', FIELDS)}}
         if 'delivered_message' in payload:

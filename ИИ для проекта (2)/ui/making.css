@@ -1,0 +1,107 @@
+/* Card creation: the supplied card-making layout, without training controls. */
+body.cards-page{background:#d1d6da;color:#2e3b43}
+.cards-page .teacher-header{left:0;background:#eef1f3}
+.cards-page .teacher-sidebar{top:87px;bottom:auto;left:0;width:100%;height:54px;padding:0;flex-direction:row;border:0;border-bottom:1px solid #cbd3da;box-shadow:none;background:#fff;overflow-x:auto}
+.cards-page .teacher-sidebar nav{flex-direction:row;gap:0;align-items:stretch}
+.cards-page .teacher-sidebar a{font-size:14px;line-height:20px;padding:16px 24px;white-space:nowrap;width:auto;border-right:1px solid #d4dde5;text-decoration:none}
+.cards-page .teacher-sidebar a[aria-current=page]{color:#1188d0;border-bottom:3px solid #1188d0}
+.cards-page .teacher-settings{margin:0 0 0 auto}
+.creation-brand{margin-right:auto;display:flex;align-items:center;gap:20px;padding:20px 28px;font-size:20px}
+.creation-brand strong{font-size:32px;color:#118bd4}
+.cards-page main#workshop{margin:141px 0 0;padding:18px 20px;min-height:calc(100vh - 141px)}
+.cards-page #workshop .intro{margin-bottom:18px;align-items:center;flex-direction:row}
+.cards-page #workshop .intro h1{font-size:28px;margin:0 0 7px;font-weight:500}
+.cards-page #workshop .eyebrow{font-size:12px;margin:0 0 5px;color:#687781}
+.cards-page #workshop .intro p{font-size:14px}
+.cards-page #workshop .stat strong{font-size:25px}
+.cards-page #workshop .generator{background:transparent;border:0;padding:0}
+.creation-grid{display:grid;grid-template-columns:minmax(280px,0.8fr) minmax(0,1.2fr);gap:10px;border:0;padding:0;margin:0;min-width:0}
+.creation-panel{min-width:0;background:#f3f5f6;border:1px solid #e4e8eb}
+.creation-panel>h2{font-size:17px;font-weight:600;margin:0;padding:12px 18px;border-bottom:1px solid #dce2e7}
+.creation-panel-body{padding:18px;display:grid;gap:16px}
+.creation-panel-body>label{display:grid;grid-template-columns:160px minmax(0,1fr);align-items:start;gap:14px;font-size:14px;font-weight:400}
+.creation-panel-body input,.creation-panel-body select,.creation-panel-body textarea{background:white;border:1px solid #c9d3dc;padding:11px;min-width:0;width:100%}
+.creation-panel-body .count input{max-width:130px}
+.creation-panel-body #generate{width:100%;max-width:300px;margin-top:8px}
+.cards-page #workshop button.primary{background:#148fd6;border-color:#148fd6}
+.category-tabs{display:flex;flex-wrap:wrap;gap:7px}
+.cards-page #workshop .category-tabs button,.cascade-choices button{padding:9px 13px;font-size:13px;border:1px solid #c7d1da;background:white;color:#33434e}
+.cards-page #workshop .category-tabs button.selected,.cards-page #workshop .cascade-choices button.selected{background:#158ed4;color:white;border-color:#158ed4}
+.classification-cascade{display:grid;gap:14px;min-width:0}
+.cascade-row{display:grid;grid-template-columns:145px minmax(0,1fr);gap:12px;align-items:start}
+.cascade-row>span{font-size:13px;color:#65737c;padding-top:9px}
+.cascade-choices{display:flex;gap:6px;flex-wrap:wrap;max-height:180px;overflow-y:auto}
+.leaf-select{display:grid;grid-template-columns:145px minmax(0,1fr);gap:12px;align-items:center;font-weight:400;font-size:13px}
+.classification-count{font-size:12px;color:#6f7d86;margin:0}
+.incident-flags{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.incident-flags label{font-size:12px;font-weight:400;color:#61707c;min-width:0}
+.incident-flags select{display:block;margin-top:5px;width:100%;font-size:13px}
+.cards-page #workshop .catalog-note{margin:0;padding:10px 5px;font-size:12px}
+.cards-page #progress-panel{padding:16px;background:white;margin-top:10px}
+.cards-page #workshop .workspace{grid-template-columns:minmax(260px,30%) minmax(0,1fr);gap:10px}
+.cards-page #workshop .library,.cards-page #workshop .editor{background:#f5f6f7;border:1px solid #e0e6eb}
+.cards-page #workshop .card-item.selected{background:#e6f3fc;border-color:#1793d9;box-shadow:inset 3px 0 #1793d9}
+.cards-page #workshop .filters .active{background:#138ed5;border-color:#138ed5}
+.selected-types{display:grid;gap:8px;margin-bottom:14px}
+.selected-type{display:grid;gap:6px;border:1px solid #cbd6de;background:#ecf5fb;padding:14px 45px 14px 14px;position:relative;overflow-wrap:anywhere}
+.selected-type span{font-size:13px;color:#637380}.selected-type small{font-size:12px;color:#657783}
+.selected-type>button{position:absolute;top:8px;right:8px;padding:3px 8px!important}
+.classification-editor details{margin:12px 0 20px}.classification-editor details>label{display:block;margin:14px 0}
+.classification-editor .classification-cascade{margin-bottom:15px}
+.selected-services{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}.selected-services>span{padding:8px 12px;background:#e7f1f7;border:1px solid #cedce5;font-size:13px}
+.routing-reference{margin-top:16px}.routing-scroll{overflow:auto;max-height:300px}.routing-scroll table{border-collapse:collapse;font-size:12px;min-width:460px;width:100%}.routing-scroll th,.routing-scroll td{border:1px solid #d2dce3;text-align:left;padding:8px;vertical-align:top}.routing-scroll small{display:block;color:#6a7b87}
+.services-dialog{width:min(600px,calc(100vw - 35px));max-height:85vh;padding:22px;border:1px solid #b9c7d2;color:#33434e}
+.services-dialog::backdrop{background:#0007}.dialog-heading{display:flex;justify-content:space-between;align-items:center}.dialog-heading h2{font-size:22px;margin:0 0 16px}.services-dialog .choices{display:grid;grid-template-columns:1fr;max-height:45vh;overflow-y:auto;margin:16px 0}.services-dialog>button{width:100%}
+@media(max-width:1100px){.creation-grid{grid-template-columns:1fr}.cards-page .teacher-sidebar a{padding:16px 15px}.cards-page #workshop .workspace{grid-template-columns:minmax(240px,32%) minmax(0,1fr)}.cards-page #workshop .intro{align-items:flex-start}.cards-page #workshop .stats{gap:12px}.creation-panel-body>label{grid-template-columns:140px minmax(0,1fr)}}
+@media(max-width:720px){.cards-page .teacher-header{height:72px;position:relative}.cards-page .teacher-sidebar{display:flex;position:relative;top:0;height:51px}.cards-page .teacher-menu{display:none}.cards-page .teacher-sidebar nav{gap:0}.cards-page .teacher-sidebar a{font-size:13px;padding:14px 17px}.cards-page .teacher-settings{padding-top:14px!important}.cards-page main#workshop{margin:0;padding:12px}.creation-brand{padding:10px 12px;gap:8px;font-size:12px}.creation-brand strong{font-size:22px}.cards-page .teacher-profile{padding:5px 10px}.cards-page .teacher-profile span{max-width:110px}.cards-page #workshop .intro{flex-direction:column;gap:14px}.cards-page #workshop .intro h1{font-size:24px}.cards-page #workshop .workspace{grid-template-columns:1fr}.creation-panel-body{padding:14px}.creation-panel-body>label,.cascade-row,.leaf-select{grid-template-columns:1fr;gap:7px}.incident-flags{grid-template-columns:1fr}.cascade-row>span{padding-top:0}.cards-page #workshop .library{position:static}.cards-page #card-list{max-height:310px;overflow-y:auto}.creation-panel-body #generate{max-width:none}}
+
+@media(min-width:1101px){
+ .cards-page main#workshop{padding:12px 18px}.cards-page #workshop .intro{margin-bottom:12px}.cards-page #workshop .intro h1{font-size:24px}.cards-page #workshop .intro p{margin:4px 0}
+ .creation-panel>h2{padding:10px 16px;font-size:16px}.creation-panel-body{padding:14px 16px;gap:12px}.creation-panel-body input,.creation-panel-body select,.creation-panel-body textarea{padding:9px;font-size:13px}.classification-cascade{gap:10px}.cascade-choices button{padding:7px 10px;font-size:12px}.incident-flags{grid-template-columns:repeat(3,minmax(0,1fr))}.cards-page #workshop .category-tabs button{padding:8px 11px}
+}
+.flags-container>details{margin-top:10px}.flags-container summary{font-size:13px;color:#5b6c77}.flags-container details .incident-flags{margin-top:12px}
+
+@media(max-width:720px){.cards-page #teacher-shell{display:flex;flex-direction:column}.cards-page .teacher-header{order:0}.cards-page .teacher-sidebar{order:1}}
+
+/* One sticky header owns both rows; page content and the library respect its height. */
+.cards-page{--cards-header-height:141px;--services-dock-height:84px}
+.cards-page #teacher-shell{position:sticky;top:0;z-index:40;display:flex;flex-direction:column;height:var(--cards-header-height);background:#eef1f3;box-shadow:0 2px 5px #20304015}
+.cards-page .teacher-header{position:relative;inset:auto;order:0;height:87px;flex-shrink:0}
+.cards-page .teacher-sidebar{position:relative;inset:auto;order:1;height:54px;flex-shrink:0}
+.cards-page main#workshop{margin-top:0;padding-bottom:calc(var(--services-dock-height) + 24px)}
+.cards-page #workshop .library{top:calc(var(--cards-header-height) + 12px);max-height:calc(100dvh - var(--cards-header-height) - var(--services-dock-height) - 24px);overflow-y:auto}
+.cards-page #workshop :is(input,select,textarea,button,article){scroll-margin-top:calc(var(--cards-header-height) + 20px);scroll-margin-bottom:calc(var(--services-dock-height) + 20px)}
+.services-dock{position:fixed;bottom:0;left:0;right:0;z-index:45;height:var(--services-dock-height);background:#303638;color:#fff;display:flex;align-items:stretch;gap:0;border-top:1px solid #596367;box-shadow:0 -3px 12px #20304020;padding-bottom:env(safe-area-inset-bottom)}
+.dock-context{display:flex;flex-direction:column;justify-content:center;width:148px;flex-shrink:0;padding:12px 14px;border-right:1px solid #657074;gap:6px}
+.dock-context strong{font-size:13px;font-weight:500}.dock-context small{font-size:10px;color:#c1ccd0;line-height:1.3}
+.dock-service-list{display:flex;flex:1;min-width:0;overflow-x:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#8b989e #303638}
+.cards-page #workshop .services-dock button{border:1px solid #697478;border-radius:0;background:transparent;color:#fff;font-weight:400;white-space:nowrap;font-size:12px;padding:10px 14px;line-height:1.25}
+.cards-page #workshop .dock-service-list button{display:flex;align-items:center;justify-content:center;gap:7px;flex-direction:column;min-width:92px;max-width:170px;white-space:normal;flex-shrink:0;border-width:0 1px 0 0;padding:10px 14px}
+.cards-page #workshop .dock-service-list button.selected{background:#176d97;box-shadow:inset 0 3px #42baff}
+.cards-page #workshop .services-dock button:hover:not(:disabled){background:#475459}
+.cards-page #workshop .services-dock button:disabled{opacity:.65}
+.cards-page #workshop .services-dock button:focus-visible{outline:2px solid #8fd9ff;outline-offset:-4px}
+.cards-page #workshop .services-dock .dock-other{border-width:0 1px 0 0;min-width:125px;flex-shrink:0}
+.dock-other span{display:block;margin-top:5px}.dock-actions{display:flex;gap:8px;align-items:center;padding:12px}
+.service-origin{display:block;font-size:11px;opacity:.75;margin-top:4px}.dock-service-list small{font-size:9px;color:#ccecff}.cards-page #workshop .dock-service-list button{gap:4px}.cards-page #reset-services{margin-left:8px}
+@media(max-width:1100px){.cards-page{--services-dock-height:124px}.services-dock{flex-wrap:wrap}.dock-context{width:130px;height:65px}.dock-service-list{height:65px}.cards-page #workshop .services-dock .dock-other{height:65px}.dock-actions{width:100%;height:58px;justify-content:flex-end;border-top:1px solid #657074;padding:8px 12px}.cards-page #workshop .services-dock button{font-size:11px}.cards-page #workshop .library{position:static;max-height:none;overflow:visible}}
+@media(max-width:720px){.cards-page{--cards-header-height:123px}.cards-page .teacher-header{height:72px}.cards-page .teacher-sidebar{height:51px}.dock-context{width:88px;padding:8px}.dock-context strong{font-size:12px}.dock-context small{font-size:9px}.cards-page #workshop .dock-service-list button{min-width:85px;padding:7px}.cards-page #workshop .services-dock .dock-other{min-width:88px;width:88px;white-space:normal;padding:8px}.dock-actions{justify-content:stretch;gap:6px;padding:8px}.dock-actions button{flex:1;min-width:0;padding:9px 7px!important;font-size:11px!important}}
+/* card.svg: dark service tabs open upward; changing membership is a separate action. */
+.dock-context{width:108px;align-items:center;padding:12px}.dock-context strong{font-size:12px;font-weight:600}
+.cards-page #workshop .dock-service-list button{min-width:124px;max-width:170px;gap:11px;padding:12px 16px;font-weight:600;font-size:11px}
+.dock-chevron{font-size:22px;font-weight:400;line-height:14px;color:#d8dee0}
+.cards-page #workshop .dock-service-list button.expanded{background:#465157;box-shadow:inset 0 3px #158ed4}
+.dock-service-list button.expanded .dock-chevron{transform:rotate(180deg)}
+.cards-page #workshop .services-dock .dock-other{min-width:62px;width:62px;padding:12px;border:0}
+.dock-other span{border:1px solid #9da6aa;margin:0;padding:7px 10px;line-height:12px;font-size:18px}
+.dock-empty{align-self:center;padding:12px;color:#c9d0d3;font-size:12px}
+.dock-actions{gap:16px;padding:12px 24px}.cards-page #workshop #dock-save{min-width:150px;font-weight:600;padding:14px}
+.dock-service-panel{position:absolute;bottom:100%;left:108px;width:min(650px,calc(100vw - 124px));max-height:calc(100dvh - var(--cards-header-height) - var(--services-dock-height) - 16px);overflow:auto;background:#f4f6f7;color:#33434e;border:1px solid #aebbc4;box-shadow:0 -6px 24px #14283325;outline:none}
+.dock-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;background:#20272b;color:white}.dock-panel-heading h2{margin:4px 0 0;font-size:18px}.dock-panel-heading small{font-size:11px;color:#c2cdd3}.dock-panel-body{padding:18px 20px}
+.service-selection-origin{margin:0 0 16px;font-size:12px;color:#527383}.dock-panel-body dl{margin:0;display:grid;grid-template-columns:105px minmax(0,1fr);gap:12px;font-size:13px;line-height:1.5}.dock-panel-body dt{color:#6b7d88}.dock-panel-body dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}.dock-panel-body details{margin-top:20px;font-size:12px;line-height:1.5}.dock-panel-body li{margin:6px 0}
+.dock-panel-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:20px;border-top:1px solid #cdd5db;padding-top:16px}.dock-panel-actions>span{font-size:11px;color:#6b7d88}.cards-page #workshop .dock-panel-actions button{color:#33434e;border-color:#aebbc4;white-space:normal}.cards-page #workshop .dock-panel-actions button:hover:not(:disabled){background:#e1eaf0}
+@media(max-width:1100px){.dock-context{width:88px}.dock-actions{padding:8px 12px}.cards-page #workshop .dock-service-list button{min-width:105px;gap:7px}.dock-service-panel{left:12px;width:min(650px,calc(100vw - 24px))}}
+@media(max-width:720px){.dock-context{width:68px;padding:8px}.cards-page #workshop .services-dock .dock-other{min-width:54px;width:54px;padding:9px}.dock-panel-body{padding:14px}.dock-panel-heading{padding:12px 14px}.dock-panel-heading h2{font-size:16px}.dock-panel-body dl{grid-template-columns:1fr;gap:4px}.dock-panel-body dd{margin-bottom:10px}.dock-panel-actions{align-items:stretch;flex-direction:column}}
+.reference-answer{margin:24px 0;padding:20px;background:#edf4f8;border:1px solid #bbd0df}.reference-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.reference-heading h3{margin:6px 0}.reference-answer>p{font-size:13px;line-height:1.6}.reference-warning{padding:12px;background:#fff2dc;border-left:3px solid #c98c30}.reference-fields{padding:0!important;margin-top:18px!important;border:0!important;min-width:0}.reference-fields label{display:block;font-size:13px}.reference-fields textarea{display:block;width:100%;margin:7px 0 14px;background:white}.reference-fields details{margin:16px 0}.reference-fields summary{margin-bottom:12px}.reference-values{display:grid;gap:12px}.reference-value{display:grid;grid-template-columns:1fr 1fr;gap:14px;border-bottom:1px solid #ccdae4}.reference-evidence{color:#637782}.reference-list-row{display:flex;gap:8px;align-items:flex-start}.reference-list-row textarea{flex:1;min-width:0}.reference-list-row button{margin-top:7px}.reference-confirm{display:flex!important;align-items:flex-start;gap:10px;margin-top:16px;font-size:13px}.reference-confirm input{width:auto!important;margin-top:2px}
+@media(max-width:720px){.reference-answer{padding:14px}.reference-heading{align-items:flex-start;flex-direction:column}.reference-value{grid-template-columns:1fr;gap:0}}
+#reference-answer{scroll-margin-top:calc(var(--cards-header-height) + 18px)}
