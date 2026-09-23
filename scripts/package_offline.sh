@@ -50,7 +50,10 @@ docker pull --platform "$PLATFORM" postgres:17-alpine
 
 mkdir -p "$OUT/dds112-deploy"
 echo "==> архив образов"
-docker save -o "$OUT/dds112-images.tar" \
+# --platform обязателен: под одним тегом могут лежать варианты для разных
+# архитектур (образ базы уже скачан на Mac как arm64), и без указания
+# платформы в архив уходит тот, что попался первым. Флаг есть с Docker 28.
+docker save --platform "$PLATFORM" -o "$OUT/dds112-images.tar" \
   dds112-backend:latest \
   dds112-web:latest \
   "dds112-llm:$LLM_TAG" \
