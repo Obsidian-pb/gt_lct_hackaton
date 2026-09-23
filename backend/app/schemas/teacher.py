@@ -106,6 +106,20 @@ class WorkOut(BaseModel):
     teacher_feedback_at: datetime | None = None
     # ФИО автора примечания: результаты обучения нельзя менять без следа.
     teacher_feedback_by: str | None = None
+    # Заполнено у повторной выдачи: номер проваленной попытки.
+    repeat_of_id: int | None = None
+
+
+class RepeatResultOut(BaseModel):
+    """Итог повторной выдачи проваленной карточки."""
+
+    attempt_id: int
+    repeat_attempt_id: int
+    scenario_title: str
+    first_score: float | None
+    repeat_score: float | None
+    # None — повтор ещё не завершён.
+    fixed: bool | None
 
 
 class StudentResultOut(BaseModel):
@@ -119,6 +133,8 @@ class StudentResultOut(BaseModel):
     critical: int = 0
     # None — завершённых работ нет, судить о зачёте не по чему.
     passed: bool | None = None
+    # Повторные выдачи — отдельно: в средний балл и зачёт они не входят.
+    repeats: list[RepeatResultOut] = Field(default_factory=list)
 
 
 class ReportOut(BaseModel):
@@ -146,6 +162,10 @@ class ReportOut(BaseModel):
     max_critical_violations: int
     passed_students: int
     failed_students: int
+    # Повторные выдачи проваленных карточек: выдано, завершено, исправились.
+    repeats_issued: int = 0
+    repeats_finished: int = 0
+    repeats_fixed: int = 0
 
 
 class SessionIn(BaseModel):
@@ -161,6 +181,8 @@ class SessionIn(BaseModel):
     # без явных критериев, оценивается так же, как и прежде.
     pass_score: float = Field(default=0.7, ge=0, le=1)
     max_critical_violations: int = Field(default=0, ge=0, le=100)
+    # Возвращать ли проваленную карточку обучающемуся в том же занятии.
+    repeat_failed: bool = False
 
 
 class SessionPatch(BaseModel):
@@ -170,6 +192,7 @@ class SessionPatch(BaseModel):
     call_interval_seconds: int | None = Field(default=None, ge=0, le=600)
     pass_score: float | None = Field(default=None, ge=0, le=1)
     max_critical_violations: int | None = Field(default=None, ge=0, le=100)
+    repeat_failed: bool | None = None
     student_ids: list[int] | None = None
     # Состав можно задать группой: её участники копируются в занятие.
     # Именно копируются, а не связываются ссылкой — иначе правка группы
@@ -208,6 +231,7 @@ class SessionOut(BaseModel):
     call_interval_seconds: int
     pass_score: float
     max_critical_violations: int
+    repeat_failed: bool = False
     started_at: datetime | None
     finished_at: datetime | None
     students: list[dict]
@@ -227,6 +251,8 @@ class ProgressOut(BaseModel):
     finished: int
     overdue_pickup: int
     in_work: int
+    # Сколько из поступивших карточек — повторные выдачи.
+    repeats: int = 0
 
 
 class MonitorOut(BaseModel):

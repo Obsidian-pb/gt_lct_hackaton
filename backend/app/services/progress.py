@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from app.models.base import as_utc
 from app.models.training import Attempt, TrainingMode
+from app.services.report import attempt_failed, critical_violations
 from app.services.violations import Severity, ViolationKind, kind_of
 
 # Меньшее число завершённых работ не позволяет говорить о динамике:
@@ -55,6 +56,10 @@ class Work:
     # кабинете оно важнее автоматических замечаний: это адресный разбор.
     teacher_feedback: str | None = None
     teacher_feedback_by: str | None = None
+    # Повторная выдача проваленной карточки и её итог: исправился ли.
+    # В статистику повторы не входят — она считается по первому проходу.
+    is_repeat: bool = False
+    repeat_fixed: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,9 @@ class Progress:
     mistakes: list[Mistake]
     works: list[Work]
     advice: list[str]
+    # Повторные выдачи: сколько завершено и в скольких обучающийся исправился.
+    repeats_finished: int = 0
+    repeats_fixed: int = 0
 
 
 def _times(count: int) -> str:
@@ -100,8 +108,17 @@ def _severity_rank(kind: ViolationKind) -> int:
     return order[kind.severity]
 
 
-def _advice(mistakes: list[Mistake], finished: int, overdue: int, total_pickups: int) -> list[str]:
-    """Рекомендации по улучшению навыков — из собственных ошибок обучающегося."""
+def _advice(
+    mistakes: list[Mistake],
+    finished: int,
+    overdue: int,
+    total_pickups: int,
+    repeats: tuple[int, int] = (0, 0),
+) -> list[str]:
+    """Рекомендации по улучшению навыков — из собственных ошибок обучающегося.
+
+    `repeats` — завершённые повторные выдачи и сколько из них исправлено.
+    """
     if not finished:
         return [
             "Завершённых работ пока нет. Начните с любого назначенного вызова — "
@@ -109,6 +126,21 @@ def _advice(mistakes: list[Mistake], finished: int, overdue: int, total_pickups:
         ]
 
     notes: list[str] = []
+    repeats_finished, repeats_fixed = repeats
+    if repeats_finished:
+        # Повтор — вторая попытка на той же карточке, и её итог говорит
+        # о другом, чем средний балл: усвоен ли разбор.
+        if repeats_fixed == repeats_finished:
+            notes.append(
+                f"Повторные выдачи: {repeats_finished}, все пройдены. Ошибки "
+                "первого прохода исправлены — разбор пошёл впрок."
+            )
+        else:
+            notes.append(
+                f"Повторные выдачи: {repeats_finished}, исправлено "
+                f"{repeats_fixed}. По оставшимся вернитесь к разбору первой "
+                "попытки: ошибка повторилась на той же карточке."
+            )
     if total_pickups and overdue / total_pickups >= 0.25:
         notes.append(
             f"Норматив взятия карточки в работу нарушен в {overdue} случаях "
@@ -138,9 +170,43 @@ def build(attempts: list[Attempt]) -> Progress:
     overdue = 0
     grammar = 0
     works: list[Work] = []
+    repeats_finished = 0
+    repeats_fixed = 0
 
     for attempt in attempts:
         mode = attempt.scenario.mode
+        evaluation = attempt.evaluation
+
+        # Повтор проваленной карточки в статистику не идёт: средний балл
+        # и динамика считаются по первому проходу, как и зачёт в отчёте
+        # преподавателя. В истории работ он остаётся — с итогом повтора.
+        if attempt.repeat_of_id is not None:
+            if evaluation is None:
+                continue
+            fixed = not attempt_failed(evaluation, attempt.session.pass_score)
+            repeats_finished += 1
+            repeats_fixed += int(fixed)
+            works.append(
+                Work(
+                    attempt_id=attempt.id,
+                    title=attempt.scenario.title,
+                    mode=mode,
+                    finished_at=as_utc(attempt.finished_at).isoformat(),
+                    score=evaluation.score,
+                    violations=len(evaluation.violations or []),
+                    critical=critical_violations(evaluation.violations),
+                    teacher_feedback=evaluation.teacher_feedback,
+                    teacher_feedback_by=(
+                        evaluation.teacher_feedback_by.full_name
+                        if evaluation.teacher_feedback_by
+                        else None
+                    ),
+                    is_repeat=True,
+                    repeat_fixed=fixed,
+                )
+            )
+            continue
+
         stats = by_mode.setdefault(mode, ModeStats(mode=mode))
         stats.attempts += 1
 
@@ -162,7 +228,6 @@ def build(attempts: list[Attempt]) -> Progress:
                 overdue += 1
                 stats.overdue_pickup += 1
 
-        evaluation = attempt.evaluation
         if evaluation is None:
             continue
 
@@ -222,14 +287,20 @@ def build(attempts: list[Attempt]) -> Progress:
     if finished >= MIN_WORKS_FOR_TREND:
         # Работы в хронологическом порядке: сравниваем первую половину
         # со второй, чтобы увидеть направление, а не отдельный провал.
-        ordered = [w.score for w in sorted(works, key=lambda w: w.finished_at)]
+        # Повторы сюда не входят: они идут в конце занятия и подтянули бы
+        # вторую половину за счёт второй попытки на той же карточке.
+        ordered = [
+            w.score
+            for w in sorted(works, key=lambda w: w.finished_at)
+            if not w.is_repeat
+        ]
         half = len(ordered) // 2
         first = sum(ordered[:half]) / half
         last = sum(ordered[half:]) / len(ordered[half:])
         trend = round(last - first, 3)
 
     return Progress(
-        total=len(attempts),
+        total=sum(1 for a in attempts if a.repeat_of_id is None),
         finished=finished,
         average_score=round(sum(scores) / finished, 3) if finished else 0.0,
         average_pickup_seconds=round(sum(pickups) / len(pickups), 1) if pickups else None,
@@ -239,5 +310,9 @@ def build(attempts: list[Attempt]) -> Progress:
         by_mode=sorted(by_mode.values(), key=lambda s: str(s.mode)),
         mistakes=mistakes,
         works=works,
-        advice=_advice(mistakes, finished, overdue, len(pickups)),
+        advice=_advice(
+            mistakes, finished, overdue, len(pickups), (repeats_finished, repeats_fixed)
+        ),
+        repeats_finished=repeats_finished,
+        repeats_fixed=repeats_fixed,
     )

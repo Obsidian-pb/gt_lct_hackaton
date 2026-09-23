@@ -11,8 +11,48 @@ from __future__ import annotations
 import collections
 from dataclasses import dataclass, field
 
-from app.models.training import Attempt, TrainingSession
+from app.models.training import Attempt, Evaluation, TrainingSession
 from app.services.violations import Severity, kind_of
+
+
+def critical_violations(violations: list[dict] | None) -> int:
+    """Сколько критических нарушений в списке из оценки.
+
+    Единственное место, где нарушение признаётся критическим для зачёта:
+    тем же счётом пользуются отчёт, список работ и решение о повторе
+    карточки — иначе они рано или поздно разошлись бы.
+    """
+    return sum(
+        1
+        for item in violations or []
+        if item.get("code") and kind_of(item["code"]).severity is Severity.CRITICAL
+    )
+
+
+def attempt_failed(evaluation: Evaluation, pass_score: float) -> bool:
+    """Провалена ли отдельная попытка.
+
+    Балл ниже порога занятия или хотя бы одно критическое нарушение. Порог
+    допустимых критических нарушений здесь не применяется: он задан на всё
+    занятие, а одна карточка с критической ошибкой — это происшествие,
+    на которое служба не выехала бы, и именно её стоит вернуть.
+    """
+    return evaluation.score < pass_score or critical_violations(evaluation.violations) > 0
+
+
+@dataclass(frozen=True)
+class RepeatResult:
+    """Что вышло из повторной выдачи проваленной карточки."""
+
+    attempt_id: int
+    repeat_attempt_id: int
+    scenario_title: str
+    first_score: float | None
+    # None — повтор ещё не завершён.
+    repeat_score: float | None
+    # Исправился ли обучающийся: повтор пройден по тем же критериям,
+    # по которым провалилась первая попытка. None, пока повтора нет.
+    fixed: bool | None
 
 
 @dataclass
@@ -27,6 +67,10 @@ class StudentResult:
     # Критические нарушения считаются отдельно от прочих: по ним занятие
     # не засчитывается независимо от среднего балла.
     critical: int = 0
+    # Повторные выдачи показываются отдельно и в средний балл не входят:
+    # зачёт ставится за первый проход, а повтор отвечает на другой вопрос —
+    # исправился ли обучающийся после разбора.
+    repeats: list[RepeatResult] = field(default_factory=list)
 
     @property
     def average_score(self) -> float:
@@ -56,6 +100,11 @@ class SessionReport:
     violations: collections.Counter
     grammar_issues: int
     insights: list[str]
+    # Повторные выдачи по занятию в целом: сколько карточек вернулось,
+    # сколько из них доведено до конца и в скольких обучающийся исправился.
+    repeats_issued: int = 0
+    repeats_finished: int = 0
+    repeats_fixed: int = 0
 
     @property
     def pass_score(self) -> float:
@@ -82,10 +131,30 @@ class SessionReport:
         )
 
 
+def _repeats_note(issued: int, finished: int, fixed: int) -> str:
+    """Фраза о повторных выдачах: что вернулось и чем кончилось."""
+    if not finished:
+        return (
+            f"Проваленные карточки возвращены повторно: {issued}. "
+            "Ни одна повторная выдача ещё не завершена."
+        )
+    return (
+        f"Проваленные карточки возвращены повторно: {issued}. "
+        f"Из {finished} завершённых повторов исправились в {fixed}."
+    )
+
+
 def _insights(
-    violations: collections.Counter, total: int, overdue_share: float, deadline: int
+    violations: collections.Counter,
+    total: int,
+    overdue_share: float,
+    deadline: int,
+    repeats: tuple[int, int, int] = (0, 0, 0),
 ) -> list[str]:
-    """Короткие выводы для преподавателя по типичным ошибкам группы."""
+    """Короткие выводы для преподавателя по типичным ошибкам группы.
+
+    `repeats` — выдано, завершено и исправлено по повторным выдачам.
+    """
     if not total:
         return ["Занятие ещё не дало результатов: ни одна карточка не завершена."]
 
@@ -113,7 +182,37 @@ def _insights(
         notes.append(f"Критических нарушений: {critical}. Разберите их индивидуально.")
     if not notes:
         notes.append("Группа работает в пределах регламента, системных ошибок не видно.")
+    # Фраза о повторах — всегда последней: это не ошибка группы, а сведения
+    # о том, чем закончился разбор ошибок по горячим следам.
+    if repeats[0]:
+        notes.append(_repeats_note(*repeats))
     return notes
+
+
+def _repeat_results(
+    session: TrainingSession, repeats: list[Attempt]
+) -> dict[int, list[RepeatResult]]:
+    """Итоги повторных выдач, сгруппированные по обучающемуся."""
+    by_student: dict[int, list[RepeatResult]] = {}
+    for repeat in repeats:
+        original = repeat.repeat_of
+        first = original.evaluation if original is not None else None
+        second = repeat.evaluation
+        by_student.setdefault(repeat.student_id, []).append(
+            RepeatResult(
+                attempt_id=repeat.repeat_of_id,
+                repeat_attempt_id=repeat.id,
+                scenario_title=repeat.scenario.title,
+                first_score=first.score if first is not None else None,
+                repeat_score=second.score if second is not None else None,
+                fixed=(
+                    not attempt_failed(second, session.pass_score)
+                    if second is not None
+                    else None
+                ),
+            )
+        )
+    return by_student
 
 
 def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
@@ -126,11 +225,19 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
     grammar = 0
     deadline = session.pickup_deadline_seconds
 
+    # Повторные выдачи отделяются до подсчёта: средний балл, зачёт
+    # и типичные ошибки группы считаются по первому проходу, иначе одна
+    # и та же ошибка, повторённая на возвращённой карточке, удваивалась бы.
+    repeats = [a for a in attempts if a.repeat_of_id is not None]
+    repeat_results = _repeat_results(session, repeats)
+
     for attempt in attempts:
         result = by_student.setdefault(
             attempt.student_id,
             StudentResult(attempt.student_id, attempt.student.full_name),
         )
+        if attempt.repeat_of_id is not None:
+            continue
         result.attempts += 1
 
         primary = next(
@@ -156,13 +263,21 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
             if code:
                 violations[code] += 1
                 result.violations[code] += 1
-                if kind_of(code).severity is Severity.CRITICAL:
-                    result.critical += 1
+        result.critical += critical_violations(evaluation.violations)
+
+    for student_id, results in repeat_results.items():
+        if student_id in by_student:
+            by_student[student_id].repeats = results
+
+    repeats_finished = sum(1 for r in repeats if r.evaluation is not None)
+    repeats_fixed = sum(
+        1 for results in repeat_results.values() for r in results if r.fixed
+    )
 
     return SessionReport(
         session=session,
         students=sorted(by_student.values(), key=lambda s: s.student_name),
-        total_attempts=len(attempts),
+        total_attempts=len(attempts) - len(repeats),
         finished_attempts=finished,
         average_score=round(sum(scores) / len(scores), 3) if scores else 0.0,
         average_response_seconds=(
@@ -176,5 +291,9 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
             finished,
             overdue / len(response_times) if response_times else 0.0,
             deadline,
+            (len(repeats), repeats_finished, repeats_fixed),
         ),
+        repeats_issued=len(repeats),
+        repeats_finished=repeats_finished,
+        repeats_fixed=repeats_fixed,
     )

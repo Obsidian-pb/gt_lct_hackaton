@@ -71,6 +71,15 @@ function WorkRow({ work }: { work: Work }) {
     <tr>
       <td>
         <Link to={link}>{work.title}</Link>
+        {work.is_repeat && (
+          <>
+            {' '}
+            <span className="chip chip--warn">повторная выдача</span>{' '}
+            <span className={work.repeat_fixed ? 'chip chip--ok' : 'chip chip--danger'}>
+              {work.repeat_fixed ? 'исправлено' : 'не исправлено'}
+            </span>
+          </>
+        )}
         {work.teacher_feedback && (
           <div className="advice">
             {work.teacher_feedback_by ?? 'Преподаватель'}: {work.teacher_feedback}
@@ -124,7 +133,10 @@ export function StudentProgressPage() {
           <div className="stats">
             <div className="stat">
               <div className="stat__value">{percent(data.average_score)}</div>
-              <div className="stat__label">Средний балл из 100</div>
+              <div className="stat__label">
+                Средний балл из 100
+                {data.repeats_finished > 0 && ' · по первым попыткам'}
+              </div>
             </div>
             <div className="stat">
               <div className="stat__value">

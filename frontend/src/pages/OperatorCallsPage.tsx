@@ -23,6 +23,7 @@ export function OperatorCallsPage() {
   }
 
   const pending = calls.filter((c) => !c.finished).length;
+  const hasRepeats = calls.some((c) => c.is_repeat);
 
   return (
     <>
@@ -32,6 +33,13 @@ export function OperatorCallsPage() {
         карточку. От выбранных признаков зависит итоговый тип происшествия, а значит — какие
         службы получат информацию. В работе: {pending} из {calls.length}.
       </p>
+      {hasRepeats && (
+        <p className="page-hint">
+          Вызов с пометкой «Повторная выдача» — тот же заявитель и то же обращение, с которым
+          не удалось справиться в первый раз. Он возвращён для повторной отработки: примите
+          его заново.
+        </p>
+      )}
 
       <table className="card-table">
         <thead>
@@ -45,6 +53,11 @@ export function OperatorCallsPage() {
           {calls.map((call) => (
             <tr key={call.attempt_id} onClick={() => navigate(`/calls/${call.attempt_id}`)}>
               <td>
+                {call.is_repeat && (
+                  <div>
+                    <span className="chip chip--warn">Повторная выдача</span>
+                  </div>
+                )}
                 <div className="card-table__type">{call.legend}</div>
                 <div className="card-table__address">{call.reported_address}</div>
               </td>

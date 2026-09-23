@@ -96,7 +96,15 @@ export function CardPage() {
               Карточка № {card.attempt_id} · направлена{' '}
               {new Date(card.issued_at).toLocaleTimeString('ru-RU')} ·{' '}
               статус карточки: {card.card_status}
+              {card.is_repeat && ' · повторная выдача'}
             </div>
+            {card.is_repeat && (
+              <div className="repeat-note">
+                Повторная выдача. Это тот же вызов, с которым не удалось справиться
+                в первый раз: карточка возвращена для повторной отработки. Норматив
+                считается заново, с момента этого направления.
+              </div>
+            )}
           </div>
           <Timer
             issuedAt={card.issued_at}

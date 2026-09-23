@@ -43,6 +43,9 @@ class CardOut(BaseModel):
     comment_required_for: list[str]
     card_status: str
     finished: bool
+    # Повторная выдача проваленной карточки: тот же вызов, вторая попытка.
+    # Эталон при этом не раскрывается — обучающийся видит только пометку.
+    is_repeat: bool = False
 
 
 class StatusIn(BaseModel):

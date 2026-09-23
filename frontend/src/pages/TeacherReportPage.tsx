@@ -76,6 +76,11 @@ function WorkFeedback({
           {work.critical > 0 && (
             <span className="chip chip--danger">критических: {work.critical}</span>
           )}
+          {work.repeat_of_id !== null && (
+            <span className="chip chip--warn" title={`Повтор работы № ${work.repeat_of_id}`}>
+              повторная выдача
+            </span>
+          )}
         </div>
       </div>
 
@@ -233,6 +238,17 @@ export function TeacherReportPage() {
             report.max_critical_violations
           } критических`}
         />
+        {report.repeats_issued > 0 && (
+          <Stat
+            label="Повторных выдач"
+            value={String(report.repeats_issued)}
+            hint={
+              report.repeats_finished
+                ? `исправились ${report.repeats_fixed} из ${report.repeats_finished}`
+                : 'ещё не завершены'
+            }
+          />
+        )}
       </div>
 
       <h2 className="section-heading">Выводы по группе</h2>
@@ -254,6 +270,13 @@ export function TeacherReportPage() {
       )}
 
       <h2 className="section-heading">Обучающиеся</h2>
+      {report.repeats_issued > 0 && (
+        <p className="page-hint">
+          Средний балл и зачёт считаются по первым попыткам. Повторные выдачи
+          проваленных карточек показаны под именем: балл первой попытки, балл
+          после повтора и исправился ли обучающийся.
+        </p>
+      )}
       <table className="card-table">
         <thead>
           <tr>
@@ -269,7 +292,31 @@ export function TeacherReportPage() {
         <tbody>
           {report.students.map((student) => (
             <tr key={student.student_id}>
-              <td>{student.student_name}</td>
+              <td>
+                {student.student_name}
+                {student.repeats.length > 0 && (
+                  <ul className="repeat-list">
+                    {student.repeats.map((repeat) => (
+                      <li key={repeat.repeat_attempt_id}>
+                        повтор «{repeat.scenario_title}»:{' '}
+                        {repeat.first_score !== null ? Math.round(repeat.first_score * 100) : '—'}
+                        {' → '}
+                        {repeat.repeat_score !== null
+                          ? Math.round(repeat.repeat_score * 100)
+                          : '—'}
+                        {' · '}
+                        {repeat.fixed === null ? (
+                          <span className="chip chip--neutral">не завершён</span>
+                        ) : (
+                          <span className={repeat.fixed ? 'chip chip--ok' : 'chip chip--danger'}>
+                            {repeat.fixed ? 'исправился' : 'не исправился'}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </td>
               <td>{student.attempts}</td>
               <td>{student.finished}</td>
               <td>
