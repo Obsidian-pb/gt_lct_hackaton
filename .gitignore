@@ -19,3 +19,6 @@ dist/
 
 # Собранная документация — воспроизводится scripts/build_docs.py
 docs/build/
+
+# Веса модели для образа ops/llm — гигабайты, получаются ops/llm/fetch_model.sh
+ops/llm/models/*.gguf

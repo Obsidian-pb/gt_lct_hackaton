@@ -142,6 +142,23 @@ cd frontend && npm install && npm run dev
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+### Изолированный контур
+
+`docker-compose.offline.yml` накладывается на продовую конфигурацию и добавляет
+контейнер `llm` — llama.cpp с моделью Qwen3 4B внутри образа. Бэкенд
+переводится на `http://llm:8080/v1`, и внешних адресов в комплексе не остаётся.
+Файл модели получается один раз, на машине с интернетом.
+
+```bash
+sh ops/llm/fetch_model.sh
+docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d --build
+```
+
+Перенос в контур без сети — одним архивом: `scripts/package_offline.sh`
+собирает образы под `linux/amd64` и складывает их вместе с файлами
+развёртывания; на месте — `docker load` и та же команда `up`. Запуск на
+рабочем месте под Windows — в [`docs/windows.md`](docs/windows.md).
+
 ### Тесты
 
 ```bash

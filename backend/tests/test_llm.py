@@ -31,6 +31,8 @@ def test_невалидный_ответ_приводит_к_ошибке():
         ("http://localhost:11434/v1", True),
         ("http://host.docker.internal:8095/v1", True),
         ("http://192.168.1.10:8000/v1", True),
+        # Имя сервиса из сети compose: его знает только внутренний DNS Docker.
+        ("http://llm:8080/v1", True),
         ("https://api.openai.com/v1", False),
     ],
 )

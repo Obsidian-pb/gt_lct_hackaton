@@ -1,0 +1,63 @@
+# Профиль изолированного контура: языковая модель — внутри комплекса.
+#
+# Накладывается на продовую конфигурацию:
+#
+#     docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d
+#
+# Добавляет сервис `llm` (llama.cpp с моделью внутри образа, см. ops/llm)
+# и переводит бэкенд на него. Ни одного внешнего адреса после этого
+# в комплексе не остаётся: ТЗ требует работы «без доступа к внешним сетям»,
+# и разбор от языковой модели — не исключение.
+#
+# Если администратор уже менял настройку модели в интерфейсе, запись в базе
+# главнее переменных окружения — тогда адрес http://llm:8080/v1 нужно
+# выбрать там же, в разделе «Настройки».
+
+services:
+  llm:
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+    build:
+      context: ./ops/llm
+      args:
+        MODEL_FILE: ${LLM_MODEL_FILE:-Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
+    image: dds112-llm:${LLM_IMAGE_TAG:-qwen3-4b}
+    environment:
+      # Все ядра, что отданы контейнеру: модель на процессоре упирается
+      # именно в них. Число потоков не должно превышать лимит cpus ниже.
+      LLAMA_ARG_THREADS: ${LLM_THREADS:-4}
+    # Веса 4B в Q4 занимают ~2,5 ГБ, контекст на два слота — ещё ~1 ГБ.
+    # Запас нужен: при нехватке памяти контейнер убивается молча,
+    # а бэкенд видит лишь обрыв соединения.
+    mem_limit: ${LLM_MEM_LIMIT:-4g}
+    cpus: ${LLM_CPUS:-4.0}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      # Загрузка весов с диска в память на медленном диске — минуты.
+      start_period: 180s
+      retries: 3
+
+  backend:
+    depends_on:
+      # Бэкенд не ждёт готовности модели: занятия и оценка без неё работают,
+      # а разбор допишется, когда модель поднимется. Ждать 2–3 минуты
+      # на каждом перезапуске ради фоновой функции — не нужно.
+      llm:
+        condition: service_started
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-local}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://llm:8080/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      # Модель без режима размышлений; флаг безвреден и для неё,
+      # а для «думающих» Qwen3 экономит минуту на каждом разборе.
+      LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-true}
+      # Процессор без ускорителя пишет разбор 30–90 секунд.
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}

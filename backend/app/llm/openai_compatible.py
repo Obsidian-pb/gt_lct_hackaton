@@ -75,6 +75,11 @@ def _is_local(base_url: str) -> bool:
     host = urlparse(base_url).hostname or ""
     if host in {"localhost", "host.docker.internal"}:
         return True
+    # Имя без точки — сервис из той же сети compose (`llm`, `backend`):
+    # такое имя разрешает только внутренний DNS Docker, снаружи его нет,
+    # и прокси о нём тем более не знает.
+    if "." not in host:
+        return True
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
