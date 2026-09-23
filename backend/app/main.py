@@ -1,10 +1,11 @@
 import logging
 import traceback
+from pathlib import Path
 
 import jwt
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api import admin, attempts, auth, materials, operator, student, teacher
 from app.core.config import get_settings
@@ -141,3 +142,31 @@ def health() -> dict:
         "ekp_rules": len(get_ekp()),
         "response_deadline_seconds": settings.default_response_deadline_seconds,
     }
+
+
+def _mount_static(static_dir: Path) -> None:
+    """Раздача собранного фронтенда самим приложением.
+
+    Нужна переносному комплекту для Windows: там нет nginx, и один процесс
+    обслуживает и API, и страницы. Маршруты интерфейса — `/calls/5`,
+    `/report/3` — существуют только в браузере, поэтому любой путь вне
+    `/api`, которому не соответствует файл, отдаёт `index.html`: иначе
+    обновление страницы на любом экране, кроме первого, давало бы 404.
+    Объявляется последним, чтобы не перехватить маршруты API.
+    """
+    index = static_dir / "index.html"
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        if path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        candidate = (static_dir / path).resolve()
+        # Путь обязан остаться внутри каталога: `..` в адресе не должен
+        # выводить за его пределы.
+        if candidate.is_file() and static_dir in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+
+if get_settings().static_dir:
+    _mount_static(get_settings().static_dir.resolve())

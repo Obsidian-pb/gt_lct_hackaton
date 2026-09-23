@@ -159,6 +159,12 @@ docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d --
 развёртывания; на месте — `docker load` и та же команда `up`. Запуск на
 рабочем месте под Windows — в [`docs/windows.md`](docs/windows.md).
 
+Без Docker — переносной комплект: `scripts/package_portable.sh` собирает
+`dds112-portable.zip` (встраиваемый Python, PostgreSQL, llama.cpp, модель,
+код и интерфейс). На Windows его распаковывают на диск и запускают
+`start.cmd`; прав администратора не нужно. Правки кода — `--update`,
+архив в 15 МБ поверх папки.
+
 ### Тесты
 
 ```bash

@@ -56,6 +56,12 @@ class Settings(BaseSettings):
 
     ekp_path: Path = BASE_DIR / "data" / "ekp.json"
 
+    # Каталог собранного фронтенда, который раздаёт само приложение.
+    # В контейнерной поставке пусто — фронт раздаёт nginx. Значение задаёт
+    # переносной комплект для Windows, где nginx нет и один процесс
+    # обслуживает и API, и страницы.
+    static_dir: Path | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
