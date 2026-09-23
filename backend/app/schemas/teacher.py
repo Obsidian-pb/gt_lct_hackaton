@@ -214,6 +214,9 @@ class SessionOut(BaseModel):
     scenarios: list[dict]
     # Сколько карточек получит каждый обучающийся при запуске.
     approved_scenarios: int
+    # Обозначение редакции классификатора, по которой идёт занятие.
+    # None — встроенная редакция из файла поставки.
+    classifier_version_label: str | None = None
 
 
 class ProgressOut(BaseModel):

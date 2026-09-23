@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { api, operatorApi } from '../api/client';
 import type { Call, CallerRole, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
 import { Timer } from '../components/Timer';
 
@@ -205,7 +205,9 @@ export function OperatorCallPage() {
 
   useEffect(() => {
     api.call(attemptId).then(setCall).catch((e) => setError(String(e.message ?? e)));
-    api.surveyGroups().then(setGroups).catch(() => undefined);
+    // Опросная карта — по редакции классификатора занятия, а не по
+    // действующей: эталон вызова считается по ней же.
+    operatorApi.surveyGroups(attemptId).then(setGroups).catch(() => undefined);
   }, [attemptId]);
 
   // Каждый выбор открывает следующий уровень опросной карты.
@@ -218,7 +220,7 @@ export function OperatorCallPage() {
     (async () => {
       const collected: SurveyOption[][] = [];
       for (let depth = 0; depth <= path.length; depth += 1) {
-        const options = await api.surveyOptions(group, path.slice(0, depth));
+        const options = await operatorApi.surveyOptions(attemptId, group, path.slice(0, depth));
         if (options.length === 0) break;
         collected.push(options);
       }
@@ -227,7 +229,7 @@ export function OperatorCallPage() {
     return () => {
       cancelled = true;
     };
-  }, [group, path]);
+  }, [attemptId, group, path]);
 
   const selectAt = useCallback((depth: number, label: string) => {
     // Выбор на верхнем уровне отменяет всё, что было выбрано ниже.

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from app.models.training import CallOutcome
 from app.services import address as address_service
+from app.services.ekp import EKP
 from app.services.survey import ClassificationResult, classify
 from app.services.violations import Severity, Violation
 
@@ -101,13 +102,17 @@ class OperatorAssessment:
 
 
 def evaluate(
-    card: FilledCard, expected: Expected | int, deadline_seconds: int
+    card: FilledCard,
+    expected: Expected | int,
+    deadline_seconds: int,
+    ekp: EKP | None = None,
 ) -> OperatorAssessment:
     """Оценивает приём вызова.
 
     Вторым аргументом принимается эталон целиком; номер правила отдельным
     числом оставлен ради прежних вызовов, где исход всегда был один —
-    классификация.
+    классификация. Редакция классификатора — редакция занятия: без неё
+    берётся встроенная.
     """
     if isinstance(expected, int):
         expected = Expected(outcome=CallOutcome.CLASSIFY, rule_number=expected)
@@ -130,7 +135,9 @@ def evaluate(
                 Violation("O1", "Признаки происшествия не выбраны, карточка не классифицирована")
             )
         else:
-            classification = classify(expected.rule_number, card.group, list(card.path))
+            classification = classify(
+                expected.rule_number, card.group, list(card.path), ekp
+            )
             result.classification = classification
             _check_classification(classification, result)
 

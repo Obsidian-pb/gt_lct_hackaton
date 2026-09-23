@@ -332,6 +332,12 @@ export function TeacherSessionPage() {
         {Math.round(session.pass_score * 100)} баллов при{' '}
         {session.max_critical_violations} критических нарушениях
       </p>
+      <p className="page-hint" style={{ fontSize: 12 }}>
+        Классификатор: {session.classifier_version_label
+          ? `редакция «${session.classifier_version_label}»`
+          : 'встроенная редакция из файла поставки'}
+        . Зафиксирована при создании занятия — смена действующей редакции его не затрагивает.
+      </p>
 
       {error && <div className="alert">{error}</div>}
 

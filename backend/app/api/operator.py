@@ -20,7 +20,8 @@ from app.models.training import (
     TrainingMode,
 )
 from app.models.user import Role, User
-from app.services.ekp import get_ekp
+from app.services.classifier_versions import current_ekp, ekp_for_session
+from app.services.ekp import EKP
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, Expected, FilledCard
 from app.services.operator import evaluate as evaluate_card
 from app.services.survey import options_at, survey_tree
@@ -160,21 +161,41 @@ def _call(attempt: Attempt) -> CallOut:
     )
 
 
+def _survey_ekp(attempt_id: int | None, db: Session, user: User) -> EKP:
+    """Редакция классификатора, по которой строится опросная карта.
+
+    Опросная карта у вызова та же, что и эталон: оператор классифицирует
+    по редакции занятия, иначе признаки, которых в его редакции нет,
+    засчитывались бы как ошибка. Без вызова — справочный просмотр
+    по действующей редакции.
+    """
+    if attempt_id is None:
+        return current_ekp(db)
+    return ekp_for_session(_load(attempt_id, db, user).session)
+
+
 @router.get("/groups", response_model=list[str])
-def groups(user: User = Depends(get_current_user)) -> list[str]:
+def groups(
+    attempt_id: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[str]:
     """Категории происшествий верхнего уровня опросной карты."""
-    return sorted(survey_tree())
+    return sorted(survey_tree(_survey_ekp(attempt_id, db, user)))
 
 
 @router.get("/options", response_model=list[OptionOut])
 def options(
     group: str,
     path: str = "",
+    attempt_id: int | None = None,
+    db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[OptionOut]:
     """Признаки, доступные на текущем шаге. Путь передаётся через «|»."""
     selected = [p for p in path.split("|") if p]
-    return [OptionOut(**o) for o in options_at(group, selected)]
+    ekp = _survey_ekp(attempt_id, db, user)
+    return [OptionOut(**o) for o in options_at(group, selected, ekp)]
 
 
 @router.get("/calls/my", response_model=list[CallOut])
@@ -233,6 +254,20 @@ def classify_call(
             status.HTTP_409_CONFLICT, "Сценарий не привязан к классификатору"
         )
 
+    # Оценка идёт по редакции занятия. Сценарий мог быть составлен по другой
+    # редакции, где правило с этим номером было, а в редакции занятия его
+    # нет, — тогда эталона нет и оценивать не по чему.
+    ekp = ekp_for_session(attempt.session)
+    if scenario.expected_outcome is CallOutcome.CLASSIFY:
+        try:
+            ekp.rule(scenario.ekp_rule_number)
+        except KeyError:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Правила № {scenario.ekp_rule_number} нет в редакции "
+                "классификатора, по которой идёт занятие",
+            ) from None
+
     now = utcnow()
     attempt.chosen_group = payload.group or None
     attempt.chosen_path = list(payload.path)
@@ -267,6 +302,7 @@ def classify_call(
             address_parts=dict(scenario.address_parts or {}),
         ),
         deadline,
+        ekp,
     )
 
     evaluation = Evaluation(
@@ -310,7 +346,9 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
             expected_depth=result.expected_depth,
             missed_services=list(result.missed_services),
             extra_services=list(result.extra_services),
-            notified_services=get_ekp().rule(result.expected_rule.number).resolve(),
+            # Эталонное правило уже взято из редакции занятия — список
+            # оповещения берётся из него же, а не ищется заново.
+            notified_services=result.expected_rule.resolve(),
         )
     return OperatorEvaluationOut(
         attempt_id=attempt.id,

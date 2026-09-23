@@ -46,7 +46,8 @@ from app.services import audit
 from app.services import export as export_service
 from app.services import report as report_service
 from app.services import sessions as session_service
-from app.services.ekp import get_ekp
+from app.services.classifier_versions import active_version, current_ekp
+from app.services.ekp import EKP
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
 from app.services.response_status import PRIMARY, ResponseStatus
 from app.services.violations import Severity, kind_of
@@ -59,18 +60,26 @@ def catalog(
     db: Session = Depends(get_session), user: User = Depends(require_teacher)
 ) -> CatalogOut:
     services = db.scalars(select(DispatchService).order_by(DispatchService.name)).all()
+    # Группы — из действующей редакции классификатора: сценарий готовится
+    # к будущим занятиям, а они будут привязаны к ней.
     return CatalogOut(
-        groups=list(get_ekp().groups),
+        groups=list(current_ekp(db).groups),
         services=[ServiceOut.model_validate(s) for s in services],
         difficulties=DIFFICULTY_LABELS,
     )
 
 
-def _to_out(scenario: Scenario) -> ScenarioOut:
+def _to_out(scenario: Scenario, ekp: EKP) -> ScenarioOut:
+    """Сценарий для кабинета. Список оповещения — по переданной редакции.
+
+    У сценария нет своего занятия, поэтому редакцию выбирает вызывающий:
+    в кабинете это действующая. Правило, которого в ней нет, оставляет
+    список пустым, а не роняет весь список сценариев.
+    """
     notified: dict[str, str] = {}
     if scenario.ekp_rule_number:
         try:
-            rule = get_ekp().rule(scenario.ekp_rule_number)
+            rule = ekp.rule(scenario.ekp_rule_number)
             notified = rule.resolve(set(scenario.flags or []))
         except KeyError:
             notified = {}
@@ -128,12 +137,14 @@ async def generate(
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Служба не найдена")
 
+    ekp = current_ekp(db)
     drafts = await generate_batch(
         get_llm_provider(),
         group=payload.group,
         count=payload.count,
         service=service.classifier_name,
         difficulty=payload.difficulty,
+        ekp=ekp,
     )
     scenarios = [_save_draft(db, d, service, user) for d in drafts]
     db.flush()
@@ -156,7 +167,7 @@ async def generate(
     return GenerateOut(
         requested=payload.count,
         created=len(scenarios),
-        scenarios=[_to_out(s) for s in scenarios],
+        scenarios=[_to_out(s, ekp) for s in scenarios],
         warning=warning,
     )
 
@@ -180,7 +191,8 @@ def list_scenarios(
         query = query.where(Scenario.approved_at.is_not(None))
     elif approved is False:
         query = query.where(Scenario.approved_at.is_(None))
-    return [_to_out(s) for s in db.scalars(query).all()]
+    ekp = current_ekp(db)
+    return [_to_out(s, ekp) for s in db.scalars(query).all()]
 
 
 @router.post("/scenarios/{scenario_id}/approve", response_model=ScenarioOut)
@@ -200,7 +212,7 @@ def approve(
         object_id=scenario.id, detail={"тип": scenario.incident_type}, request=request,
     )
     db.commit()
-    return _to_out(scenario)
+    return _to_out(scenario, current_ekp(db))
 
 
 @router.post("/scenarios/{scenario_id}/correct", response_model=ScenarioOut)
@@ -225,7 +237,15 @@ async def correct(
             status.HTTP_409_CONFLICT, "Сценарий не привязан к классификатору"
         )
 
-    rule = get_ekp().rule(scenario.ekp_rule_number)
+    ekp = current_ekp(db)
+    try:
+        rule = ekp.rule(scenario.ekp_rule_number)
+    except KeyError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Правила № {scenario.ekp_rule_number} нет в действующей редакции "
+            "классификатора: сценарий составлен по прежней редакции",
+        ) from None
     draft = await draft_from_rule(
         get_llm_provider(),
         rule,
@@ -254,7 +274,7 @@ async def correct(
         object_id=scenario.id, detail={"замечание": payload.note[:200]}, request=request,
     )
     db.commit()
-    return _to_out(scenario)
+    return _to_out(scenario, ekp)
 
 
 @router.patch("/scenarios/{scenario_id}", response_model=ScenarioOut)
@@ -288,7 +308,7 @@ def edit(
     for key, value in data.items():
         setattr(scenario, key, value)
     db.commit()
-    return _to_out(scenario)
+    return _to_out(scenario, current_ekp(db))
 
 
 # Поля, которые преподаватель правит руками и которые имеет смысл проверять:
@@ -564,6 +584,9 @@ def _session_out(session: TrainingSession) -> SessionOut:
             {"id": s.id, "title": s.title, "approved": s.is_approved} for s in session.scenarios
         ],
         approved_scenarios=sum(1 for s in session.scenarios if s.is_approved),
+        classifier_version_label=(
+            session.classifier_version.label if session.classifier_version else None
+        ),
     )
 
 
@@ -732,6 +755,9 @@ def create_session(
         call_interval_seconds=payload.call_interval_seconds,
         pass_score=payload.pass_score,
         max_critical_violations=payload.max_critical_violations,
+        # Редакция классификатора фиксируется при создании: смена действующей
+        # редакции после этого занятие не затрагивает. Пусто — встроенная.
+        classifier_version=active_version(db),
     )
     db.add(session)
     db.commit()

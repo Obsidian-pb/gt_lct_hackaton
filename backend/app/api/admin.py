@@ -14,9 +14,20 @@
 """
 
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -27,9 +38,16 @@ from app.core.db import get_session
 from app.core.security import hash_password
 from app.llm import is_external, probe_llm, reset_llm_provider
 from app.models.audit import AuditAction, AuditEvent, ErrorEvent
-from app.models.training import Attempt, Scenario, SessionState, TrainingSession
+from app.models.training import (
+    Attempt,
+    ClassifierVersion,
+    Scenario,
+    SessionState,
+    TrainingSession,
+)
 from app.models.user import DispatchService, Role, User
 from app.services import audit, health, system_settings
+from app.services import classifier_versions as classifier_service
 from app.services.ekp import get_ekp
 from app.services.system_settings import LlmConfig
 
@@ -812,3 +830,202 @@ async def test_llm(
         detail=result.detail,
         elapsed_ms=result.elapsed_ms,
     )
+
+
+# --- Редакции классификатора -------------------------------------------------
+#
+# Механизм импорта обновлений учебных материалов из ТЗ: классификатор правится
+# не реже раза в год, и администратор загружает новую редакцию xlsx из
+# интерфейса. Загрузка и включение разведены: сначала видно число правил
+# и предупреждения разбора, потом решение. Уже созданные занятия остаются
+# на своей редакции — оценка через год должна совпадать с тем, что
+# обучающийся видел на экране.
+#
+# Удаления редакции нет намеренно: на неё ссылаются проведённые занятия,
+# а кабинет администратора необратимых удалений не содержит вовсе.
+
+# Исходный xlsx весит около 700 КБ; предел с запасом на вложенные листы
+# и форматирование, но не на попытку залить в базу что-то постороннее.
+MAX_CLASSIFIER_BYTES = 20 * 1024 * 1024
+
+
+class ClassifierVersionOut(BaseModel):
+    id: int
+    label: str
+    source_name: str
+    sha256: str
+    rule_count: int
+    is_active: bool
+    note: str | None
+    uploaded_by: str
+    uploaded_at: datetime
+    # Подписи подколонок, которых разбор не знает. Заполняется только
+    # в ответе на загрузку: потом их неоткуда взять, а решение о включении
+    # принимается как раз в этот момент.
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ClassifierOut(BaseModel):
+    """Состояние классификатора: встроенная редакция и загруженные."""
+
+    builtin_source: str
+    builtin_rule_count: int
+    # Истинно, когда не включена ни одна загруженная редакция.
+    builtin_active: bool
+    versions: list[ClassifierVersionOut]
+
+
+def _version_out(
+    version: ClassifierVersion, warnings: list[str] | None = None
+) -> ClassifierVersionOut:
+    return ClassifierVersionOut(
+        id=version.id,
+        label=version.label,
+        source_name=version.source_name,
+        sha256=version.sha256,
+        rule_count=version.rule_count,
+        is_active=version.is_active,
+        note=version.note,
+        uploaded_by=version.uploaded_by.full_name,
+        uploaded_at=version.created_at,
+        warnings=list(warnings or []),
+    )
+
+
+def _classifier_out(db: Session) -> ClassifierOut:
+    builtin = get_ekp()
+    versions = classifier_service.list_versions(db)
+    return ClassifierOut(
+        builtin_source=builtin.source or "файл поставки",
+        builtin_rule_count=len(builtin),
+        builtin_active=not any(v.is_active for v in versions),
+        versions=[_version_out(v) for v in versions],
+    )
+
+
+@router.get("/classifier", response_model=ClassifierOut)
+def classifier_state(
+    db: Session = Depends(get_session), admin: User = Depends(require_admin)
+) -> ClassifierOut:
+    return _classifier_out(db)
+
+
+@router.post(
+    "/classifier/versions",
+    response_model=ClassifierVersionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_classifier(
+    request: Request,
+    file: UploadFile = File(...),
+    label: str = Form(min_length=1, max_length=64),
+    note: str | None = Form(default=None, max_length=500),
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> ClassifierVersionOut:
+    """Загрузка новой редакции из исходного xlsx. Редакция сохраняется выключенной."""
+    # Имя приходит от клиента и может содержать путь: берётся последний
+    # элемент, как и в справочной базе.
+    name = PurePosixPath((file.filename or "").replace("\\", "/")).name
+    if PurePosixPath(name).suffix.lower() != ".xlsx":
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "Классификатор принимается только в виде книги Excel (.xlsx) — "
+            "в том формате, в каком его выдаёт ГБУ «Система 112»",
+        )
+
+    # Предел проверяется по фактически прочитанным байтам: заголовок
+    # Content-Length клиент вправе не прислать.
+    data = await file.read(MAX_CLASSIFIER_BYTES + 1)
+    if len(data) > MAX_CLASSIFIER_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Файл больше {MAX_CLASSIFIER_BYTES // (1024 * 1024)} МБ — "
+            "это не классификатор",
+        )
+    if not data:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Файл пустой")
+
+    clean_label = label.strip()
+    if not clean_label:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "Укажите обозначение редакции"
+        )
+
+    try:
+        version, warnings = classifier_service.upload(
+            db,
+            data=data,
+            label=clean_label,
+            source_name=name,
+            note=(note or "").strip() or None,
+            actor=admin,
+        )
+    except classifier_service.DuplicateVersion as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    except classifier_service.ParseError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+
+    audit.record(
+        db,
+        AuditAction.CLASSIFIER_UPLOADED,
+        actor=admin,
+        object_type="classifier_version",
+        object_id=version.id,
+        detail={
+            "обозначение": version.label,
+            "файл": version.source_name,
+            "правил": str(version.rule_count),
+            "sha256": version.sha256,
+            "нераспознанных подколонок": str(len(warnings)),
+        },
+        request=request,
+    )
+    db.commit()
+    return _version_out(version, warnings)
+
+
+@router.post("/classifier/versions/{version_id}/activate", response_model=ClassifierOut)
+def activate_classifier(
+    version_id: int,
+    request: Request,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> ClassifierOut:
+    """Делает редакцию действующей для новых занятий и кабинета преподавателя."""
+    try:
+        version = classifier_service.activate(db, version_id)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+    audit.record(
+        db,
+        AuditAction.CLASSIFIER_ACTIVATED,
+        actor=admin,
+        object_type="classifier_version",
+        object_id=version.id,
+        detail={"обозначение": version.label, "правил": str(version.rule_count)},
+        request=request,
+    )
+    db.commit()
+    return _classifier_out(db)
+
+
+@router.post("/classifier/builtin", response_model=ClassifierOut)
+def restore_builtin_classifier(
+    request: Request,
+    db: Session = Depends(get_session),
+    admin: User = Depends(require_admin),
+) -> ClassifierOut:
+    """Возврат к встроенной редакции: ни одна загруженная не включена."""
+    previous = classifier_service.deactivate(db)
+    audit.record(
+        db,
+        AuditAction.CLASSIFIER_BUILTIN_RESTORED,
+        actor=admin,
+        object_type="classifier_version",
+        object_id=previous.id if previous else None,
+        detail={"была включена": previous.label if previous else "—"},
+        request=request,
+    )
+    db.commit()
+    return _classifier_out(db)

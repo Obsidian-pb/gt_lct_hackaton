@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from app.services.ekp import Rule, get_ekp
+from app.services.ekp import EKP, Rule, get_ekp
 
 
 @dataclass
@@ -39,10 +39,15 @@ HIDDEN_FROM_OPERATOR = "Не отображается оператору 112"
 
 
 @lru_cache
-def survey_tree() -> dict[str, SurveyNode]:
-    """Дерево признаков по группам происшествий."""
+def _tree_for(ekp: EKP) -> dict[str, SurveyNode]:
+    """Дерево признаков одной редакции.
+
+    Кеш держится на самом объекте классификатора: редакций несколько,
+    и у каждой своё дерево. Объекты редакций живут в кешах сервисов весь
+    срок работы процесса, поэтому ключ по ним не устаревает.
+    """
     roots: dict[str, SurveyNode] = {}
-    for rule in get_ekp().all_rules():
+    for rule in ekp.all_rules():
         signs = [s for s in rule.signs if s]
         if not signs or signs[0] == HIDDEN_FROM_OPERATOR:
             continue
@@ -56,9 +61,18 @@ def survey_tree() -> dict[str, SurveyNode]:
     return roots
 
 
-def options_at(group: str, path: list[str]) -> list[dict]:
+def survey_tree(ekp: EKP | None = None) -> dict[str, SurveyNode]:
+    """Дерево признаков по группам происшествий.
+
+    Без редакции — по встроенной: так вызывают проверки и справочные
+    места; занятие передаёт свою редакцию явно.
+    """
+    return _tree_for(ekp or get_ekp())
+
+
+def options_at(group: str, path: list[str], ekp: EKP | None = None) -> list[dict]:
     """Что оператор может выбрать на текущем шаге."""
-    roots = survey_tree()
+    roots = survey_tree(ekp)
     node = roots.get(group)
     if node is None:
         return []
@@ -77,9 +91,10 @@ def options_at(group: str, path: list[str]) -> list[dict]:
     ]
 
 
-def resolve(group: str, path: list[str]) -> Rule | None:
+def resolve(group: str, path: list[str], ekp: EKP | None = None) -> Rule | None:
     """Правило, к которому привёл выбранный путь признаков."""
-    node = survey_tree().get(group)
+    ekp = ekp or get_ekp()
+    node = survey_tree(ekp).get(group)
     if node is None:
         return None
     for sign in path:
@@ -88,7 +103,7 @@ def resolve(group: str, path: list[str]) -> Rule | None:
             return None
     if node.rule_number is None:
         return None
-    return get_ekp().rule(node.rule_number)
+    return ekp.rule(node.rule_number)
 
 
 @dataclass(frozen=True)
@@ -124,11 +139,16 @@ class ClassificationResult:
 
 
 def classify(
-    expected_rule_number: int, group: str, path: list[str]
+    expected_rule_number: int, group: str, path: list[str], ekp: EKP | None = None
 ) -> ClassificationResult:
-    ekp = get_ekp()
+    """Сверяет выбранный путь с эталонным правилом.
+
+    Редакция передаётся снаружи: и эталон, и выбранный путь обязаны
+    читаться по одной и той же редакции — той, по которой идёт занятие.
+    """
+    ekp = ekp or get_ekp()
     expected = ekp.rule(expected_rule_number)
-    chosen = resolve(group, path)
+    chosen = resolve(group, path, ekp)
 
     expected_signs = [s for s in expected.signs if s]
     matched = 0

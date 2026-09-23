@@ -238,7 +238,10 @@ class ClassifierVersion(Base, TimestampMixin):
     rule_count: Mapped[int] = mapped_column(Integer)
     # Разобранный классификатор в том же виде, что и файл поставки
     # `data/ekp.json`: так одна и та же загрузка обслуживает обе редакции.
-    content: Mapped[bytes] = mapped_column(LargeBinary)
+    # Столбец отложенный: это мегабайты, а список редакций и привязка
+    # занятия к редакции обходятся обозначением и контрольной суммой.
+    # На схему это не влияет — только на то, когда столбец читается.
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     note: Mapped[str | None] = mapped_column(String(500))
 

@@ -389,3 +389,69 @@ export const settingsApi = {
       body: JSON.stringify(body),
     }),
 };
+
+// --- Редакции классификатора -------------------------------------------------
+// Файл общий и правится только дописыванием в конец, поэтому раздел вынесен
+// отдельным объектом, а его типы импортированы отдельной строкой.
+
+import type { ClassifierState, ClassifierVersion } from './types';
+
+/**
+ * Загрузка xlsx новой редакции. Мимо `request` по той же причине, что и файл
+ * справочной базы: multipart обязан нести границу частей, и её проставляет
+ * сам браузер — свой Content-Type её бы затёр.
+ */
+async function uploadClassifier(
+  file: File,
+  label: string,
+  note: string,
+): Promise<ClassifierVersion> {
+  const token = getToken();
+  const form = new FormData();
+  form.append('file', file);
+  form.append('label', label);
+  if (note.trim()) form.append('note', note.trim());
+  const response = await fetch(`${BASE}/api/admin/classifier/versions`, {
+    method: 'POST',
+    body: form,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    let detail = `Ошибка ${response.status}`;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      // Тело может быть пустым — оставляем текст по умолчанию.
+    }
+    throw new ApiError(detail);
+  }
+  return (await response.json()) as ClassifierVersion;
+}
+
+export const classifierApi = {
+  read: () => request<ClassifierState>('/api/admin/classifier'),
+  upload: uploadClassifier,
+  activate: (id: number) =>
+    request<ClassifierState>(`/api/admin/classifier/versions/${id}/activate`, {
+      method: 'POST',
+    }),
+  restoreBuiltin: () =>
+    request<ClassifierState>('/api/admin/classifier/builtin', { method: 'POST' }),
+};
+
+/**
+ * Опросная карта по редакции классификатора того занятия, к которому
+ * относится вызов. Вызовы без номера вызова (api.surveyGroups и
+ * api.surveyOptions) остаются для справочного просмотра по действующей.
+ */
+export const operatorApi = {
+  surveyGroups: (attemptId: number) =>
+    request<string[]>(`/api/operator/groups?attempt_id=${attemptId}`),
+  surveyOptions: (attemptId: number, group: string, path: string[]) =>
+    request<SurveyOption[]>(
+      `/api/operator/options?attempt_id=${attemptId}&group=${encodeURIComponent(
+        group,
+      )}&path=${encodeURIComponent(path.join('|'))}`,
+    ),
+};

@@ -72,8 +72,21 @@ class Rule:
 
 
 class EKP:
-    def __init__(self, path: Path) -> None:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+    """Разобранный классификатор одной редакции.
+
+    Строится из файла поставки, из байтов, сохранённых в базе вместе
+    с загруженной редакцией, или из уже разобранного словаря — формат
+    у всех трёх один, `data/ekp.json`.
+    """
+
+    def __init__(self, source: Path | bytes | dict) -> None:
+        if isinstance(source, Path):
+            raw = json.loads(source.read_text(encoding="utf-8"))
+        elif isinstance(source, (bytes, bytearray)):
+            raw = json.loads(source.decode("utf-8"))
+        else:
+            raw = source
+        self.source: str = str(raw.get("source") or "")
         self.groups: tuple[str, ...] = tuple(raw["groups"])
         self.services: tuple[str, ...] = tuple(raw["services"])
         self._rules: dict[int, Rule] = {}
@@ -120,4 +133,10 @@ class EKP:
 
 @lru_cache
 def get_ekp() -> EKP:
+    """Встроенная редакция — из файла поставки.
+
+    Это редакция всех занятий, у которых редакция не указана, и запасной
+    вариант, когда администратор не включил ни одной загруженной. Редакции,
+    загруженные через интерфейс, выдаёт `services.classifier_versions`.
+    """
     return EKP(get_settings().ekp_path)

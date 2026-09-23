@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from app.llm import GeneratedScenario, LLMProvider
 from app.services.callers import random_caller
-from app.services.ekp import Rule, get_ekp
+from app.services.ekp import EKP, Rule, get_ekp
 from app.services.response_status import ResponseStatus
 
 DIFFICULTY_LABELS = {1: "простая", 2: "средняя", 3: "высокая"}
@@ -67,14 +67,19 @@ def is_profile_for(rule: Rule, service: str, flags: set[str] | None = None) -> b
     return service in rule.resolve(flags or set())
 
 
-def pick_rules(group: str, count: int, service: str, rng: random.Random) -> list[Rule]:
+def pick_rules(
+    group: str, count: int, service: str, rng: random.Random, ekp: EKP | None = None
+) -> list[Rule]:
     """Выбирает правила группы, подмешивая непрофильные.
 
     Тренажёр должен учить и отказываться: если все карточки профильные,
     обучающийся привыкает всегда нажимать «Принята», а корректный отказ —
     отдельный навык, которому посвящён целый раздел памятки.
+
+    Редакция классификатора — та, что действует в момент формирования:
+    сценарий готовится к будущим занятиям, а они пойдут по включённой.
     """
-    rules = list(get_ekp().by_group(group))
+    rules = list((ekp or get_ekp()).by_group(group))
     if not rules:
         return []
 
@@ -143,6 +148,7 @@ async def generate_batch(
     difficulty: int = 2,
     seed: int | None = None,
     concurrency: int = 2,
+    ekp: EKP | None = None,
 ) -> list[DraftScenario]:
     """Формирует пачку черновиков.
 
@@ -155,7 +161,7 @@ async def generate_batch(
     с запрошенным количеством и сообщает, сколько получилось.
     """
     rng = random.Random(seed)
-    rules = pick_rules(group, count, service, rng)
+    rules = pick_rules(group, count, service, rng, ekp)
     # Генератор случайных чисел не потокобезопасен, а заявители нужны разные,
     # поэтому раздаём каждой задаче собственное зерно заранее.
     seeds = [rng.random() for _ in rules]

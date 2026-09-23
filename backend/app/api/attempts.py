@@ -10,7 +10,7 @@ from app.models.training import Attempt, Evaluation, Scenario, TrainingMode
 from app.models.user import Role, User
 from app.schemas.training import CardOut, EvaluationOut, StatusIn
 from app.services import attempts as service
-from app.services.ekp import get_ekp
+from app.services.classifier_versions import ekp_for_session
 from app.services.response_status import COMMENT_REQUIRED, ResponseStatus
 
 router = APIRouter(prefix="/api/attempts", tags=["Работа на АРМ-112"])
@@ -31,7 +31,9 @@ def _card(attempt: Attempt) -> CardOut:
     scenario = attempt.scenario
     notified: dict[str, str] = {}
     if scenario.ekp_rule_number:
-        ekp = get_ekp()
+        # Список оповещения — по редакции классификатора, по которой идёт
+        # занятие: карточка обязана выглядеть так же и через год.
+        ekp = ekp_for_session(attempt.session)
         try:
             notified = ekp.rule(scenario.ekp_rule_number).resolve(set(scenario.flags or []))
         except KeyError:

@@ -539,3 +539,33 @@ export interface LlmTestResult {
   detail: string;
   elapsed_ms: number;
 }
+
+// --- Редакции классификатора -------------------------------------------------
+
+/** Редакция ЕКП, загруженная администратором из исходного xlsx. */
+export interface ClassifierVersion {
+  id: number;
+  label: string;
+  source_name: string;
+  sha256: string;
+  rule_count: number;
+  is_active: boolean;
+  note: string | null;
+  uploaded_by: string;
+  uploaded_at: string;
+  /** Подписи подколонок, которых разбор не знает; приходят только в ответе на загрузку. */
+  warnings: string[];
+}
+
+export interface ClassifierState {
+  builtin_source: string;
+  builtin_rule_count: number;
+  /** Истинно, когда не включена ни одна загруженная редакция. */
+  builtin_active: boolean;
+  versions: ClassifierVersion[];
+}
+
+export interface TrainingSession {
+  /** Обозначение редакции классификатора занятия; null — встроенная из файла поставки. */
+  classifier_version_label: string | null;
+}
