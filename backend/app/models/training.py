@@ -217,6 +217,35 @@ class Scenario(Base, TimestampMixin):
         return self.approved_at is not None
 
 
+class ClassifierVersion(Base, TimestampMixin):
+    """Редакция Единого классификатора происшествий, загруженная в комплекс.
+
+    Классификатор правится не реже раза в год, и техническое задание требует
+    механизма импорта обновлений учебных материалов. Хранится сам разобранный
+    файл, а не ссылка на него: занятие, проведённое по прежней редакции,
+    должно и через год оцениваться по ней же — иначе отчёт разойдётся
+    с тем, что обучающийся видел на экране.
+
+    Пустая ссылка у занятия означает встроенную редакцию из файла поставки.
+    """
+
+    __tablename__ = "classifier_version"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(64), unique=True)
+    source_name: Mapped[str] = mapped_column(String(512))
+    sha256: Mapped[str] = mapped_column(String(64))
+    rule_count: Mapped[int] = mapped_column(Integer)
+    # Разобранный классификатор в том же виде, что и файл поставки
+    # `data/ekp.json`: так одна и та же загрузка обслуживает обе редакции.
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    note: Mapped[str | None] = mapped_column(String(500))
+
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    uploaded_by: Mapped[User] = relationship()
+
+
 class TrainingSession(Base, TimestampMixin):
     """Практическое занятие, которым управляет преподаватель."""
 
@@ -249,6 +278,19 @@ class TrainingSession(Base, TimestampMixin):
     max_critical_violations: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0"
     )
+    # Возвращать ли проваленную карточку обучающемуся в том же занятии.
+    # Повтор идёт тем же сценарием после остальных карточек: ошибка
+    # разбирается по горячим следам, а не на следующей неделе.
+    repeat_failed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    # Редакция классификатора, по которой проводится занятие. Пусто —
+    # встроенная редакция из файла поставки; так устроены все занятия,
+    # проведённые до появления загрузки редакций.
+    classifier_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("classifier_version.id", name="fk_training_session_classifier_version")
+    )
+    classifier_version: Mapped[ClassifierVersion | None] = relationship()
 
     teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
     teacher: Mapped[User] = relationship()
@@ -309,6 +351,15 @@ class Attempt(Base, TimestampMixin):
     student: Mapped[User] = relationship()
     scenario_id: Mapped[int] = mapped_column(ForeignKey("scenario.id"))
     scenario: Mapped[Scenario] = relationship()
+
+    # Если карточка выдана повторно после провала — ссылка на проваленную
+    # попытку. По ней в отчёте видно, исправился ли обучающийся, а сама
+    # повторная попытка не участвует в подсчёте среднего балла первого
+    # прохода. Повтор повтора не выдаётся.
+    repeat_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attempt.id", name="fk_attempt_repeat_of")
+    )
+    repeat_of: Mapped["Attempt | None"] = relationship(remote_side="Attempt.id")
 
     # Точка отсчёта норматива: момент направления карточки в службу.
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
