@@ -15,6 +15,7 @@ const DIFFICULTY_LABELS: Record<number, string> = {
 function Criteria({ session, onChanged }: { session: TrainingSession; onChanged: () => void }) {
   const [passScore, setPassScore] = useState(Math.round(session.pass_score * 100));
   const [maxCritical, setMaxCritical] = useState(session.max_critical_violations);
+  const [repeatFailed, setRepeatFailed] = useState(session.repeat_failed);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -25,6 +26,7 @@ function Criteria({ session, onChanged }: { session: TrainingSession; onChanged:
       await api.updateSession(session.id, {
         pass_score: passScore / 100,
         max_critical_violations: maxCritical,
+        repeat_failed: repeatFailed,
       });
       setSaved(true);
       onChanged();
@@ -63,6 +65,17 @@ function Criteria({ session, onChanged }: { session: TrainingSession; onChanged:
             value={maxCritical}
             onChange={(e) => setMaxCritical(Number(e.target.value))}
           />
+        </div>
+        <div className="field">
+          <label htmlFor="repeat-failed">
+            <input
+              id="repeat-failed"
+              type="checkbox"
+              checked={repeatFailed}
+              onChange={(e) => setRepeatFailed(e.target.checked)}
+            />{' '}
+            Возвращать проваленные карточки
+          </label>
         </div>
         <button className="btn btn--ghost" onClick={save}>
           Сохранить критерии
@@ -247,6 +260,7 @@ function Monitor({ sessionId, interval }: { sessionId: number; interval: number 
             <th>В работе сейчас</th>
             <th>Обработано</th>
             <th>Просрочено</th>
+            <th>Повторов</th>
           </tr>
         </thead>
         <tbody>
@@ -268,6 +282,7 @@ function Monitor({ sessionId, interval }: { sessionId: number; interval: number 
                   {row.overdue_pickup}
                 </span>
               </td>
+              <td>{row.repeats}</td>
             </tr>
           ))}
         </tbody>
@@ -331,6 +346,7 @@ export function TeacherSessionPage() {
         {session.handling_deadline_seconds} с · зачёт от{' '}
         {Math.round(session.pass_score * 100)} баллов при{' '}
         {session.max_critical_violations} критических нарушениях
+        {session.repeat_failed && ' · проваленные карточки возвращаются'}
       </p>
 
       {error && <div className="alert">{error}</div>}

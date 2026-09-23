@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from app.models.base import as_utc, utcnow
 from app.models.training import Attempt, Evaluation, SessionState, TrainingSession
 from app.services import attempts as attempt_service
+from app.services import report as report_service
 
 
 class SessionError(RuntimeError):
@@ -37,6 +38,8 @@ class StudentProgress:
     overdue_pickup: int
     # Сколько карточек висит на обучающемся прямо сейчас.
     in_work: int
+    # Сколько из поступивших карточек — повторные выдачи проваленных.
+    repeats: int = 0
 
 
 def plan_issue_times(
@@ -94,13 +97,71 @@ def start(session: TrainingSession, now: datetime | None = None) -> list[Attempt
     return created
 
 
+def _is_repeat_of(candidate: Attempt, attempt: Attempt) -> bool:
+    # Сравнение по связи, а не только по ключу: у попытки, созданной
+    # в этом же вызове и ещё не записанной, номера нет.
+    if candidate.repeat_of is attempt:
+        return True
+    return attempt.id is not None and candidate.repeat_of_id == attempt.id
+
+
+def schedule_repeat(
+    attempt: Attempt,
+    evaluation: Evaluation,
+    planned: list[Attempt],
+    now: datetime | None = None,
+) -> Attempt | None:
+    """Возвращает проваленную карточку обучающемуся в том же занятии.
+
+    Вызывается сразу после детерминированной части оценки, не дожидаясь
+    языковой модели: ошибка разбирается по горячим следам, а разбор
+    комментария балл ниже порога не поднимет.
+
+    `planned` — все выдачи этого обучающегося в этом занятии, включая уже
+    назначенные повторы: новая карточка встаёт после последней из них,
+    чтобы повтор не вклинивался в поток, а завершал его. Раньше «сейчас»
+    выдача не назначается — иначе она пришла бы задним числом и норматив
+    взятия в работу оказался бы нарушен ещё до появления карточки в ленте.
+
+    Возвращает созданную попытку или None, если повтор не положен: флаг
+    у занятия выключен, занятие завершено, попытка сама была повтором,
+    повтор на неё уже назначен или работа зачтена. Сохранить попытку
+    должен вызывающий.
+    """
+    session = attempt.session
+    if not session.repeat_failed or session.state is SessionState.FINISHED:
+        return None
+    # Повтор повтора не выдаётся: второй провал разбирает преподаватель.
+    if attempt.repeat_of_id is not None or attempt.repeat_of is not None:
+        return None
+    if any(_is_repeat_of(p, attempt) for p in planned):
+        return None
+    if not report_service.attempt_failed(evaluation, session.pass_score):
+        return None
+
+    moment = now or utcnow()
+    last_issue = max((as_utc(p.issued_at) for p in planned), default=moment)
+    issued_at = max(
+        moment, last_issue + timedelta(seconds=session.call_interval_seconds)
+    )
+    return Attempt(
+        session=session,
+        student=attempt.student,
+        scenario=attempt.scenario,
+        repeat_of=attempt,
+        issued_at=issued_at,
+    )
+
+
 def finish(
     session: TrainingSession, attempts: list[Attempt], now: datetime | None = None
 ) -> list[Evaluation]:
     """Завершает занятие и закрывает незаконченные карточки.
 
     Незавершённая карточка — тоже результат: она означает, что обучающийся
-    до неё не добрался, и в отчёте это должно быть видно.
+    до неё не добрался, и в отчёте это должно быть видно. Карточки, чьё
+    время ещё не пришло, — в том числе назначенные повторы, — не трогаются
+    и в зачёт не идут.
 
     Возвращает созданные оценки: их должен сохранить вызывающий. Присваивание
     attempt.evaluation не добавляет объект в сессию — в SQLAlchemy 2.0 каскад
@@ -144,9 +205,12 @@ def progress(session: TrainingSession, attempts: list[Attempt], now: datetime | 
                 "finished": 0,
                 "overdue_pickup": 0,
                 "in_work": 0,
+                "repeats": 0,
             },
         )
         row["issued"] += 1
+        if attempt.repeat_of_id is not None or attempt.repeat_of is not None:
+            row["repeats"] += 1
         if attempt.opened_at is not None:
             row["opened"] += 1
         if attempt.finished_at is not None:
@@ -173,6 +237,7 @@ def progress(session: TrainingSession, attempts: list[Attempt], now: datetime | 
             finished=row["finished"],
             overdue_pickup=row["overdue_pickup"],
             in_work=row["in_work"],
+            repeats=row["repeats"],
         )
         for student_id, row in sorted(by_student.items(), key=lambda kv: kv[1]["name"])
     ]

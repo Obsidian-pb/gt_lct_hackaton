@@ -389,3 +389,18 @@ export const settingsApi = {
       body: JSON.stringify(body),
     }),
 };
+
+// --- Повтор проваленных карточек ---------------------------------------------
+// Файл общий и правится только дописыванием в конец. Тело запроса собрано
+// из уже описанного типа teacherApi.createSession: поля, которые допишут
+// в него другие разделы, подхватятся сами, без правки этого объявления.
+
+export const repeatApi = {
+  createSession: (
+    body: Parameters<typeof teacherApi.createSession>[0] & { repeat_failed: boolean },
+  ) =>
+    request<TrainingSession>('/api/teacher/sessions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+};

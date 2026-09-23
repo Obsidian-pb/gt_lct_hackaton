@@ -35,6 +35,9 @@ class WorkOut(BaseModel):
     # не открывать каждую работу в поисках, где преподаватель что-то написал.
     teacher_feedback: str | None = None
     teacher_feedback_by: str | None = None
+    # Повторная выдача проваленной карточки и её итог: исправился ли.
+    is_repeat: bool = False
+    repeat_fixed: bool | None = None
 
 
 class MistakeOut(BaseModel):
@@ -61,6 +64,9 @@ class ProgressOut(BaseModel):
     mistakes: list[MistakeOut]
     works: list[WorkOut]
     advice: list[str]
+    # Повторные выдачи: завершено и исправлено. В статистику выше не входят.
+    repeats_finished: int = 0
+    repeats_fixed: int = 0
 
 
 @router.get("/progress", response_model=ProgressOut)
@@ -126,8 +132,12 @@ def my_progress(
                 critical=w.critical,
                 teacher_feedback=w.teacher_feedback,
                 teacher_feedback_by=w.teacher_feedback_by,
+                is_repeat=w.is_repeat,
+                repeat_fixed=w.repeat_fixed,
             )
             for w in result.works
         ],
         advice=result.advice,
+        repeats_finished=result.repeats_finished,
+        repeats_fixed=result.repeats_fixed,
     )

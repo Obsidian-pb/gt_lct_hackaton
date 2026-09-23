@@ -33,6 +33,7 @@ export function CardListPage() {
   }
 
   const pending = cards.filter((c) => !c.finished).length;
+  const hasRepeats = cards.some((c) => c.is_repeat);
 
   return (
     <>
@@ -41,6 +42,12 @@ export function CardListPage() {
         Карточки, направленные в вашу службу. Подтвердите приём информации в течение норматива —
         иначе карточка перейдёт в статус «Не оповещено». В работе: {pending} из {cards.length}.
       </p>
+      {hasRepeats && (
+        <p className="page-hint">
+          Карточка с пометкой «Повторная выдача» — тот же вызов, с которым не удалось
+          справиться в первый раз. Он возвращён для повторной отработки: пройдите его заново.
+        </p>
+      )}
 
       <table className="card-table">
         <thead>
@@ -55,7 +62,15 @@ export function CardListPage() {
           {cards.map((card) => (
             <tr key={card.attempt_id} onClick={() => navigate(`/cards/${card.attempt_id}`)}>
               <td>
-                <div className="card-table__type">{card.incident_type}</div>
+                <div className="card-table__type">
+                  {card.incident_type}
+                  {card.is_repeat && (
+                    <>
+                      {' '}
+                      <span className="chip chip--warn">Повторная выдача</span>
+                    </>
+                  )}
+                </div>
                 <div className="card-table__address">{card.address}</div>
               </td>
               <td>

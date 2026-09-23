@@ -66,6 +66,8 @@ STUDENT_COLUMNS = (
 
 VIOLATION_COLUMNS = ("Код", "Нарушение", "Тяжесть", "Случаев", "Доля завершённых, %")
 
+REPEAT_COLUMNS = ("Обучающийся", "Карточка", "Первая попытка", "После повтора", "Итог")
+
 DASH = "—"
 
 
@@ -122,6 +124,35 @@ def _summary_rows(report: SessionReport) -> list[list[str]]:
         ],
         ["Доля просрочек норматива, %", _number(report.overdue_share * 100)],
         ["Замечаний к грамматике", str(report.grammar_issues)],
+        # Повторы — отдельными строками: в «выдано» и «завершено» выше они
+        # не входят, там только первый проход, по которому ставится зачёт.
+        ["Повторных выдач", str(report.repeats_issued)],
+        [
+            "Исправились после повтора",
+            f"{report.repeats_fixed} из {report.repeats_finished}"
+            if report.repeats_finished
+            else DASH,
+        ],
+    ]
+
+
+def _repeat_verdict(fixed: bool | None) -> str:
+    if fixed is None:
+        return "не завершён"
+    return "исправился" if fixed else "не исправился"
+
+
+def _repeat_rows(report: SessionReport) -> list[list[str]]:
+    return [
+        [
+            student.student_name,
+            repeat.scenario_title,
+            _score(repeat.first_score) if repeat.first_score is not None else DASH,
+            _score(repeat.repeat_score) if repeat.repeat_score is not None else DASH,
+            _repeat_verdict(repeat.fixed),
+        ]
+        for student in report.students
+        for repeat in student.repeats
     ]
 
 
@@ -177,6 +208,12 @@ def build_csv(report: SessionReport) -> bytes:
         writer.writerow(["Типичные нарушения"])
         writer.writerow(list(VIOLATION_COLUMNS))
         writer.writerows(_violation_rows(report))
+
+    if report.repeats_issued:
+        writer.writerow([])
+        writer.writerow(["Повторные выдачи проваленных карточек"])
+        writer.writerow(list(REPEAT_COLUMNS))
+        writer.writerows(_repeat_rows(report))
 
     writer.writerow([])
     writer.writerow(["Выводы по группе"])
@@ -314,6 +351,19 @@ def build_pdf(report: SessionReport) -> bytes:
                 ],
                 [14 * mm, width - 88 * mm, 28 * mm, 20 * mm, 26 * mm],
                 VIOLATION_COLUMNS,
+            )
+        )
+
+    if report.repeats_issued:
+        story.append(Paragraph("Повторные выдачи проваленных карточек", styles["heading"]))
+        story.append(
+            _table(
+                [
+                    [_cell(row[0]), _cell(row[1]), row[2], row[3], row[4]]
+                    for row in _repeat_rows(report)
+                ],
+                [50 * mm, width - 128 * mm, 26 * mm, 26 * mm, 26 * mm],
+                REPEAT_COLUMNS,
             )
         )
 

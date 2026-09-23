@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { api, teacherApi } from '../api/client';
+import { api, repeatApi } from '../api/client';
 import type { TrainingSession } from '../api/types';
 
 export const STATE_LABELS: Record<string, string> = {
@@ -31,6 +31,9 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
   // Критерии успешности: на экране балл стобалльный, на сервер уходит доля.
   const [passScore, setPassScore] = useState(70);
   const [maxCritical, setMaxCritical] = useState(0);
+  // Возвращать ли проваленную карточку в том же занятии. По умолчанию нет:
+  // повтор удлиняет поток, и решать это должен преподаватель.
+  const [repeatFailed, setRepeatFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +41,7 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const session = await teacherApi.createSession({
+      const session = await repeatApi.createSession({
         title,
         mode,
         pickup_deadline_seconds: pickup,
@@ -46,6 +49,7 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
         call_interval_seconds: interval,
         pass_score: passScore / 100,
         max_critical_violations: maxCritical,
+        repeat_failed: repeatFailed,
       });
       onCreated(session.id);
     } catch (e) {
@@ -142,6 +146,17 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
           onChange={(e) => setMaxCritical(Number(e.target.value))}
         />
       </div>
+      <div className="field">
+        <label htmlFor="repeat-failed">
+          <input
+            id="repeat-failed"
+            type="checkbox"
+            checked={repeatFailed}
+            onChange={(e) => setRepeatFailed(e.target.checked)}
+          />{' '}
+          Возвращать проваленные карточки
+        </label>
+      </div>
       <button className="btn" onClick={submit} disabled={busy || title.trim().length < 3}>
         Создать
       </button>
@@ -157,6 +172,12 @@ function CreateForm({ onCreated }: { onCreated: (id: number) => void }) {
         Занятие зачтено, если средний балл не ниже порога и критических нарушений
         не больше допустимого. Критическое нарушение — то, из-за которого служба
         не выехала бы на происшествие, поэтому по умолчанию их не прощают вовсе.
+      </p>
+      <p className="page-hint" style={{ width: '100%', margin: 0 }}>
+        Если включить возврат проваленных карточек, вызов, с которым обучающийся
+        не справился — балл ниже порога или критическое нарушение, — придёт ему
+        ещё раз в этом же занятии, после остальных карточек. В зачёт идёт первая
+        попытка, а по повтору в отчёте видно, исправился ли он.
       </p>
       {error && <div className="alert" style={{ width: '100%' }}>{error}</div>}
     </div>
@@ -217,6 +238,7 @@ export function TeacherSessionsPage() {
                 </td>
                 <td className="card-table__address">
                   вызов раз в {session.call_interval_seconds} с
+                  {session.repeat_failed && ' · проваленные возвращаются'}
                 </td>
                 <td>
                   <span className={stateChip(session.state)}>

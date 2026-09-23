@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.attempts import run_llm_review
+from app.api.attempts import complete_attempt
 from app.api.deps import forbid_admin_to_student_work, get_current_user
 from app.core.db import get_session
 from app.models.base import as_utc, utcnow
@@ -61,6 +61,8 @@ class CallOut(BaseModel):
     entered_address_parts: dict[str, str]
     # Готовая запись голоса заявителя, если для сценария она озвучена.
     audio_url: str | None
+    # Повторная выдача проваленного вызова: тот же заявитель, вторая попытка.
+    is_repeat: bool = False
 
 
 class ClassifyIn(BaseModel):
@@ -157,6 +159,7 @@ def _call(attempt: Attempt) -> CallOut:
         entered_caller_phone=attempt.entered_caller_phone,
         entered_address_parts=dict(attempt.entered_address_parts or {}),
         audio_url=_audio_url(attempt.scenario),
+        is_repeat=attempt.repeat_of_id is not None,
     )
 
 
@@ -288,11 +291,7 @@ def classify_call(
         # Модель нужна только для грамматики описания.
         llm_pending=bool(attempt.entered_description),
     )
-    db.add(evaluation)
-    db.commit()
-
-    if evaluation.llm_pending:
-        background.add_task(run_llm_review, attempt.id)
+    complete_attempt(db, attempt, evaluation, background)
 
     return _out(attempt, evaluation, assessment)
 

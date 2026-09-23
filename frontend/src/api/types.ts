@@ -539,3 +539,63 @@ export interface LlmTestResult {
   detail: string;
   elapsed_ms: number;
 }
+
+// --- Повтор проваленных карточек ---------------------------------------------
+// Файл общий и правится только дописыванием в конец: поля к уже описанным
+// сущностям добавлены слиянием объявлений.
+
+/** Итог повторной выдачи проваленной карточки. */
+export interface RepeatResult {
+  attempt_id: number;
+  repeat_attempt_id: number;
+  scenario_title: string;
+  first_score: number | null;
+  repeat_score: number | null;
+  /** null — повтор ещё не завершён. */
+  fixed: boolean | null;
+}
+
+export interface Card {
+  /** Повторная выдача проваленной карточки: тот же вызов, вторая попытка. */
+  is_repeat: boolean;
+}
+
+export interface Call {
+  is_repeat: boolean;
+}
+
+export interface TrainingSession {
+  /** Возвращать ли проваленные карточки обучающемуся в том же занятии. */
+  repeat_failed: boolean;
+}
+
+export interface StudentProgress {
+  /** Сколько из поступивших карточек — повторные выдачи. */
+  repeats: number;
+}
+
+export interface StudentResult {
+  /** Повторы — отдельно: в средний балл и зачёт они не входят. */
+  repeats: RepeatResult[];
+}
+
+export interface Report {
+  repeats_issued: number;
+  repeats_finished: number;
+  repeats_fixed: number;
+}
+
+export interface SessionWork {
+  /** Заполнено у повторной выдачи: номер проваленной попытки. */
+  repeat_of_id: number | null;
+}
+
+export interface Work {
+  is_repeat: boolean;
+  repeat_fixed: boolean | null;
+}
+
+export interface PersonalProgress {
+  repeats_finished: number;
+  repeats_fixed: number;
+}

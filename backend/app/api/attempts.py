@@ -10,10 +10,43 @@ from app.models.training import Attempt, Evaluation, Scenario, TrainingMode
 from app.models.user import Role, User
 from app.schemas.training import CardOut, EvaluationOut, StatusIn
 from app.services import attempts as service
+from app.services import sessions as session_service
 from app.services.ekp import get_ekp
 from app.services.response_status import COMMENT_REQUIRED, ResponseStatus
 
 router = APIRouter(prefix="/api/attempts", tags=["Работа на АРМ-112"])
+
+
+def complete_attempt(
+    db: Session, attempt: Attempt, evaluation: Evaluation, background: BackgroundTasks
+) -> Attempt | None:
+    """Общее завершение попытки в обоих режимах обучения.
+
+    Сохраняет детерминированную оценку, при провале назначает повторную
+    выдачу той же карточки и только потом запускает языковую модель.
+    Порядок важен: повтор не должен ждать модели — её ответ может прийти
+    через минуту, а может не прийти вовсе, и карточка тогда не вернулась бы.
+
+    Возвращает назначенный повтор, если он создан.
+    """
+    db.add(evaluation)
+    # Все выдачи обучающегося в этом занятии: повтор встаёт после последней.
+    planned = db.scalars(
+        select(Attempt).where(
+            Attempt.session_id == attempt.session_id,
+            Attempt.student_id == attempt.student_id,
+        )
+    ).all()
+    repeat = session_service.schedule_repeat(attempt, evaluation, list(planned))
+    if repeat is not None:
+        db.add(repeat)
+    db.commit()
+
+    # Детерминированная оценка уже готова и отдаётся сразу — норматив отклика
+    # в 2 секунды не зависит от скорости работы LLM.
+    if evaluation.llm_pending:
+        background.add_task(run_llm_review, attempt.id)
+    return repeat
 
 
 def _load(attempt_id: int, db: Session, user: User) -> Attempt:
@@ -59,6 +92,7 @@ def _card(attempt: Attempt) -> CardOut:
         comment_required_for=[str(s) for s in COMMENT_REQUIRED],
         card_status=str(attempt.card_status),
         finished=attempt.finished_at is not None,
+        is_repeat=attempt.repeat_of_id is not None,
     )
 
 
@@ -138,13 +172,7 @@ def finish(
 
     service.finish(attempt)
     evaluation = service.build_evaluation(attempt)
-    db.add(evaluation)
-    db.commit()
-
-    # Детерминированная оценка уже готова и отдаётся сразу — норматив отклика
-    # в 2 секунды не зависит от скорости работы LLM.
-    if evaluation.llm_pending:
-        background.add_task(run_llm_review, attempt.id)
+    complete_attempt(db, attempt, evaluation, background)
     return _evaluation_out(evaluation)
 
 

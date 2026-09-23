@@ -32,6 +32,7 @@ from app.schemas.teacher import (
     GenerateIn,
     GenerateOut,
     GrammarCheckOut,
+    RepeatResultOut,
     ReportOut,
     ScenarioEditIn,
     ScenarioOut,
@@ -49,7 +50,6 @@ from app.services import sessions as session_service
 from app.services.ekp import get_ekp
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
 from app.services.response_status import PRIMARY, ResponseStatus
-from app.services.violations import Severity, kind_of
 
 router = APIRouter(prefix="/api/teacher", tags=["Кабинет преподавателя"])
 
@@ -408,6 +408,7 @@ def session_report(
                 violations=dict(s.violations),
                 critical=s.critical,
                 passed=s.passed(data.pass_score, data.max_critical_violations),
+                repeats=[RepeatResultOut(**vars(r)) for r in s.repeats],
             )
             for s in data.students
         ],
@@ -423,15 +424,16 @@ def session_report(
         max_critical_violations=data.max_critical_violations,
         passed_students=data.passed_students,
         failed_students=data.failed_students,
+        repeats_issued=data.repeats_issued,
+        repeats_finished=data.repeats_finished,
+        repeats_fixed=data.repeats_fixed,
     )
 
 
 def _work_out(attempt: Attempt) -> WorkOut:
     evaluation = attempt.evaluation
-    critical = sum(
-        1
-        for item in (evaluation.violations if evaluation else [])
-        if item.get("code") and kind_of(item["code"]).severity is Severity.CRITICAL
+    critical = report_service.critical_violations(
+        evaluation.violations if evaluation else []
     )
     return WorkOut(
         attempt_id=attempt.id,
@@ -449,6 +451,7 @@ def _work_out(attempt: Attempt) -> WorkOut:
             if evaluation and evaluation.teacher_feedback_by
             else None
         ),
+        repeat_of_id=attempt.repeat_of_id,
     )
 
 
@@ -554,6 +557,7 @@ def _session_out(session: TrainingSession) -> SessionOut:
         call_interval_seconds=session.call_interval_seconds,
         pass_score=session.pass_score,
         max_critical_violations=session.max_critical_violations,
+        repeat_failed=session.repeat_failed,
         started_at=session.started_at,
         finished_at=session.finished_at,
         students=[
@@ -732,6 +736,7 @@ def create_session(
         call_interval_seconds=payload.call_interval_seconds,
         pass_score=payload.pass_score,
         max_critical_violations=payload.max_critical_violations,
+        repeat_failed=payload.repeat_failed,
     )
     db.add(session)
     db.commit()
