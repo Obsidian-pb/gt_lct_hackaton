@@ -11,6 +11,7 @@ from typing import Iterable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 from sqlalchemy import delete, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
@@ -23,11 +24,14 @@ sys.path.insert(0, str(DATABASE_ROOT / "src"))
 from trainer_db.models.catalog import (  # noqa: E402
     ClassifierVersion,
     EventClass,
+    EventServiceRoute,
     EventFeature1,
     EventFeature2,
     EventFeature3,
     EventType,
+    Service,
     classifier_version_events,
+    event_class_services,
 )
 
 
@@ -41,6 +45,95 @@ EXCLUSION_TEXT = "не отображается оператору 112"
 EXPECTED_IMPORTED_ROWS = 1137
 EXPECTED_EXCLUDED_ROWS = 144
 
+SERVICE_GROUP_CODES = {
+    "Классификатор МЧС": "MCHS",
+    "Классификатор МВД": "POLICE",
+    "Классификатор СМП": "AMBULANCE",
+    "Классификатор МОСГАЗ": "MOSGAZ",
+    "ЦЭМП": "ZEMP",
+    "Классификатор ФСБ": "FSB",
+    "Классификатор Мособлгаз": "MOSOBLGAZ",
+    "Автомобильные дороги": "AUTOROADS",
+    "Мосгортранс": "MOSGORTRANS",
+    "Гор. Хозяйство": "GKH",
+    "ГОРМОСТ": "GORMOST",
+    "Канал имени Москвы": "MOSCOW_CANAL",
+    "МГТС": "MGTS",
+    "Метро": "METRO",
+    "Мосводоканал": "MOSVODOCANAL",
+    "МОЭК": "MOEK",
+    'МОЭСК (ПАО "Россети Московский регион")': "MOESK",
+    "ОЭК": "OEK",
+    "Мослифт": "MOSLIFT",
+    "ЦОДД": "ZODD",
+    "Деп. ЖКХ": "DEP_GKH",
+    "Департамент РБиПК (ГКУ МОСБЕЗ)": "DEP_RBPK",
+    "Аппарат МЭРА": "MAYOR_OFFICE",
+    "Москоллектор": "MOSCOLLECTOR",
+    "РЖД": "MZD",
+    "Департамент образования": "DEP_EDUCATION",
+    "Центррегионводхоз (Московско-Окское БВУ)": "WATER_AUTHORITY",
+    "Военная комендатура": "MILITARY_COMMAND",
+    "ОАТИ": "OATI",
+    "Мосводосток": "MOSVODOSTOK",
+    "Департамент ППиООС": "DEP_ECO",
+    "ОД Департамент ТСЗН": "DEP_TSZN",
+    "РСВО": "RSVO",
+    "ЭВАЖД": "EVAZHD",
+    "МСППН": "MSPPN",
+    "ДТУ_Р (Ритуал)": "DTU_R",
+    "ДТУ": "DTU",
+    "Росгвардия": "ROSGVARDIA",
+    "Территориальные ОИВ": "TERRITORIAL_OIV",
+    "Территориальные ОИВ ТиНАО": "TINAO_OIV",
+    "Автомобильные дороги АО г.Москвы": "AO_AUTOROADS",
+    "Департамент строительства города Москвы": "DEP_CONSTRUCTION",
+    "Комитет ветеринарии": "VETERINARY_COMMITTEE",
+    "Мосжилинспекция": "MOSZHILINSPEKTSIYA",
+    "Департамент культуры": "DEP_CULTURE",
+    "ГКУ ЦСА имени Е.П.Глинки": "GLINKA_CENTER",
+    "ГКУ НТУ": "GKU_NTU",
+    "ФСО": "FSO",
+    "ГУП МСР": "GUP_MSR",
+    "Комитет по туризму г.Москвы": "TOURISM_COMMITTEE",
+    "ДГП (Департамент градостроительной политики)": "DEP_URBAN_POLICY",
+}
+MAIN_SERVICE_CODES = {
+    "Police": "POLICE",
+    "Dep.tszn": "DEP_TSZN",
+    "DepEco": "DEP_ECO",
+}
+MAIN_SERVICE_NAMES = {
+    "MCHS": "МЧС",
+    "POLICE": "Полиция",
+    "AMBULANCE": "Скорая медицинская помощь",
+    "MOSGAZ": "Мосгаз",
+    "ZEMP": "ЦЭМП",
+}
+CONDITION_BY_COLUMN = {
+    "O": "no_access_false", "P": "no_access", "Q": "default",
+    "R": "threat_to_people", "S": "victims", "T": "no_access",
+    "V": "no_violation_or_victims", "W": "law_violation", "X": "victims",
+    "Y": "no_victims", "Z": "victims", "AA": "victims_not_on_scene",
+    "AB": "default", "AC": "gasified", "AD": "default",
+    "AE": "threat_to_people", "AF": "victims", "AG": "medical_help",
+    "AH": "evacuation", "AI": "default", "AJ": "many_people",
+    "AM": "default", "AN": "victims", "AO": "traffic_blocked",
+    "AQ": "default", "AR": "tunnel", "AS": "pedestrian",
+    "AT": "automotive", "AV": "always", "AW": "communication_facility",
+    "CA": "default", "CB": "construction", "CE": "listed_cultural_site",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceRoute:
+    service_code: str
+    source_column: str
+    condition_code: str
+    condition_label: str | None
+    response_label: str | None
+    is_primary: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class ClassifierRow:
@@ -53,6 +146,8 @@ class ClassifierRow:
     feature_1_label: str
     feature_2_label: str | None
     feature_3_label: str | None
+    main_service_code: str | None
+    service_routes: tuple[ServiceRoute, ...]
 
     @property
     def event_number(self) -> int:
@@ -78,6 +173,7 @@ class ParsedClassifier:
     rows: tuple[ClassifierRow, ...]
     excluded_rows: int
     group_names: dict[int, str]
+    service_names: dict[str, str]
 
 
 def clean_text(value: object) -> str | None:
@@ -100,6 +196,63 @@ def integer_code(value: object, *, cell: str) -> int:
     return result
 
 
+def service_columns(raw_rows: list[tuple[object, ...]]) -> dict[int, tuple[str, str, str | None]]:
+    groups: dict[int, tuple[str, str, str | None]] = {}
+    current_group: str | None = None
+    for index in range(14, 90):  # O:CL, service classifier columns
+        current_group = clean_text(raw_rows[0][index]) or current_group
+        if current_group is None or current_group not in SERVICE_GROUP_CODES:
+            raise ValueError(f"{get_column_letter(index + 1)}: неизвестная группа службы {current_group!r}")
+        condition_label = clean_text(raw_rows[2][index]) or clean_text(raw_rows[1][index])
+        groups[index] = (
+            SERVICE_GROUP_CODES[current_group], current_group, condition_label
+        )
+    return groups
+
+
+def row_service_routes(
+    values: tuple[object, ...],
+    columns: dict[int, tuple[str, str, str | None]],
+    service_names: dict[str, str],
+) -> tuple[str | None, tuple[ServiceRoute, ...]]:
+    routes: list[ServiceRoute] = []
+    main_codes: list[str] = []
+    for raw_code in (clean_text(values[13]) or "").split(","):
+        raw_code = raw_code.strip()
+        if not raw_code:
+            continue
+        code = MAIN_SERVICE_CODES.get(raw_code, raw_code.upper().replace(".", "_"))
+        main_codes.append(code)
+        service_names.setdefault(code, MAIN_SERVICE_NAMES.get(code, raw_code))
+        routes.append(ServiceRoute(code, "N", "always", "Главная служба", None, len(main_codes) == 1))
+    for index, (code, name, condition_label) in columns.items():
+        response = clean_text(values[index])
+        if response is None or normalized(response) == "нет реагирования":
+            continue
+        service_names.setdefault(code, MAIN_SERVICE_NAMES.get(code, name))
+        column = get_column_letter(index + 1)
+        routes.append(ServiceRoute(
+            service_code=code,
+            source_column=column,
+            condition_code=CONDITION_BY_COLUMN.get(column, "always"),
+            condition_label=condition_label,
+            response_label=response,
+        ))
+    if not any(
+        route.service_code == "AMBULANCE" and route.condition_code == "victims"
+        for route in routes
+    ):
+        service_names.setdefault("AMBULANCE", MAIN_SERVICE_NAMES["AMBULANCE"])
+        routes.append(ServiceRoute(
+            service_code="AMBULANCE",
+            source_column="USR",
+            condition_code="victims",
+            condition_label="Пострадавшие или погибшие",
+            response_label="Вызов скорой медицинской помощи",
+        ))
+    return (main_codes[0] if main_codes else None), tuple(routes)
+
+
 def parse_workbook(path: Path) -> ParsedClassifier:
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
@@ -107,7 +260,9 @@ def parse_workbook(path: Path) -> ParsedClassifier:
             raise ValueError("Ожидался один лист классификатора")
 
         worksheet = workbook[workbook.sheetnames[0]]
-        raw_rows = list(worksheet.iter_rows(values_only=True))
+        raw_rows = [tuple(row) for row in worksheet.iter_rows(values_only=True)]
+        columns = service_columns(raw_rows)
+        service_names: dict[str, str] = {}
         group_names: dict[int, str] = {}
         pending_group_name: str | None = None
         prepared: list[tuple[int, tuple[object, ...]]] = []
@@ -170,6 +325,9 @@ def parse_workbook(path: Path) -> ParsedClassifier:
                 integer_code(values[2], cell=f"C{row_number}"),
                 integer_code(values[3], cell=f"D{row_number}"),
             )
+            main_service_code, routes = row_service_routes(values, columns, service_names)
+            if not any(route.source_column != "USR" for route in routes):
+                raise ValueError(f"Строка {row_number}: в классификаторе нет ни одной службы")
             item = ClassifierRow(
                 source_row=row_number,
                 event_type_code=codes[0],
@@ -180,6 +338,8 @@ def parse_workbook(path: Path) -> ParsedClassifier:
                 feature_1_label=clean_text(values[6]) or "",
                 feature_2_label=clean_text(values[7]),
                 feature_3_label=clean_text(values[8]),
+                main_service_code=main_service_code,
+                service_routes=routes,
             )
             if item.key in seen_keys:
                 raise ValueError(
@@ -210,6 +370,7 @@ def parse_workbook(path: Path) -> ParsedClassifier:
             rows=tuple(result_rows),
             excluded_rows=excluded_rows,
             group_names=group_names,
+            service_names=service_names,
         )
     finally:
         workbook.close()
@@ -269,7 +430,7 @@ def write_sql_import(
             f"VALUES ('{version_id}'::uuid, {version_number}, "
             f"{sql_text('Классификатор происшествий v_046_11')}, "
             f"{sql_text(workbook_path.name)}, "
-            f"{sql_text('Импортированы A-D и расшифровки G-I. Строки с пометкой '
+            f"{sql_text('Импортированы A-D, G-I и маршруты служб N-CL. Строки с пометкой '
                          "'Не отображается оператору 112' исключены.")}, "
             "true, CURRENT_TIMESTAMP) "
             "ON CONFLICT (version_number) DO UPDATE SET "
@@ -278,6 +439,13 @@ def write_sql_import(
             "published_at = EXCLUDED.published_at, updated_at = CURRENT_TIMESTAMP;"
         ),
     ]
+
+    for code, name in sorted(parsed.service_names.items()):
+        lines.append(
+            "INSERT INTO catalog.services (id, code, name) "
+            f"VALUES ('{stable_id('service', code)}'::uuid, {sql_text(code)}, {sql_text(name)}) "
+            "ON CONFLICT (code) DO NOTHING;"
+        )
 
     for code, name in sorted(parsed.group_names.items()):
         if code not in active_type_codes:
@@ -350,11 +518,16 @@ def write_sql_import(
             "INSERT INTO catalog.event_classes "
             "(id, event_number, event_type_id, event_feature_1_id, "
             "event_feature_2_id, event_feature_3_id, feature_1_label, "
-            "feature_2_label, feature_3_label, name, is_active) "
+            "feature_2_label, feature_3_label, name, main_service_id, is_active) "
             f"SELECT '{entity_id}'::uuid, {row.event_number}, et.id, f1.id, "
             f"f2.id, f3.id, {sql_text(row.feature_1_label)}, "
             f"{sql_text(row.feature_2_label)}, {sql_text(row.feature_3_label)}, "
-            f"{sql_text(event_name)}, true "
+            f"{sql_text(event_name)}, "
+            + (
+                f"(SELECT id FROM catalog.services WHERE code = {sql_text(row.main_service_code)}), "
+                if row.main_service_code else "NULL, "
+            )
+            + "true "
             "FROM catalog.event_types AS et "
             "JOIN catalog.event_features_1 AS f1 ON f1.event_type_id = et.id "
             "JOIN catalog.event_features_2 AS f2 ON f2.event_feature_1_id = f1.id "
@@ -367,9 +540,37 @@ def write_sql_import(
             "feature_1_label = EXCLUDED.feature_1_label, "
             "feature_2_label = EXCLUDED.feature_2_label, "
             "feature_3_label = EXCLUDED.feature_3_label, "
-            "name = EXCLUDED.name, is_active = true, deleted_at = NULL, "
+            "name = EXCLUDED.name, main_service_id = EXCLUDED.main_service_id, "
+            "is_active = true, deleted_at = NULL, "
             "purge_after = NULL, updated_at = CURRENT_TIMESTAMP;"
         )
+
+        for route in row.service_routes:
+            lines.append(
+                "INSERT INTO catalog.event_class_services (event_class_id, service_id) "
+                "SELECT ec.id, s.id FROM catalog.event_classes AS ec "
+                "JOIN catalog.services AS s ON s.code = "
+                f"{sql_text(route.service_code)} "
+                f"WHERE ec.event_number = {row.event_number} ON CONFLICT DO NOTHING;"
+            )
+            lines.append(
+                "INSERT INTO catalog.event_service_routes "
+                "(id, event_class_id, service_id, source_column, condition_code, "
+                "condition_label, response_label, is_primary) "
+                f"SELECT '{stable_id('service-route', row.event_number, route.source_column, route.service_code)}'::uuid, "
+                "ec.id, s.id, "
+                f"{sql_text(route.source_column)}, {sql_text(route.condition_code)}, "
+                f"{sql_text(route.condition_label)}, {sql_text(route.response_label)}, "
+                f"{'true' if route.is_primary else 'false'} "
+                "FROM catalog.event_classes AS ec "
+                f"JOIN catalog.services AS s ON s.code = {sql_text(route.service_code)} "
+                f"WHERE ec.event_number = {row.event_number} "
+                "ON CONFLICT (event_class_id, service_id, source_column) DO UPDATE SET "
+                "condition_code = EXCLUDED.condition_code, "
+                "condition_label = EXCLUDED.condition_label, "
+                "response_label = EXCLUDED.response_label, "
+                "is_primary = EXCLUDED.is_primary;"
+            )
 
     lines.append(
         "DELETE FROM catalog.classifier_version_events "
@@ -430,7 +631,7 @@ async def import_classifier(
                     "name": "Классификатор происшествий v_046_11",
                     "source_name": workbook_path.name,
                     "description": (
-                        "Импортированы A-D и расшифровки G-I. Строки с пометкой "
+                        "Импортированы A-D, G-I и маршруты служб N-CL. Строки с пометкой "
                         "'Не отображается оператору 112' исключены."
                     ),
                     "is_active": True,
@@ -441,7 +642,7 @@ async def import_classifier(
                     "name": "Классификатор происшествий v_046_11",
                     "source_name": workbook_path.name,
                     "description": (
-                        "Импортированы A-D и расшифровки G-I. Строки с пометкой "
+                        "Импортированы A-D, G-I и маршруты служб N-CL. Строки с пометкой "
                         "'Не отображается оператору 112' исключены."
                     ),
                     "is_active": True,
@@ -453,6 +654,14 @@ async def import_classifier(
                     classifier_version_events.c.classifier_version_id == version_id
                 )
             )
+
+            service_ids: dict[str, UUID] = {}
+            for code, name in sorted(parsed.service_names.items()):
+                statement = pg_insert(Service).values(id=uuid4(), code=code, name=name)
+                statement = statement.on_conflict_do_update(
+                    index_elements=[Service.code], set_={"code": statement.excluded.code}
+                ).returning(Service.id)
+                service_ids[code] = (await connection.execute(statement)).scalar_one()
 
             event_type_ids: dict[int, UUID] = {}
             for code, name in sorted(parsed.group_names.items()):
@@ -515,6 +724,8 @@ async def import_classifier(
                     {"name": label},
                 )
 
+            route_values: list[dict] = []
+            service_links: set[tuple[UUID, UUID]] = set()
             for row in parsed.rows:
                 labels = [
                     label
@@ -539,6 +750,7 @@ async def import_classifier(
                         "feature_2_label": row.feature_2_label,
                         "feature_3_label": row.feature_3_label,
                         "name": event_name,
+                        "main_service_id": service_ids.get(row.main_service_code),
                         "is_active": True,
                     },
                     [EventClass.event_number],
@@ -547,6 +759,7 @@ async def import_classifier(
                         "feature_2_label": row.feature_2_label,
                         "feature_3_label": row.feature_3_label,
                         "name": event_name,
+                        "main_service_id": service_ids.get(row.main_service_code),
                         "is_active": True,
                         "deleted_at": None,
                         "purge_after": None,
@@ -562,6 +775,49 @@ async def import_classifier(
                             classifier_version_events.c.classifier_version_id,
                             classifier_version_events.c.event_class_id,
                         ]
+                    )
+                )
+                for route in row.service_routes:
+                    service_id = service_ids[route.service_code]
+                    service_links.add((event_id, service_id))
+                    route_values.append(
+                        {
+                            "id": stable_id(
+                                "service-route", row.event_number,
+                                route.source_column, route.service_code,
+                            ),
+                            "event_class_id": event_id,
+                            "service_id": service_id,
+                            "source_column": route.source_column,
+                            "condition_code": route.condition_code,
+                            "condition_label": route.condition_label,
+                            "response_label": route.response_label,
+                            "is_primary": route.is_primary,
+                        }
+                    )
+
+            links = [
+                {"event_class_id": event_id, "service_id": service_id}
+                for event_id, service_id in sorted(service_links)
+            ]
+            for offset in range(0, len(links), 500):
+                statement = pg_insert(event_class_services).values(links[offset:offset + 500])
+                await connection.execute(statement.on_conflict_do_nothing())
+            for offset in range(0, len(route_values), 400):
+                statement = pg_insert(EventServiceRoute).values(route_values[offset:offset + 400])
+                await connection.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[
+                            EventServiceRoute.event_class_id,
+                            EventServiceRoute.service_id,
+                            EventServiceRoute.source_column,
+                        ],
+                        set_={
+                            "condition_code": statement.excluded.condition_code,
+                            "condition_label": statement.excluded.condition_label,
+                            "response_label": statement.excluded.response_label,
+                            "is_primary": statement.excluded.is_primary,
+                        },
                     )
                 )
     finally:
@@ -595,7 +851,11 @@ def main() -> None:
     print(
         f"Проверено: {len(parsed.rows)} записей, "
         f"исключено: {parsed.excluded_rows}, "
-        f"групп происшествий: {len(parsed.group_names)}"
+        f"групп происшествий: {len(parsed.group_names)}, "
+        f"служб: {len(parsed.service_names)}, "
+        f"маршрутов: {sum(len(row.service_routes) for row in parsed.rows)}, "
+        f"без главной службы в Excel: "
+        f"{sum(row.main_service_code is None for row in parsed.rows)}"
     )
 
     if arguments.sql_output:

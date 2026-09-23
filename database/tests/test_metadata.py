@@ -12,7 +12,9 @@ EXPECTED_TABLES = {
     "catalog.classifier_version_events",
     "catalog.classifier_versions",
     "catalog.event_class_services",
+    "catalog.event_additional_fields",
     "catalog.event_classes",
+    "catalog.event_service_routes",
     "catalog.event_features_1",
     "catalog.event_features_2",
     "catalog.event_features_3",
@@ -21,6 +23,7 @@ EXPECTED_TABLES = {
     "content.event_template_services",
     "content.event_templates",
     "content.exercise_revisions",
+    "content.exercise_additional_values",
     "content.exercise_services",
     "content.exercises",
     "content.incident_card_details",
@@ -89,12 +92,31 @@ def test_incident_card_has_structured_details() -> None:
         "incident_description",
         "vis_information",
         "control_notes",
+        "has_victims_or_deceased",
+        "ambulance_refused_or_not_on_scene",
+        "no_access_or_blocked",
     } <= set(details.columns.keys())
 
     revision_foreign_keys = {
         foreign_key.target_fullname for foreign_key in details.foreign_keys
     }
     assert revision_foreign_keys == {"content.exercise_revisions.id"}
+
+
+def test_event_specific_fields_and_service_routes_are_linked() -> None:
+    definitions = Base.metadata.tables["catalog.event_additional_fields"]
+    values = Base.metadata.tables["content.exercise_additional_values"]
+    routes = Base.metadata.tables["catalog.event_service_routes"]
+    assert {fk.target_fullname for fk in definitions.foreign_keys} == {
+        "catalog.event_classes.id"
+    }
+    assert {fk.target_fullname for fk in values.foreign_keys} == {
+        "catalog.event_additional_fields.id",
+        "content.exercise_revisions.id",
+    }
+    assert {fk.target_fullname for fk in routes.foreign_keys} == {
+        "catalog.event_classes.id", "catalog.services.id"
+    }
 
 
 def test_retained_entities_have_deletion_deadlines() -> None:
@@ -124,3 +146,8 @@ def test_exported_schema_contains_database_functions() -> None:
     assert "CREATE FUNCTION catalog.prevent_classifier_code_change" in schema_sql
     assert "CREATE TRIGGER trg_event_classes_assign_event_number" in schema_sql
     assert "CREATE TABLE content.incident_card_details" in schema_sql
+    assert "CREATE TABLE catalog.event_additional_fields" in schema_sql
+    assert "CREATE TABLE catalog.event_service_routes" in schema_sql
+    assert "CREATE FUNCTION catalog.matching_service_routes" in schema_sql
+    assert "CREATE CONSTRAINT TRIGGER trg_event_requires_service" in schema_sql
+    assert "CREATE FUNCTION content.assert_approved_exercise" in schema_sql

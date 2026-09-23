@@ -24,6 +24,8 @@
 - `event_classes` — допустимые комбинации признаков и номера событий;
 - `services` — справочник экстренных и городских служб;
 - `event_class_services` — службы, привлекаемые к событию;
+- `event_service_routes` — условия вызова служб из классификатора;
+- `event_additional_fields` — дополнительные поля конкретного события;
 - `classifier_versions` — опубликованные версии классификатора;
 - `classifier_version_events` — состав каждой версии классификатора.
 
@@ -47,11 +49,15 @@
 - `exercise_services` — службы конкретной карточки;
 - `exercise_revisions` — редакции, эталон, предложение GigaChat и проверка;
 - `incident_card_details` — заявитель, три телефона, адрес, координаты,
-  описание происшествия, сведения ВИС и контроль.
+  описание происшествия, сведения ВИС, контроль и три логических признака;
+- `exercise_additional_values` — дополнительные поля и значения редакции карточки.
 
 Одна редакция имеет не более одного набора `incident_card_details`. Номер
 карточки получается через `exercise_revisions.event_class_id` и
 `event_classes.event_number`.
+Определения дополнительных полей копируются из события в редакцию.
+При утверждении карточки база проверяет ключевые поля, наличие
+классификации и значения обязательных дополнительных полей.
 
 ### `training` — прохождение и оценка
 
@@ -125,6 +131,9 @@ erDiagram
     event_classes ||--o{ event_class_services : "привлекает"
     services ||--o{ event_class_services : "назначается"
     services o|--o{ event_classes : "главная служба"
+    event_classes ||--o{ event_service_routes : "условия вызова"
+    services ||--o{ event_service_routes : "вызывается"
+    event_classes ||--o{ event_additional_fields : "задаёт поля"
 
     event_types o|--o{ event_templates : "ограничивает тему"
     event_classes o|--o{ event_templates : "задаёт событие"
@@ -137,6 +146,8 @@ erDiagram
     exercises ||--o{ exercise_revisions : "имеет редакции"
     event_classes o|--o{ exercise_revisions : "классифицирует"
     exercise_revisions ||--o| incident_card_details : "имеет содержимое"
+    exercise_revisions ||--o{ exercise_additional_values : "содержит значения"
+    event_additional_fields o|--o{ exercise_additional_values : "источник поля"
 
     event_types {
         uuid id PK
@@ -188,6 +199,21 @@ erDiagram
         uuid event_class_id PK, FK
         uuid service_id PK, FK
     }
+    event_service_routes {
+        uuid id PK
+        uuid event_class_id FK
+        uuid service_id FK
+        string source_column
+        string condition_code
+        string response_label
+    }
+    event_additional_fields {
+        uuid id PK
+        uuid event_class_id FK
+        string field_key
+        string data_type
+        boolean is_required
+    }
     event_templates {
         uuid id PK
         uuid event_type_id FK
@@ -224,6 +250,16 @@ erDiagram
         string aon_phone
         decimal latitude
         decimal longitude
+        boolean has_victims_or_deceased
+        boolean ambulance_refused_or_not_on_scene
+        boolean no_access_or_blocked
+    }
+    exercise_additional_values {
+        uuid id PK
+        uuid exercise_revision_id FK
+        uuid source_field_id FK
+        string field_key
+        jsonb value
     }
 ```
 
