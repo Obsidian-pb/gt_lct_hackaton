@@ -310,6 +310,28 @@ export function OperatorCallPage() {
           <div className="card__description">{call.legend}</div>
           <div className="legend__address">Со слов заявителя: {call.reported_address}</div>
         </div>
+
+        {/* Блок рабочей карточки «Регистрация и контроль». Появляется после
+            сдачи: до неё регистрировать нечего, а контроль проводит
+            преподаватель уже по готовой карточке. */}
+        {call.finished && (
+          <div className="card__block">
+            <div className="card__label">Регистрация и контроль</div>
+            <div className="card__meta">
+              Карточка № {call.attempt_id} · зарегистрировал {call.registered_by}
+              {call.registered_at &&
+                `, ${new Date(call.registered_at).toLocaleString('ru-RU', DATE_FORMAT)}`}
+            </div>
+            <div className="card__meta">
+              {call.control_at
+                ? `Контроль провёл ${call.control_by ?? 'преподаватель'}, ${new Date(
+                    call.control_at,
+                  ).toLocaleString('ru-RU', DATE_FORMAT)}`
+                : 'Контроль преподавателем ещё не проводился'}
+            </div>
+            {call.control_note && <div className="repeat-note">{call.control_note}</div>}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
@@ -375,7 +397,10 @@ export function OperatorCallPage() {
           <div className="address-grid">
             {ADDRESS_FIELDS.map((f) => (
               <div key={f.key} className={`field${f.wide ? ' field--wide' : ''}`}>
-                <label htmlFor={`addr-${f.key}`}>{f.label}</label>
+                <label htmlFor={`addr-${f.key}`}>
+                  {f.label}
+                  {f.hint && <span className="card__meta"> · {f.hint}</span>}
+                </label>
                 <input
                   id={`addr-${f.key}`}
                   value={addressParts[f.key] ?? ''}
@@ -441,9 +466,14 @@ const ROLE_NAMES: Record<CallerRole, string> = {
  * полноты зависит, найдут ли место силы реагирования. Порядок — от общего
  * к частному, как его и выясняют в разговоре.
  */
-const ADDRESS_FIELDS: Array<{ key: string; label: string; wide?: boolean }> = [
+const ADDRESS_FIELDS: Array<{ key: string; label: string; wide?: boolean; hint?: string }> = [
   { key: 'subject', label: 'Субъект', wide: true },
   { key: 'settlement', label: 'Населённый пункт', wide: true },
+  // Округ и район в рабочей карточке есть, но заявитель их не называет —
+  // оператор берёт их из адресного справочника. Здесь они справочные:
+  // заполняются по желанию и в оценке не участвуют.
+  { key: 'district', label: 'Округ', hint: 'справочно' },
+  { key: 'area', label: 'Район', hint: 'справочно' },
   { key: 'street', label: 'Улица', wide: true },
   { key: 'house', label: 'Дом' },
   { key: 'building', label: 'Корпус' },
@@ -452,7 +482,17 @@ const ADDRESS_FIELDS: Array<{ key: string; label: string; wide?: boolean }> = [
   { key: 'entrance', label: 'Подъезд' },
   { key: 'floor', label: 'Этаж' },
   { key: 'intercom', label: 'Код домофона' },
+  // Для места без номера дома объект и ориентиры — это и есть адрес.
+  { key: 'object', label: 'Объект', wide: true, hint: 'магазин, станция метро, парк' },
+  { key: 'access', label: 'Ориентиры, как проехать', wide: true, hint: '«напротив ТЦ», «во дворе у 5 подъезда»' },
 ];
+
+const DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+};
 
 const OUTCOME_NAMES: Record<CallOutcome, string> = {
   classify: 'зарегистрировать происшествие',

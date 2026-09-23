@@ -155,6 +155,12 @@ export interface Call {
   entered_caller_phone: string | null;
   entered_address_parts: Record<string, string>;
   audio_url: string | null;
+  /** Блок «Регистрация и контроль»: кто и когда зарегистрировал и проверил. */
+  registered_by: string;
+  registered_at: string | null;
+  control_by: string | null;
+  control_at: string | null;
+  control_note: string | null;
 }
 
 export interface Classification {

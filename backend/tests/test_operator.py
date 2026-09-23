@@ -392,3 +392,58 @@ def test_описательный_адрес_не_проверяется_по_ч
     """У половины учебных вызовов адрес описательный — спрашивать нечего."""
     result = evaluate(card(address_parts={}), FIRE_TRASH, DEFAULT_CALL_DEADLINE_SECONDS)
     assert result.violations == []
+
+
+ON_RING_ROAD = Expected(
+    outcome=CallOutcome.CLASSIFY,
+    rule_number=FIRE_TRASH,
+    address_parts={
+        "subject": "Москва",
+        "settlement": "Москва",
+        "object": "ТЦ Вегас",
+        "access": "напротив ТЦ Вегас, в левом ряду",
+    },
+)
+
+
+def test_место_без_дома_без_ориентиров_это_критическая_ошибка():
+    """«МКАД» записан, а куда именно ехать — нет."""
+    result = evaluate(
+        card(address_parts={"subject": "Москва", "settlement": "Москва"}),
+        ON_RING_ROAD,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O12"]
+    assert "ориентиры" in result.violations[0].detail
+    assert "объект" in result.violations[0].detail
+
+
+def test_ориентиры_записаны_своими_словами():
+    result = evaluate(
+        card(address_parts={"subject": "Москва", "settlement": "Москва", "object": "Вегас", "access": "слева от дороги"}),
+        ON_RING_ROAD,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+
+
+def test_объект_у_дома_не_записан_это_неполнота():
+    """Дом известен — бригада доедет; объект и ориентиры лишь ускорят поиск."""
+    expected = Expected(
+        outcome=CallOutcome.CLASSIFY,
+        rule_number=FIRE_TRASH,
+        address_parts=dict(MOSCOW_ADDRESS, object="магазин «Билла»"),
+    )
+    result = evaluate(card(address_parts=dict(MOSCOW_ADDRESS)), expected, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert codes(result) == ["O13"]
+    assert "объект" in result.violations[0].detail
+
+
+def test_округ_и_район_не_спрашиваются():
+    expected = Expected(
+        outcome=CallOutcome.CLASSIFY,
+        rule_number=FIRE_TRASH,
+        address_parts=dict(MOSCOW_ADDRESS, district="СЗАО", area="Щукино"),
+    )
+    result = evaluate(card(address_parts=dict(MOSCOW_ADDRESS)), expected, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []

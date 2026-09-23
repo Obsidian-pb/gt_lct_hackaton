@@ -64,6 +64,15 @@ class CallOut(BaseModel):
     audio_url: str | None
     # Повторная выдача проваленного вызова: тот же заявитель, вторая попытка.
     is_repeat: bool = False
+    # Блок «Регистрация и контроль» рабочей карточки: кто и когда
+    # зарегистрировал, кто и когда проверил. Ничего нового не хранится —
+    # это те же данные попытки и примечание преподавателя, показанные
+    # там, где они стоят в настоящей карточке.
+    registered_by: str = ""
+    registered_at: str | None = None
+    control_by: str | None = None
+    control_at: str | None = None
+    control_note: str | None = None
 
 
 class ClassifyIn(BaseModel):
@@ -140,7 +149,18 @@ def _audio_url(scenario: Scenario) -> str | None:
 
 def _call(attempt: Attempt) -> CallOut:
     reference = as_utc(attempt.finished_at) if attempt.finished_at else utcnow()
+    evaluation = attempt.evaluation
+    controller = evaluation.teacher_feedback_by if evaluation else None
     return CallOut(
+        registered_by=attempt.student.full_name,
+        registered_at=as_utc(attempt.finished_at).isoformat() if attempt.finished_at else None,
+        control_by=controller.full_name if controller else None,
+        control_at=(
+            as_utc(evaluation.teacher_feedback_at).isoformat()
+            if evaluation and evaluation.teacher_feedback_at
+            else None
+        ),
+        control_note=evaluation.teacher_feedback if evaluation else None,
         attempt_id=attempt.id,
         legend=attempt.scenario.description,
         reported_address=attempt.scenario.address,

@@ -23,6 +23,8 @@ from dataclasses import dataclass
 PARTS: tuple[tuple[str, str], ...] = (
     ("subject", "субъект"),
     ("settlement", "населённый пункт"),
+    ("district", "округ"),
+    ("area", "район"),
     ("street", "улица"),
     ("house", "дом"),
     ("building", "корпус"),
@@ -31,11 +33,23 @@ PARTS: tuple[tuple[str, str], ...] = (
     ("entrance", "подъезд"),
     ("floor", "этаж"),
     ("intercom", "код домофона"),
+    ("object", "объект"),
+    ("access", "ориентиры, как проехать"),
 )
 
 # Без субъекта и населённого пункта выезжать некуда: силы не поймут, чей
 # это адрес вообще. Без улицы и дома — не найдут место в городе.
 CRITICAL_PARTS = ("subject", "settlement", "street", "house")
+
+# Свободный текст: «магазин “Билла”», «напротив ТЦ Вегас, в левом ряду».
+# Сверять его дословно значит проверять формулировку, а не знание места,
+# поэтому проверяется только одно — записано ли вообще.
+PRESENCE_ONLY = ("object", "access")
+
+# Есть в рабочей карточке, но в тренажёре не разбираются и не оцениваются:
+# заявитель округ и район не называет, оператор берёт их из адресного
+# справочника, которого здесь нет. Требовать их — придирка к пустому месту.
+DISPLAY_ONLY = ("district", "area")
 
 # Субъекты, встречающиеся в учебных вызовах. Список закрытый: угадывать
 # регион по обрывку названия опаснее, чем оставить поле пустым.
@@ -80,8 +94,67 @@ SETTLEMENT = re.compile(
     r"городской округ|мкр\.?|микрорайон)\s*([А-ЯЁ][А-Яа-яЁё-]{2,30})",
 )
 
+# Объект — именованное место, которое силы реагирования ищут вместо дома:
+# «станция метро Арбатская», «магазин “Пятёрочка”», «парк Лосиный остров».
+# Признаки — родовое слово или название в кавычках. Слово «центр» само
+# по себе не считается: «центр города» объектом не является.
+OBJECT_WORDS = re.compile(
+    r"(?i)(?:\b(?:магазин|тц|трц|торгов\w*\s+центр|бизнес-центр|ресторан|кафе|"
+    r"станци\w*\s+метро|метро|вокзал|платформ\w*|дворец\s+спорта|стадион|"
+    r"посольств\w*|парк|школ\w*|детск\w*\s+сад|больниц\w*|поликлиник\w*|"
+    r"гостиниц\w*|отел[ьяе]\w*|завод|рынок|храм|церк\w*|аптек\w*|азс|"
+    r"автозаправ\w*|общежити\w*|интернат)\b|«[^»]+»)"
+)
+
+# Ориентиры и подъезд — то, что в разговоре идёт после адреса: «напротив»,
+# «во дворе у 5 подъезда», «1 км не доезжая», «охрана встретит». Для места
+# без номера дома это и есть адрес: по «МКАД» без «напротив ТЦ Вегас,
+# в левом ряду» экипаж будет ездить по кольцу.
+ACCESS_WORDS = re.compile(
+    r"(?i)(?:рядом\s+с|напротив|около|возле|у\s+входа|во\s+двор|\bдвор\b|"
+    r"на\s+пересечении|перекр[её]ст|не\s+доезжая|в\s+(?:левом|правом|крайнем)\s+ряду|"
+    r"обочин|встретит|далее|на\s+стоянке|на\s+парковке|на\s+тротуаре|"
+    r"на\s+(?:детской\s+)?площадке|у\s+касс|вход\s+от|съезд|в\s+сторону|"
+    r"за\s+домом|за\s+зданием|со\s+стороны|ориентир|точка\s+на\s+карте|\bкм\b|километр)"
+)
+
 
 TITLES = dict(PARTS)
+
+
+def _chunks(text: str) -> list[str]:
+    """Части адреса, как их произносят: через запятую или точку с запятой."""
+    return [c.strip(" .()") for c in re.split(r"[,;]", text) if c.strip(" .()")]
+
+
+# Объект записывается без вводного оборота: «магазин “Пятёрочка”», а не
+# «около магазина “Пятёрочка”» — оборот уходит в ориентиры.
+OBJECT_LEAD = re.compile(
+    r"(?i)^(?:рядом\s+с|напротив|около|возле|во\s+дворе\s+у\s+входа\s+в|у\s+входа\s+в|у|на)\s+"
+)
+
+
+def _landmarks(text: str, taken: set[str]) -> dict[str, str]:
+    """Объект и ориентиры из тех кусков адреса, что не ушли в другие части.
+
+    Один кусок может дать и то и другое: «во дворе у входа в магазин “Билла”» —
+    это объект (магазин) и ориентир (во дворе у входа) сразу.
+    """
+    found: dict[str, str] = {}
+    access: list[str] = []
+    for chunk in _chunks(text):
+        lowered = chunk.lower()
+        # Куски, из которых уже взяты субъект, город, улица или дом, объектом
+        # не считаются: «ул. Вешняковская дом 37» — это улица, а не ориентир.
+        if any(t and t.lower() in lowered for t in taken):
+            continue
+        if "object" not in found and OBJECT_WORDS.search(chunk):
+            found["object"] = OBJECT_LEAD.sub("", chunk.lstrip(" 0123456789-"))
+        if ACCESS_WORDS.search(chunk):
+            access.append(chunk)
+    if access:
+        found["access"] = "; ".join(access)
+    return found
 
 
 @dataclass(frozen=True)
@@ -96,10 +169,9 @@ class AddressCheck:
 
     missing: tuple[str, ...] = ()
     wrong: tuple[str, ...] = ()
-
-    @property
-    def critical_missing(self) -> tuple[str, ...]:
-        return tuple(p for p in self.missing if p in CRITICAL_PARTS)
+    # Считается при сверке, а не выводится из списка: какие части критичны,
+    # зависит от самого адреса — у места без дома эту роль играют ориентиры.
+    critical_missing: tuple[str, ...] = ()
 
     @staticmethod
     def titles(keys: tuple[str, ...]) -> list[str]:
@@ -152,6 +224,7 @@ def parse(text: str) -> dict[str, str]:
         if found := re.search(pattern, text, re.IGNORECASE):
             parts[key] = found.group(1).strip()
 
+    parts.update(_landmarks(text, {parts.get("street", ""), parts.get("settlement", "")}))
     return parts
 
 
@@ -178,12 +251,25 @@ def compare(expected: dict[str, str], answer: dict[str, str]) -> AddressCheck:
     missing: list[str] = []
     wrong: list[str] = []
     for key, title in PARTS:
+        if key in DISPLAY_ONLY:
+            continue
         want = (expected.get(key) or "").strip()
         if not want:
             continue
         got = (answer.get(key) or "").strip()
         if not got:
             missing.append(key)
+        elif key in PRESENCE_ONLY:
+            continue
         elif normalise(got) != normalise(want):
             wrong.append(f"{title}: записано «{got}», следовало «{want}»")
-    return AddressCheck(tuple(missing), tuple(wrong))
+
+    # У адреса без номера дома — «МКАД, напротив ТЦ Вегас, в левом ряду» —
+    # место задают объект и ориентиры. Пропустить их там так же дорого,
+    # как пропустить дом в городе.
+    critical = set(CRITICAL_PARTS)
+    if not (expected.get("house") or "").strip():
+        critical.update(PRESENCE_ONLY)
+    return AddressCheck(
+        tuple(missing), tuple(wrong), tuple(p for p in missing if p in critical)
+    )
