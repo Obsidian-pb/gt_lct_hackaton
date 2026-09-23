@@ -197,6 +197,7 @@ export function OperatorCallPage() {
   const [description, setDescription] = useState('');
   const [outcome, setOutcome] = useState<CallOutcome>('classify');
   const [phone, setPhone] = useState('');
+  const [addressParts, setAddressParts] = useState<Record<string, string>>({});
   const [referral, setReferral] = useState('');
   const [evaluation, setEvaluation] = useState<OperatorEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -248,6 +249,7 @@ export function OperatorCallPage() {
           address,
           description,
           caller_phone: phone,
+          address_parts: addressParts,
         }),
       );
       setCall(await api.call(attemptId));
@@ -256,7 +258,7 @@ export function OperatorCallPage() {
     } finally {
       setBusy(false);
     }
-  }, [attemptId, group, path, address, description, outcome, referral, phone]);
+  }, [attemptId, group, path, address, description, outcome, referral, phone, addressParts]);
 
   if (error && !call) return <div className="alert">{error}</div>;
   if (!call) return <div className="empty">Загрузка вызова…</div>;
@@ -357,8 +359,27 @@ export function OperatorCallPage() {
               onChange={(e) => setPhone(e.target.value)}
             />
           </div>
+          <div className="card__label" style={{ marginTop: 6 }}>
+            Адрес происшествия по частям
+          </div>
+          <div className="address-grid">
+            {ADDRESS_FIELDS.map((f) => (
+              <div key={f.key} className={`field${f.wide ? ' field--wide' : ''}`}>
+                <label htmlFor={`addr-${f.key}`}>{f.label}</label>
+                <input
+                  id={`addr-${f.key}`}
+                  value={addressParts[f.key] ?? ''}
+                  disabled={locked}
+                  onChange={(e) =>
+                    setAddressParts((current) => ({ ...current, [f.key]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+
           <div className="field">
-            <label htmlFor="address">Адрес происшествия</label>
+            <label htmlFor="address">Адрес со слов заявителя, как сказано</label>
             <input
               id="address"
               value={address}
@@ -404,6 +425,24 @@ const ROLE_NAMES: Record<CallerRole, string> = {
   witness: 'очевидец',
   relative: 'родственник',
 };
+
+/**
+ * Адрес в карточке Системы-112 хранится по частям, а не строкой: от их
+ * полноты зависит, найдут ли место силы реагирования. Порядок — от общего
+ * к частному, как его и выясняют в разговоре.
+ */
+const ADDRESS_FIELDS: Array<{ key: string; label: string; wide?: boolean }> = [
+  { key: 'subject', label: 'Субъект', wide: true },
+  { key: 'settlement', label: 'Населённый пункт', wide: true },
+  { key: 'street', label: 'Улица', wide: true },
+  { key: 'house', label: 'Дом' },
+  { key: 'building', label: 'Корпус' },
+  { key: 'structure', label: 'Строение' },
+  { key: 'flat', label: 'Квартира' },
+  { key: 'entrance', label: 'Подъезд' },
+  { key: 'floor', label: 'Этаж' },
+  { key: 'intercom', label: 'Код домофона' },
+];
 
 const OUTCOME_NAMES: Record<CallOutcome, string> = {
   classify: 'зарегистрировать происшествие',

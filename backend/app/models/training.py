@@ -164,6 +164,13 @@ class Scenario(Base, TimestampMixin):
     caller_phone_stated: Mapped[str | None] = mapped_column(String(32))
     caller_phone_onsite: Mapped[str | None] = mapped_column(String(32))
 
+    # Адрес по частям: субъект, населённый пункт, улица, дом, корпус,
+    # строение, квартира, подъезд, этаж, код домофона. Хранится словарём,
+    # а не десятком столбцов: состав частей задан предметной областью
+    # и меняется вместе с ней, а каждая правка столбцами — это миграция.
+    # Строка `address` остаётся описательной частью, как в рабочей карточке.
+    address_parts: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+
     @property
     def contact_phone(self) -> str | None:
         """Номер, по которому связываться: со слов заявителя, иначе АОН.
@@ -320,6 +327,10 @@ class Attempt(Base, TimestampMixin):
     entered_description: Mapped[str | None] = mapped_column(Text)
     # Телефон для связи, записанный обучающимся со слов заявителя.
     entered_caller_phone: Mapped[str | None] = mapped_column(String(32))
+    # Адрес, записанный обучающимся по частям.
+    entered_address_parts: Mapped[dict] = mapped_column(
+        JSON, default=dict, server_default="{}"
+    )
     # Какой исход выбрал обучающийся: классифицировать, передать
     # по принадлежности или отказать в регистрации.
     chosen_outcome: Mapped[CallOutcome | None] = mapped_column(

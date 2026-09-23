@@ -153,6 +153,7 @@ export interface Call {
   chosen_outcome: CallOutcome | null;
   chosen_referral_target: string | null;
   entered_caller_phone: string | null;
+  entered_address_parts: Record<string, string>;
   audio_url: string | null;
 }
 

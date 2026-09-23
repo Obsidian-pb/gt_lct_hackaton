@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.models.training import CallOutcome
+from app.services import address as address_service
 from app.services.survey import ClassificationResult, classify
 from app.services.violations import Severity, Violation
 
@@ -39,6 +40,8 @@ class FilledCard:
     referral_target: str = ""
     # Телефон для связи, записанный со слов заявителя.
     caller_phone: str = ""
+    # Адрес по частям: субъект, населённый пункт, улица, дом и подробности.
+    address_parts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,9 @@ class Expected:
     # Номер, по которому силы реагирования смогут связаться с заявителем.
     # None — у сценария телефон не задан, и спрашивать его не за что.
     contact_phone: str | None = None
+    # Эталонный адрес по частям. Пустой словарь — адрес у вызова
+    # описательный, разбирать в нём нечего.
+    address_parts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,7 +87,7 @@ class OperatorAssessment:
         penalty = sum(
             SEVERITY_PENALTY[v.kind.severity]
             for v in self.violations
-            if v.code in {"O5", "O6", "O9", "O11"}
+            if v.code in {"O5", "O6", "O9", "O11", "O13"}
         )
         paperwork = max(0.0, 1.0 - penalty / 2.0)
         overdue = 1.0 if self.elapsed_seconds > self.deadline_seconds else 0.0
@@ -133,6 +139,7 @@ def evaluate(
     if not card.description.strip():
         result.violations.append(Violation("O6", "Описание происшествия не внесено"))
     _check_phone(card, expected, result)
+    _check_address(card, expected, result)
 
     # Превышение ориентира по времени снижает балл, но отдельным нарушением
     # не считается: разговор с заявителем может затянуться по его вине.
@@ -242,6 +249,50 @@ def _check_outcome(card: FilledCard, expected: Expected, result: OperatorAssessm
                 evidence=card.address.strip() or None,
             )
         )
+
+
+def _check_address(card: FilledCard, expected: Expected, result: OperatorAssessment) -> None:
+    """Сверяет адрес по частям.
+
+    Разделение на два нарушения не формальное: без субъекта, города, улицы
+    или дома на место вообще не выехать, а без подъезда и кода домофона
+    бригада доедет до дома и будет искать вход. Это разные по цене ошибки.
+    """
+    if not expected.address_parts:
+        return
+
+    check = address_service.compare(expected.address_parts, card.address_parts)
+    if check.ok:
+        return
+
+    critical = check.critical_missing
+    if critical:
+        result.violations.append(
+            Violation(
+                "O12",
+                "Не уточнено: " + ", ".join(address_service.AddressCheck.titles(critical)),
+                evidence=", ".join(f"{k}={v}" for k, v in card.address_parts.items()) or None,
+            )
+        )
+
+    minor = [part for part in check.missing if part not in critical]
+    if minor:
+        result.violations.append(
+            Violation(
+                "O13",
+                "Не записано: "
+                + ", ".join(address_service.AddressCheck.titles(tuple(minor))),
+            )
+        )
+
+    if check.wrong:
+        # Неверная часть адреса хуже незаписанной: по ней поедут не туда,
+        # а незаписанную хотя бы переспросят.
+        code = "O12" if any(
+            part.split(":")[0] in {"субъект", "населённый пункт", "улица", "дом"}
+            for part in check.wrong
+        ) else "O13"
+        result.violations.append(Violation(code, "; ".join(check.wrong)))
 
 
 def _digits(value: str) -> str:

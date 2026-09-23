@@ -1195,3 +1195,24 @@ button {
   white-space: pre-wrap;
   overflow-x: auto;
 }
+
+/* --- Адрес по частям ------------------------------------------------------ */
+
+/* Узкие поля для номеров и широкие для названий: дом и этаж — это две-три
+   цифры, а улица не помещается в такую же клетку. */
+.address-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0 14px;
+  margin-top: 6px;
+}
+
+.address-grid .field--wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 560px) {
+  .address-grid .field--wide {
+    grid-column: span 1;
+  }
+}

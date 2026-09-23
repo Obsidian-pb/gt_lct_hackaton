@@ -323,3 +323,72 @@ def test_номер_со_слов_важнее_определившегося():
     assert scenario.contact_phone == "916-126-34-71"
     only_aon = Scenario(caller_phone_aon="495-111-22-33")
     assert only_aon.contact_phone == "495-111-22-33"
+
+
+# --- Адрес по частям ---------------------------------------------------------
+#
+# Карточка Системы-112 хранит адрес полями, а не строкой: от их полноты
+# зависит, найдут ли место силы реагирования. Разбор полей прислал заказчик.
+
+MOSCOW_ADDRESS = {
+    "subject": "Москва",
+    "settlement": "Москва",
+    "street": "Берзарина",
+    "house": "21",
+    "building": "1",
+    "entrance": "3",
+    "intercom": "68",
+}
+WITH_ADDRESS = Expected(
+    outcome=CallOutcome.CLASSIFY, rule_number=FIRE_TRASH, address_parts=MOSCOW_ADDRESS
+)
+
+
+def test_адрес_записан_полностью():
+    result = evaluate(
+        card(address_parts=dict(MOSCOW_ADDRESS)), WITH_ADDRESS, DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert result.violations == []
+
+
+def test_не_уточнён_город():
+    """Заявитель назвал улицу и дом, город спросить забыли."""
+    answer = {k: v for k, v in MOSCOW_ADDRESS.items() if k not in ("subject", "settlement")}
+    result = evaluate(card(address_parts=answer), WITH_ADDRESS, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert codes(result) == ["O12"]
+    assert "субъект" in result.violations[0].detail
+    assert "населённый пункт" in result.violations[0].detail
+
+
+def test_подробности_внутри_дома_не_записаны():
+    """Бригада доедет до дома и будет искать вход — это отдельная ошибка."""
+    answer = {k: v for k, v in MOSCOW_ADDRESS.items() if k in ("subject", "settlement", "street", "house")}
+    result = evaluate(card(address_parts=answer), WITH_ADDRESS, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert codes(result) == ["O13"]
+    assert "подъезд" in result.violations[0].detail
+
+
+def test_неверный_номер_дома_это_критическая_ошибка():
+    answer = dict(MOSCOW_ADDRESS, house="12")
+    result = evaluate(card(address_parts=answer), WITH_ADDRESS, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert "O12" in codes(result)
+    assert "следовало «21»" in " ".join(v.detail for v in result.violations)
+
+
+@pytest.mark.parametrize(
+    "written", ["Берзарина", "ул. Берзарина", "улица берзарина", " Берзарина "]
+)
+def test_форма_записи_улицы_не_важна(written):
+    """Оператор записывает адрес на слух: сокращения и регистр у каждого свои."""
+    result = evaluate(
+        card(address_parts=dict(MOSCOW_ADDRESS, street=written)),
+        WITH_ADDRESS,
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+
+
+def test_описательный_адрес_не_проверяется_по_частям():
+    """У половины учебных вызовов адрес описательный — спрашивать нечего."""
+    result = evaluate(card(address_parts={}), FIRE_TRASH, DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []

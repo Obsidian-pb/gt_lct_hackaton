@@ -34,6 +34,7 @@ from app.models.training import (  # noqa: E402
     TrainingMode,
 )
 from app.models.user import DispatchService, Role, User  # noqa: E402
+from app.services.address import parse as parse_address  # noqa: E402
 from app.services.ekp import get_ekp  # noqa: E402
 
 TICKETS = BACKEND_DIR / "data" / "tickets.json"
@@ -173,6 +174,7 @@ def refresh_callers() -> None:
             row.caller = name
             row.caller_phone_stated = phone
             row.caller_role = role
+            row.address_parts = parse_address(call["address"])
             updated += 1
         db.commit()
     print(f"Дополнено сведениями о заявителе: {updated} сценариев.")
@@ -250,6 +252,7 @@ def main(dry_run: bool) -> None:
                     expected_outcome=outcome,
                     referral_target=subject,
                     address=address,
+                    address_parts=parse_address(call["address"]),
                     description=call["situation"],
                     caller=caller_name,
                     # Номер записан со слов: автоматического определения

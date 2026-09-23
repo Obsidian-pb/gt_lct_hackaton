@@ -58,6 +58,7 @@ class CallOut(BaseModel):
     chosen_outcome: str | None
     chosen_referral_target: str | None
     entered_caller_phone: str | None
+    entered_address_parts: dict[str, str]
     # Готовая запись голоса заявителя, если для сценария она озвучена.
     audio_url: str | None
 
@@ -75,6 +76,9 @@ class ClassifyIn(BaseModel):
     address: str = ""
     description: str = ""
     caller_phone: str = ""
+    # Адрес по частям. Строка `address` остаётся описательной частью:
+    # в карточке Системы-112 она есть наравне с формализованным адресом.
+    address_parts: dict[str, str] = Field(default_factory=dict)
 
 
 class ClassificationOut(BaseModel):
@@ -151,6 +155,7 @@ def _call(attempt: Attempt) -> CallOut:
         chosen_outcome=str(attempt.chosen_outcome) if attempt.chosen_outcome else None,
         chosen_referral_target=attempt.chosen_referral_target,
         entered_caller_phone=attempt.entered_caller_phone,
+        entered_address_parts=dict(attempt.entered_address_parts or {}),
         audio_url=_audio_url(attempt.scenario),
     )
 
@@ -234,6 +239,9 @@ def classify_call(
     attempt.entered_address = payload.address.strip() or None
     attempt.entered_description = payload.description.strip() or None
     attempt.entered_caller_phone = payload.caller_phone.strip() or None
+    attempt.entered_address_parts = {
+        k: v.strip() for k, v in payload.address_parts.items() if v and v.strip()
+    }
     attempt.chosen_outcome = payload.outcome
     attempt.chosen_referral_target = payload.referral_target.strip() or None
     attempt.finished_at = now
@@ -249,12 +257,14 @@ def classify_call(
             outcome=payload.outcome,
             referral_target=payload.referral_target,
             caller_phone=payload.caller_phone,
+            address_parts=attempt.entered_address_parts,
         ),
         Expected(
             outcome=scenario.expected_outcome,
             rule_number=scenario.ekp_rule_number,
             referral_target=scenario.referral_target,
             contact_phone=scenario.contact_phone,
+            address_parts=dict(scenario.address_parts or {}),
         ),
         deadline,
     )
