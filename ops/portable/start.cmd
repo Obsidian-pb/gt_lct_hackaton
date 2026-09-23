@@ -19,6 +19,9 @@ set "PGDATA=%ROOT%\data\pgdata"
 set "LOGS=%ROOT%\data\logs"
 set "PGPORT=5433"
 set "WEB_PORT=8090"
+rem 127.0.0.1 — только этот компьютер. 0.0.0.0 — доступ ученикам из класса
+rem по адресу компьютера в сети; база и модель наружу не открываются.
+set "WEB_HOST=127.0.0.1"
 set "LLM_PORT=8081"
 set "LLM_THREADS=%NUMBER_OF_PROCESSORS%"
 if exist "%ROOT%\settings.cmd" call "%ROOT%\settings.cmd"
@@ -114,7 +117,7 @@ echo  Обновляю схему базы и учебные данные...
 "%PY%" scripts\import_tickets.py --refresh-callers >>"%LOGS%\setup.log" 2>&1
 
 echo  Запускаю сервер на порту %WEB_PORT%...
-start "DDS112 server" /min "%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port %WEB_PORT%
+start "DDS112 server" /min "%PY%" -m uvicorn app.main:app --host %WEB_HOST% --port %WEB_PORT%
 "%PY%" "%ROOT%\runtime\wait_health.py" %WEB_PORT% 90
 if errorlevel 1 (
   echo  Сервер не ответил за 90 секунд. Смотрите окно «DDS112 server».
@@ -125,6 +128,13 @@ if errorlevel 1 (
 start http://127.0.0.1:%WEB_PORT%/
 echo.
 echo  Готово: http://127.0.0.1:%WEB_PORT%/
+if "%WEB_HOST%"=="0.0.0.0" (
+  echo.
+  echo  Доступ из класса открыт. Адреса для учеников:
+  "%PY%" "%ROOT%\runtime\lan_addresses.py" %WEB_PORT%
+  echo  Если Windows спросит про брандмауэр — разрешите доступ в частных сетях,
+  echo  иначе ученики не подключатся. Для этого нужны права администратора.
+)
 echo  Учётные записи: admin, teacher, student, student2 — пароль совпадает с логином.
 echo  Модель загружается в память ещё 1–3 минуты; до этого разбор придёт с задержкой.
 echo.
