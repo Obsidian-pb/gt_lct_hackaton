@@ -1293,5 +1293,302 @@ CREATE CONSTRAINT TRIGGER trg_exercise_additional_values_approved_check AFTER IN
 
 UPDATE alembic_version SET version_num='0006_card_services' WHERE alembic_version.version_num = '0005_classifier_import_fields';
 
+-- Running upgrade 0006_card_services -> 0007_assignments_history
+
+CREATE TABLE auth.user_services (
+    user_id UUID NOT NULL,
+    service_id UUID NOT NULL,
+    assigned_by UUID,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pk_user_services PRIMARY KEY (user_id, service_id),
+    CONSTRAINT fk_user_services_user_id_users FOREIGN KEY(user_id) REFERENCES auth.users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_user_services_service_id_services FOREIGN KEY(service_id) REFERENCES catalog.services (id) ON DELETE CASCADE,
+    CONSTRAINT fk_user_services_assigned_by_users FOREIGN KEY(assigned_by) REFERENCES auth.users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_user_services_service_id ON auth.user_services (service_id);
+
+CREATE TABLE training.assignments (
+    id UUID NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    teacher_id UUID,
+    trainee_id UUID NOT NULL,
+    requested_card_count INTEGER NOT NULL,
+    normative_seconds INTEGER DEFAULT '30' NOT NULL,
+    status VARCHAR(16) DEFAULT 'draft' NOT NULL,
+    starts_at TIMESTAMP WITH TIME ZONE,
+    due_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pk_assignments PRIMARY KEY (id),
+    CONSTRAINT ck_assignments_card_count_positive CHECK (requested_card_count > 0),
+    CONSTRAINT ck_assignments_normative_seconds_positive CHECK (normative_seconds > 0),
+    CONSTRAINT ck_assignments_status_values CHECK (status IN ('draft', 'active', 'completed', 'cancelled')),
+    CONSTRAINT fk_assignments_teacher_id_users FOREIGN KEY(teacher_id) REFERENCES auth.users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_assignments_trainee_id_users FOREIGN KEY(trainee_id) REFERENCES auth.users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_assignments_trainee_status ON training.assignments (trainee_id, status);
+
+CREATE TABLE training.assignment_services (
+    assignment_id UUID NOT NULL,
+    service_id UUID NOT NULL,
+    CONSTRAINT pk_assignment_services PRIMARY KEY (assignment_id, service_id),
+    CONSTRAINT fk_assignment_services_assignment_id_assignments FOREIGN KEY(assignment_id) REFERENCES training.assignments (id) ON DELETE CASCADE,
+    CONSTRAINT fk_assignment_services_service_id_services FOREIGN KEY(service_id) REFERENCES catalog.services (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_assignment_services_service_id ON training.assignment_services (service_id);
+
+CREATE TABLE training.assignment_exercises (
+    assignment_id UUID NOT NULL,
+    exercise_id UUID NOT NULL,
+    CONSTRAINT pk_assignment_exercises PRIMARY KEY (assignment_id, exercise_id),
+    CONSTRAINT fk_assignment_exercises_assignment_id_assignments FOREIGN KEY(assignment_id) REFERENCES training.assignments (id) ON DELETE CASCADE,
+    CONSTRAINT fk_assignment_exercises_exercise_id_exercises FOREIGN KEY(exercise_id) REFERENCES content.exercises (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_assignment_exercises_exercise_id ON training.assignment_exercises (exercise_id);
+
+CREATE TRIGGER trg_assignments_updated_at
+        BEFORE UPDATE ON training.assignments
+        FOR EACH ROW EXECUTE FUNCTION audit.touch_updated_at();
+
+ALTER TABLE training.sessions ADD COLUMN trainee_id_snapshot UUID;
+
+ALTER TABLE training.sessions ADD COLUMN teacher_id_snapshot UUID;
+
+ALTER TABLE training.sessions ADD COLUMN assignment_id UUID;
+
+ALTER TABLE training.sessions ADD COLUMN assignment_snapshot JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+ALTER TABLE training.sessions ADD COLUMN normative_seconds INTEGER DEFAULT '30' NOT NULL;
+
+ALTER TABLE training.sessions ADD CONSTRAINT ck_sessions_ck_sessions_normative_seconds_positive CHECK (normative_seconds > 0);
+
+ALTER TABLE training.sessions ADD CONSTRAINT ck_sessions_ck_sessions_assignment_snapshot_object CHECK (jsonb_typeof(assignment_snapshot) = 'object');
+
+UPDATE training.sessions SET trainee_id_snapshot = trainee_id, teacher_id_snapshot = teacher_id;
+
+ALTER TABLE training.sessions ALTER COLUMN trainee_id_snapshot SET NOT NULL;
+
+ALTER TABLE training.sessions DROP CONSTRAINT fk_sessions_trainee_id_users;
+
+ALTER TABLE training.sessions ALTER COLUMN trainee_id DROP NOT NULL;
+
+ALTER TABLE training.sessions ADD CONSTRAINT fk_sessions_trainee_id_users FOREIGN KEY(trainee_id) REFERENCES auth.users (id) ON DELETE SET NULL;
+
+ALTER TABLE training.sessions ADD CONSTRAINT fk_sessions_assignment_id_assignments FOREIGN KEY(assignment_id) REFERENCES training.assignments (id) ON DELETE SET NULL;
+
+CREATE FUNCTION training.snapshot_assignment(p_assignment_id uuid)
+        RETURNS jsonb LANGUAGE sql STABLE AS $$
+            SELECT jsonb_build_object(
+                'assignment', to_jsonb(a),
+                'services', COALESCE((
+                    SELECT jsonb_agg(to_jsonb(svc) ORDER BY svc.code)
+                    FROM training.assignment_services AS s
+                    JOIN catalog.services AS svc ON svc.id = s.service_id
+                    WHERE s.assignment_id = a.id
+                ), '[]'::jsonb),
+                'exercise_ids', COALESCE((
+                    SELECT jsonb_agg(e.exercise_id ORDER BY e.exercise_id)
+                    FROM training.assignment_exercises AS e WHERE e.assignment_id = a.id
+                ), '[]'::jsonb)
+            ) FROM training.assignments AS a WHERE a.id = p_assignment_id
+        $$;
+
+CREATE FUNCTION training.capture_session_snapshot() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'INSERT' THEN
+                IF NEW.trainee_id IS NULL THEN
+                    RAISE EXCEPTION 'New training session requires a trainee';
+                END IF;
+                NEW.trainee_id_snapshot := NEW.trainee_id;
+                NEW.teacher_id_snapshot := NEW.teacher_id;
+                IF NEW.assignment_id IS NOT NULL THEN
+                    NEW.assignment_snapshot := training.snapshot_assignment(NEW.assignment_id);
+                    IF NEW.assignment_snapshot IS NULL THEN
+                        RAISE EXCEPTION 'Assignment % does not exist', NEW.assignment_id;
+                    END IF;
+                END IF;
+            ELSE
+                -- SET NULL from deleting the account/assignment must not erase history.
+                IF NEW.trainee_id IS NOT NULL AND NEW.trainee_id IS DISTINCT FROM OLD.trainee_id THEN
+                    NEW.trainee_id_snapshot := NEW.trainee_id;
+                END IF;
+                IF NEW.teacher_id IS NOT NULL AND NEW.teacher_id IS DISTINCT FROM OLD.teacher_id THEN
+                    NEW.teacher_id_snapshot := NEW.teacher_id;
+                END IF;
+                IF NEW.assignment_id IS NOT NULL AND NEW.assignment_id IS DISTINCT FROM OLD.assignment_id THEN
+                    NEW.assignment_snapshot := training.snapshot_assignment(NEW.assignment_id);
+                END IF;
+            END IF;
+            RETURN NEW;
+        END $$;
+
+CREATE TRIGGER trg_sessions_capture_snapshot
+        BEFORE INSERT OR UPDATE OF trainee_id, teacher_id, assignment_id ON training.sessions
+        FOR EACH ROW EXECUTE FUNCTION training.capture_session_snapshot();
+
+ALTER TABLE training.session_cards ADD COLUMN exercise_revision_id_snapshot UUID;
+
+ALTER TABLE training.session_cards ADD COLUMN exercise_snapshot JSONB;
+
+CREATE FUNCTION training.snapshot_exercise(p_revision_id uuid)
+        RETURNS jsonb LANGUAGE sql STABLE AS $$
+            SELECT jsonb_build_object(
+                'revision', to_jsonb(r),
+                'exercise', to_jsonb(e),
+                'card_details', to_jsonb(d),
+                'event_class', to_jsonb(ec),
+                'additional_values', COALESCE((
+                    SELECT jsonb_agg(to_jsonb(v) ORDER BY v.display_order, v.field_key)
+                    FROM content.exercise_additional_values AS v
+                    WHERE v.exercise_revision_id = r.id
+                ), '[]'::jsonb),
+                'service_ids', COALESCE((
+                    SELECT jsonb_agg(es.service_id ORDER BY es.service_id)
+                    FROM content.exercise_services AS es WHERE es.exercise_id = e.id
+                ), '[]'::jsonb)
+            )
+            FROM content.exercise_revisions AS r
+            JOIN content.exercises AS e ON e.id = r.exercise_id
+            LEFT JOIN content.incident_card_details AS d ON d.exercise_revision_id = r.id
+            LEFT JOIN catalog.event_classes AS ec ON ec.id = r.event_class_id
+            WHERE r.id = p_revision_id
+        $$;
+
+UPDATE training.session_cards AS sc
+        SET exercise_revision_id_snapshot = sc.exercise_revision_id,
+            exercise_snapshot = training.snapshot_exercise(sc.exercise_revision_id);
+
+ALTER TABLE training.session_cards ALTER COLUMN exercise_revision_id_snapshot SET NOT NULL;
+
+ALTER TABLE training.session_cards ALTER COLUMN exercise_snapshot SET NOT NULL;
+
+ALTER TABLE training.session_cards ADD CONSTRAINT ck_session_cards_ck_session_cards_exercise_snapshot_object CHECK (jsonb_typeof(exercise_snapshot) = 'object');
+
+ALTER TABLE training.session_cards DROP CONSTRAINT fk_session_cards_exercise_revision_id_exercise_revisions;
+
+ALTER TABLE training.session_cards ALTER COLUMN exercise_revision_id DROP NOT NULL;
+
+ALTER TABLE training.session_cards ADD CONSTRAINT fk_session_cards_exercise_revision_id_exercise_revisions FOREIGN KEY(exercise_revision_id) REFERENCES content.exercise_revisions (id) ON DELETE SET NULL;
+
+CREATE INDEX ix_session_cards_exercise_revision_id ON training.session_cards (exercise_revision_id);
+
+CREATE FUNCTION training.capture_card_snapshot() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'INSERT' OR NEW.exercise_revision_id IS DISTINCT FROM OLD.exercise_revision_id THEN
+                IF NEW.exercise_revision_id IS NULL THEN
+                    IF TG_OP = 'INSERT' THEN
+                        RAISE EXCEPTION 'New session card requires an exercise revision';
+                    END IF;
+                    RETURN NEW; -- FK SET NULL after source deletion: keep the snapshot.
+                END IF;
+                IF TG_OP = 'UPDATE' AND OLD.status <> 'pending' THEN
+                    RAISE EXCEPTION 'A shown session card cannot be replaced';
+                END IF;
+                NEW.exercise_revision_id_snapshot := NEW.exercise_revision_id;
+                NEW.exercise_snapshot := training.snapshot_exercise(NEW.exercise_revision_id);
+                IF NEW.exercise_snapshot IS NULL THEN
+                    RAISE EXCEPTION 'Exercise revision % does not exist', NEW.exercise_revision_id;
+                END IF;
+            END IF;
+            RETURN NEW;
+        END $$;
+
+CREATE TRIGGER trg_session_cards_capture_snapshot
+        BEFORE INSERT OR UPDATE OF exercise_revision_id ON training.session_cards
+        FOR EACH ROW EXECUTE FUNCTION training.capture_card_snapshot();
+
+CREATE FUNCTION training.prevent_result_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'Training answers and evaluations are retained permanently';
+        END $$;
+
+CREATE TRIGGER trg_answers_retain_result BEFORE DELETE ON training.answers FOR EACH ROW EXECUTE FUNCTION training.prevent_result_delete();
+
+CREATE TRIGGER trg_evaluations_retain_result BEFORE DELETE ON training.evaluations FOR EACH ROW EXECUTE FUNCTION training.prevent_result_delete();
+
+CREATE OR REPLACE FUNCTION audit.purge_expired_data(p_limit integer DEFAULT 1000)
+        RETURNS TABLE(entity_name text, deleted_count bigint)
+        LANGUAGE plpgsql AS $$
+        DECLARE affected bigint;
+        BEGIN
+            DELETE FROM training.sessions WHERE id IN (
+                SELECT s.id FROM training.sessions AS s
+                WHERE s.purge_after <= CURRENT_TIMESTAMP
+                  AND NOT EXISTS (
+                      SELECT 1 FROM training.session_cards AS sc
+                      JOIN training.answers AS a ON a.session_card_id = sc.id
+                      WHERE sc.session_id = s.id
+                  )
+                ORDER BY s.purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'training.sessions'::text, affected;
+
+            DELETE FROM content.exercises WHERE id IN (
+                SELECT id FROM content.exercises
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'content.exercises'::text, affected;
+
+            DELETE FROM content.event_templates WHERE id IN (
+                SELECT id FROM content.event_templates
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'content.event_templates'::text, affected;
+
+            DELETE FROM training.scoring_profiles WHERE id IN (
+                SELECT id FROM training.scoring_profiles
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'training.scoring_profiles'::text, affected;
+
+            DELETE FROM catalog.services WHERE id IN (
+                SELECT id FROM catalog.services
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'catalog.services'::text, affected;
+
+            DELETE FROM catalog.event_classes WHERE id IN (
+                SELECT id FROM catalog.event_classes
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'catalog.event_classes'::text, affected;
+
+            DELETE FROM auth.users WHERE id IN (
+                SELECT id FROM auth.users
+                WHERE purge_after <= CURRENT_TIMESTAMP
+                ORDER BY purge_after LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'auth.users'::text, affected;
+
+            DELETE FROM audit.audit_log WHERE id IN (
+                SELECT id FROM audit.audit_log
+                WHERE retain_until <= CURRENT_TIMESTAMP
+                ORDER BY retain_until LIMIT p_limit
+            );
+            GET DIAGNOSTICS affected = ROW_COUNT;
+            RETURN QUERY SELECT 'audit.audit_log'::text, affected;
+        END $$;
+
+UPDATE alembic_version SET version_num='0007_assignments_history' WHERE alembic_version.version_num = '0006_card_services';
+
 COMMIT;
 

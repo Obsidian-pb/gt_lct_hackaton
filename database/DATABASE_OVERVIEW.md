@@ -13,6 +13,7 @@
 - `roles` — роли пользователей;
 - `permissions` — разрешения;
 - `user_roles` — назначение нескольких ролей пользователю;
+- `user_services` — профильные службы пользователя;
 - `role_permissions` — разрешения, входящие в роль.
 
 ### `catalog` — классификатор и службы
@@ -64,9 +65,18 @@
 - `scoring_profiles` — наборы правил оценки;
 - `scoring_rules` — правила для каждого уровня сложности;
 - `sessions` — учебные сессии;
+- `assignments` — индивидуальные задания от преподавателя;
+- `assignment_services` — разрешённые в задании службы;
+- `assignment_exercises` — явно назначенные карточки;
 - `session_cards` — карточки, выданные в сессии;
 - `answers` — ответы обучающихся;
 - `evaluations` — правильность, время, применённые правила и итоговый балл.
+
+Задание может ограничить выборку по службам и/или указать конкретные карточки.
+В сессии сохраняется норматив времени (по умолчанию 30 секунд), но он не
+останавливает работу обучающегося. У сессии и выданной карточки сохраняются
+снимки идентификаторов, настроек и содержимого на момент прохождения.
+Ответы и оценки не удаляются; сессии с ответами исключены из очистки.
 
 ### `audit` — журнал действий
 
@@ -85,6 +95,8 @@ erDiagram
     roles ||--o{ user_roles : "назначается пользователям"
     roles ||--o{ role_permissions : "содержит права"
     permissions ||--o{ role_permissions : "входит в роли"
+    users ||--o{ user_services : "имеет профильные службы"
+    services ||--o{ user_services : "доступна пользователям"
 
     users {
         uuid id PK
@@ -109,6 +121,13 @@ erDiagram
     role_permissions {
         uuid role_id PK, FK
         uuid permission_id PK, FK
+    }
+    user_services {
+        uuid user_id PK, FK
+        uuid service_id PK, FK
+    }
+    services {
+        uuid id PK
     }
 ```
 
@@ -277,6 +296,12 @@ erDiagram
     scoring_profiles o|--o{ sessions : "оценивает"
     classifier_versions o|--o{ sessions : "фиксируется в"
     users ||--o{ sessions : "проходит или контролирует"
+    users ||--o{ assignments : "получает задание"
+    assignments o|--o{ sessions : "начинает прохождение"
+    assignments ||--o{ assignment_services : "ограничивает службы"
+    services ||--o{ assignment_services : "выбрана для задания"
+    assignments ||--o{ assignment_exercises : "назначает карточки"
+    exercises ||--o{ assignment_exercises : "входит в задание"
 
     sessions ||--o{ session_cards : "содержит"
     exercise_revisions ||--o{ session_cards : "выдаётся в сессии"
@@ -299,7 +324,11 @@ erDiagram
     sessions {
         uuid id PK
         uuid trainee_id FK
+        uuid trainee_id_snapshot
         uuid teacher_id FK
+        uuid assignment_id FK
+        jsonb assignment_snapshot
+        int normative_seconds
         uuid scoring_profile_id FK
         uuid classifier_version_id FK
         string status
@@ -308,8 +337,25 @@ erDiagram
         uuid id PK
         uuid session_id FK
         uuid exercise_revision_id FK
+        uuid exercise_revision_id_snapshot
+        jsonb exercise_snapshot
         int sequence_number
         string status
+    }
+    assignments {
+        uuid id PK
+        uuid trainee_id FK
+        uuid teacher_id FK
+        int requested_card_count
+        int normative_seconds
+    }
+    assignment_services {
+        uuid assignment_id PK, FK
+        uuid service_id PK, FK
+    }
+    assignment_exercises {
+        uuid assignment_id PK, FK
+        uuid exercise_id PK, FK
     }
     answers {
         uuid id PK
@@ -345,12 +391,19 @@ erDiagram
     exercise_revisions {
         uuid id PK
     }
+    services {
+        uuid id PK
+    }
+    exercises {
+        uuid id PK
+    }
 }
 ```
 
 ## Удаление и история
 
-Пользователи, события, службы, шаблоны, карточки, профили оценки и учебные
-сессии сначала помечаются удалёнными. Поле `purge_after` назначает физическое
-удаление через шесть месяцев. Зависимые записи удаляются каскадно только после
-окончательного удаления родительского объекта.
+Пользователи, события, службы, шаблоны, карточки, профили оценки и пустые
+учебные сессии сначала помечаются удалёнными. Поле `purge_after` назначает
+физическое удаление через шесть месяцев. Сессии с ответами, сами ответы и
+оценки хранятся бессрочно. Удаление исходного пользователя или карточки не
+удаляет результат: необходимые данные остаются в снимках сессии и карточки.

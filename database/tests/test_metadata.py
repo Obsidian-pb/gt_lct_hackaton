@@ -8,6 +8,7 @@ EXPECTED_TABLES = {
     "auth.role_permissions",
     "auth.roles",
     "auth.user_roles",
+    "auth.user_services",
     "auth.users",
     "catalog.classifier_version_events",
     "catalog.classifier_versions",
@@ -28,6 +29,9 @@ EXPECTED_TABLES = {
     "content.exercises",
     "content.incident_card_details",
     "training.answers",
+    "training.assignments",
+    "training.assignment_services",
+    "training.assignment_exercises",
     "training.evaluations",
     "training.scoring_profiles",
     "training.scoring_rules",
@@ -135,6 +139,18 @@ def test_retained_entities_have_deletion_deadlines() -> None:
         assert "purge_after" in columns
 
 
+def test_service_scoped_assignments_and_history_snapshots() -> None:
+    assignment = Base.metadata.tables["training.assignments"]
+    session = Base.metadata.tables["training.sessions"]
+    session_card = Base.metadata.tables["training.session_cards"]
+    assert {"trainee_id", "teacher_id", "requested_card_count", "normative_seconds"} <= set(assignment.columns.keys())
+    assert {"assignment_id", "assignment_snapshot", "trainee_id_snapshot", "normative_seconds"} <= set(session.columns.keys())
+    assert {"exercise_revision_id_snapshot", "exercise_snapshot"} <= set(session_card.columns.keys())
+    assert Base.metadata.tables["auth.user_services"] is not None
+    assert Base.metadata.tables["training.assignment_services"] is not None
+    assert Base.metadata.tables["training.assignment_exercises"] is not None
+
+
 def test_exported_schema_contains_database_functions() -> None:
     schema_sql = (Path(__file__).parents[1] / "schema.sql").read_text(
         encoding="utf-8"
@@ -151,3 +167,5 @@ def test_exported_schema_contains_database_functions() -> None:
     assert "CREATE FUNCTION catalog.matching_service_routes" in schema_sql
     assert "CREATE CONSTRAINT TRIGGER trg_event_requires_service" in schema_sql
     assert "CREATE FUNCTION content.assert_approved_exercise" in schema_sql
+    assert "CREATE FUNCTION training.snapshot_exercise" in schema_sql
+    assert "CREATE FUNCTION training.prevent_result_delete" in schema_sql

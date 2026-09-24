@@ -1,5 +1,5 @@
 from trainer_db.models.audit import AuditLog
-from trainer_db.models.auth import Permission, Role, User, role_permissions, user_roles
+from trainer_db.models.auth import Permission, Role, User, role_permissions, user_roles, user_services
 from trainer_db.models.base import Base
 from trainer_db.models.catalog import (
     ClassifierVersion,
@@ -30,6 +30,9 @@ from trainer_db.models.training import (
     ScoringRule,
     SessionCard,
     TrainingSession,
+    TrainingAssignment,
+    assignment_services,
+    assignment_exercises,
 )
 
 __all__ = [
@@ -57,6 +60,7 @@ __all__ = [
     "Service",
     "SessionCard",
     "TrainingSession",
+    "TrainingAssignment",
     "User",
     "classifier_version_events",
     "event_class_services",
@@ -64,4 +68,7 @@ __all__ = [
     "exercise_services",
     "role_permissions",
     "user_roles",
+    "user_services",
+    "assignment_services",
+    "assignment_exercises",
 ]
