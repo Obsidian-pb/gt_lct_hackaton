@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import socket
 import threading
 import time
@@ -268,8 +269,12 @@ def _disk() -> dict:
     система контейнера: физически это диск сервера, и переполняется он общий
     — вместе с базой, копиями и загруженными учебными материалами.
     """
+    # shutil.disk_usage, а не os.statvfs: последнего в Windows нет вовсе, и
+    # страница «Состояние» переносного комплекта падала целиком. Диск берётся
+    # тот, на котором лежит приложение: в контейнере это корень, в переносном
+    # комплекте — диск с папкой комплекта, где живут и база, и модель.
     try:
-        stat = os.statvfs("/")
+        usage = shutil.disk_usage(Path(__file__).resolve().anchor)
     except OSError:
         return {
             "used_bytes": None,
@@ -277,12 +282,11 @@ def _disk() -> dict:
             "percent": None,
             "note": "Сведения о диске недоступны.",
         }
-    total = stat.f_blocks * stat.f_frsize
-    # f_bavail, а не f_bfree: часть места зарезервирована за суперпользователем
-    # и приложению недоступна, показывать её как свободную — вводить в
-    # заблуждение.
-    free = stat.f_bavail * stat.f_frsize
-    used = total - free
+    total = usage.total
+    # free у disk_usage — место, доступное приложению, а не вся свободная
+    # область: часть зарезервирована за суперпользователем, и показывать её
+    # как свободную — вводить в заблуждение.
+    used = total - usage.free
     return {
         "used_bytes": used,
         "total_bytes": total,
@@ -291,9 +295,46 @@ def _disk() -> dict:
     }
 
 
+UNAVAILABLE = "Сведения недоступны на этой платформе."
+
+
+def _guarded(section: str, read, fallback: dict) -> dict:
+    """Один недоступный показатель не должен ронять всю страницу состояния.
+
+    Показатели читаются из системных источников, состав которых зависит
+    от платформы: cgroup и /proc есть в контейнере на Linux, но не на Windows
+    переносного комплекта. Страницу «Состояние» открывают, когда что-то
+    подозревают, — и получить вместо неё «внутренняя ошибка» хуже всего.
+    Запасное значение полное, по всем полям: схема ответа их требует.
+    """
+    try:
+        return read()
+    except Exception as failure:  # noqa: BLE001 — любой отказ источника, не только OSError
+        logger.warning("Показатель «%s» недоступен: %s", section, failure)
+        return dict(fallback)
+
+
 def load() -> dict:
     """Нагрузка на сервер: процессор, оперативная память, диск."""
-    return {"cpu": _cpu(), "memory": _memory(), "disk": _disk()}
+    return {
+        "cpu": _guarded(
+            "процессор",
+            _cpu,
+            {"percent": None, "limit_cores": None, "load_average_1m": None,
+             "scope": "недоступно", "note": UNAVAILABLE},
+        ),
+        "memory": _guarded(
+            "память",
+            _memory,
+            {"used_bytes": None, "limit_bytes": None, "percent": None,
+             "scope": "недоступно", "note": UNAVAILABLE},
+        ),
+        "disk": _guarded(
+            "диск",
+            _disk,
+            {"used_bytes": None, "total_bytes": None, "percent": None, "note": UNAVAILABLE},
+        ),
+    }
 
 
 # --- База данных -------------------------------------------------------------

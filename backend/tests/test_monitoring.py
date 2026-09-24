@@ -141,6 +141,28 @@ def test_состояние_комплекса_видно_администрат
         assert показатель in state["load"]
 
 
+def test_недоступный_показатель_не_роняет_страницу_состояния(admin_client, monkeypatch):
+    """На Windows нет ни cgroup, ни statvfs — страница обязана открыться всё равно.
+
+    Заказчик открыл «Состояние» в переносном комплекте и получил «внутреннюю
+    ошибку»: падал один показатель, а с ним и вся страница.
+    """
+
+    def no_such_call():
+        raise AttributeError("module 'os' has no attribute 'statvfs'")
+
+    monkeypatch.setattr(health, "_disk", no_such_call)
+    headers = token(admin_client, "root")
+
+    response = admin_client.get("/api/admin/health", headers=headers)
+    assert response.status_code == 200, response.text
+    disk = response.json()["load"]["disk"]
+    assert disk["percent"] is None and disk["total_bytes"] is None
+    assert "недоступны" in disk["note"]
+    # Остальные показатели приходят как обычно.
+    assert "scope" in response.json()["load"]["cpu"]
+
+
 def test_отсутствие_резервных_копий_не_выдаётся_за_исправность(admin_client, tmp_path, monkeypatch):
     """Каталог копий контейнеру приложения может быть не виден — это не «ок»."""
     monkeypatch.setattr(health, "BACKUP_DIR", tmp_path / "нет-такого-каталога")
