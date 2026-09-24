@@ -75,12 +75,12 @@ crlf ops/portable/settings.example.cmd "$KIT/settings.example.cmd"
 printf '\xEF\xBB\xBF' > "$KIT/README-ЗАПУСК.txt"
 perl -pe 's/\r?\n/\r\n/' "ops/portable/README-ЗАПУСК.txt" >> "$KIT/README-ЗАПУСК.txt"
 mkdir -p "$KIT/runtime"
-cp ops/portable/wait_health.py ops/portable/lan_addresses.py "$KIT/runtime/"
+cp ops/portable/wait_health.py ops/portable/lan_addresses.py ops/portable/backup.py "$KIT/runtime/"
 
 if [ "$MODE" = "--update" ]; then
   mkdir -p "$OUT"
   rm -f "$OUT/dds112-update.zip"
-  ( cd "$KIT" && zip -q -r -n .mp3 "$OUT/dds112-update.zip" app start.cmd stop.cmd settings.example.cmd "README-ЗАПУСК.txt" runtime/wait_health.py runtime/lan_addresses.py )
+  ( cd "$KIT" && zip -q -r -n .mp3 "$OUT/dds112-update.zip" app start.cmd stop.cmd settings.example.cmd "README-ЗАПУСК.txt" runtime/wait_health.py runtime/lan_addresses.py runtime/backup.py )
   rm -rf "$KIT"
   echo "готово: $OUT/dds112-update.zip ($(du -h "$OUT/dds112-update.zip" | cut -f1))"
   echo "на месте: stop.cmd, распаковать поверх папки комплекта с заменой, start.cmd"

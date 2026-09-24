@@ -55,6 +55,7 @@ echo.
 rem --- База данных -----------------------------------------------------------
 if not exist "%PGDATA%\PG_VERSION" (
   echo  Первый запуск: создаю базу данных...
+  set "FIRST_RUN=1"
   "%PG%\initdb.exe" -D "%PGDATA%" -U trainer -A trust -E UTF8 --locale=C >"%LOGS%\initdb.log" 2>&1
   if errorlevel 1 (
     echo  Не удалось создать базу. Подробности: data\logs\initdb.log
@@ -110,6 +111,12 @@ set "DATABASE_URL=postgresql+psycopg://trainer@127.0.0.1:%PGPORT%/trainer"
 set "STATIC_DIR=%ROOT%\app\web"
 set "BACKUP_DIR=%ROOT%\data\backups"
 cd /d "%ROOT%\app\backend"
+rem Копия перед обновлением схемы: если миграция что-то испортит, есть
+rem к чему откатиться. При первом запуске копировать ещё нечего.
+if not defined FIRST_RUN (
+  echo  Снимаю резервную копию базы...
+  "%PY%" "%ROOT%\runtime\backup.py" "%PG%" %PGPORT% "%ROOT%\data\backups" >>"%LOGS%\backup.log" 2>&1
+)
 echo  Обновляю схему базы и учебные данные...
 "%PY%" scripts\migrate.py >>"%LOGS%\setup.log" 2>&1 || goto :setup_failed
 "%PY%" scripts\seed.py >>"%LOGS%\setup.log" 2>&1 || goto :setup_failed

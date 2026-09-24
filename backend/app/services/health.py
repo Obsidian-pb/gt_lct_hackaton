@@ -22,6 +22,7 @@ import logging
 import os
 import shutil
 import socket
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -151,6 +152,59 @@ def _load_average() -> float | None:
         return None
 
 
+# --- Windows: переносной комплект --------------------------------------------
+#
+# Ни cgroup, ни /proc там нет, а показывать «нет данных» на рабочем месте
+# заказчика — значит оставить администратора без единственного раздела,
+# который отвечает на вопрос «почему тормозит». Windows отдаёт то же самое
+# через системные вызовы; сторонних библиотек ради двух чисел не заводим.
+
+
+def _windows_memory() -> tuple[int, int] | None:
+    """Занятая и общая физическая память компьютера, байты."""
+    if sys.platform != "win32":
+        return None
+    import ctypes  # noqa: PLC0415 — модуль нужен только на Windows
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [
+            ("length", ctypes.c_ulong),
+            ("load", ctypes.c_ulong),
+            ("total_phys", ctypes.c_ulonglong),
+            ("avail_phys", ctypes.c_ulonglong),
+            ("total_pagefile", ctypes.c_ulonglong),
+            ("avail_pagefile", ctypes.c_ulonglong),
+            ("total_virtual", ctypes.c_ulonglong),
+            ("avail_virtual", ctypes.c_ulonglong),
+            ("avail_extended", ctypes.c_ulonglong),
+        ]
+
+    status = MemoryStatus()
+    status.length = ctypes.sizeof(MemoryStatus)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    return status.total_phys - status.avail_phys, status.total_phys
+
+
+def _windows_cpu_seconds() -> float | None:
+    """Процессорное время, израсходованное всеми ядрами компьютера, секунды.
+
+    GetSystemTimes отдаёт время простоя, ядра и пользователя в единицах
+    по 100 нс; время ядра включает простой, поэтому занято = ядро + пользователь − простой.
+    Считается так же, как по cgroup: разница двух замеров, делённая на ядра.
+    """
+    if sys.platform != "win32":
+        return None
+    import ctypes  # noqa: PLC0415 — модуль нужен только на Windows
+
+    idle, kernel, user = ctypes.c_ulonglong(), ctypes.c_ulonglong(), ctypes.c_ulonglong()
+    if not ctypes.windll.kernel32.GetSystemTimes(
+        ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)
+    ):
+        return None
+    return (kernel.value + user.value - idle.value) / 1e7
+
+
 def _cpu() -> dict:
     """Загрузка процессора в процентах от того, что отведено контейнеру.
 
@@ -165,12 +219,18 @@ def _cpu() -> dict:
     limit = _cpu_limit_cores()
     average = _load_average()
     used = _cpu_seconds_used()
+    scope = "контейнер приложения"
+    if used is None:
+        # Переносной комплект на Windows: считаем по компьютеру целиком.
+        used = _windows_cpu_seconds()
+        if used is not None:
+            limit, scope = float(os.cpu_count() or 1), "компьютер целиком"
     if used is None:
         return {
             "percent": None,
             "limit_cores": limit,
             "load_average_1m": average,
-            "scope": "контейнер приложения",
+            "scope": scope,
             "note": "Показатель доступен только при работе в контейнере Linux.",
         }
 
@@ -192,7 +252,7 @@ def _cpu() -> dict:
         "percent": percent,
         "limit_cores": limit,
         "load_average_1m": average,
-        "scope": "контейнер приложения",
+        "scope": scope,
         "note": (
             "Доля от отведённого комплексу процессорного времени."
             if percent is not None
@@ -234,12 +294,24 @@ def _memory() -> dict:
             total = _stat_value(Path("/proc/meminfo"), "MemTotal:")
             available = _stat_value(Path("/proc/meminfo"), "MemAvailable:")
             if total is None or available is None:
+                # Переносной комплект на Windows: память компьютера целиком,
+                # предела у процесса там нет, как и у контейнера без лимита.
+                windows = _windows_memory()
+                if windows is None:
+                    return {
+                        "used_bytes": None,
+                        "limit_bytes": None,
+                        "percent": None,
+                        "scope": "контейнер приложения",
+                        "note": "Показатель доступен только при работе в контейнере Linux.",
+                    }
+                used, limit = windows
                 return {
-                    "used_bytes": None,
-                    "limit_bytes": None,
-                    "percent": None,
-                    "scope": "контейнер приложения",
-                    "note": "Показатель доступен только при работе в контейнере Linux.",
+                    "used_bytes": used,
+                    "limit_bytes": limit,
+                    "percent": round(used / limit * 100, 1) if limit else None,
+                    "scope": "компьютер целиком",
+                    "note": "Занято на компьютере в целом, включая другие программы.",
                 }
             # Единицы в /proc/meminfo — килобайты. Предела контейнера здесь
             # нет, поэтому и сказано прямо: это память сервера целиком.
