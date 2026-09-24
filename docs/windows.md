@@ -89,6 +89,9 @@ docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d
 
 ## Путь В. Без Docker — переносной комплект
 
+Проверен заказчиком на рабочем месте под Windows 24 сентября 2026:
+запустился с первого раза, без правок.
+
 Для рабочего места, где нет Docker и прав администратора. Архив
 `dds112-portable.zip` (~2,7 ГБ) собирается на машине разработчика
 (`scripts/package_portable.sh`) и содержит всё: встраиваемый Python
