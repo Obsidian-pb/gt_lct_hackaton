@@ -12,6 +12,26 @@ function elapsedSince(issuedAt: string): number {
   return (Date.now() - new Date(issuedAt).getTime()) / 1000;
 }
 
+/**
+ * Действующий норматив карточки в секундах от её направления.
+ *
+ * Нормативов два, и они отсчитываются от разных моментов: взятие в работу —
+ * от направления карточки, обработка — от взятия в работу. Таймер считает
+ * от направления, поэтому после взятия в работу норматив обработки
+ * переводится в ту же шкалу: фактическое время взятия плюс норматив.
+ */
+export function cardDeadline(card: {
+  opened_at: string | null;
+  pickup_seconds: number | null;
+  pickup_deadline_seconds: number;
+  handling_deadline_seconds: number;
+}): number {
+  if (card.opened_at && card.pickup_seconds != null) {
+    return card.pickup_seconds + card.handling_deadline_seconds;
+  }
+  return card.pickup_deadline_seconds;
+}
+
 export function Timer({ issuedAt, deadlineSeconds, frozenAt }: Props) {
   const [elapsed, setElapsed] = useState(() => elapsedSince(issuedAt));
 

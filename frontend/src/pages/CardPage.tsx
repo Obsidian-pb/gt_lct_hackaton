@@ -6,7 +6,7 @@ import type { Card, Evaluation } from '../api/types';
 import { useAuth } from '../auth';
 import { EvaluationReport } from '../components/EvaluationReport';
 import { NotificationReasons } from '../components/NotificationReasons';
-import { Timer } from '../components/Timer';
+import { Timer, cardDeadline } from '../components/Timer';
 
 export function CardPage() {
   const { id } = useParams();
@@ -109,7 +109,7 @@ export function CardPage() {
           </div>
           <Timer
             issuedAt={card.issued_at}
-            deadlineSeconds={card.deadline_seconds}
+            deadlineSeconds={cardDeadline(card)}
             frozenAt={card.finished ? card.elapsed_seconds : null}
           />
         </div>

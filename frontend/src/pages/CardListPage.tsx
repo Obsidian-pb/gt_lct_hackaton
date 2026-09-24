@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Card } from '../api/types';
-import { Timer } from '../components/Timer';
+import { Timer, cardDeadline } from '../components/Timer';
 
 /** Красная индикация у статусов, которые попадают в отдел контроля. */
 const PROBLEM_STATUSES = new Set(['Не оповещено', 'Отказ', 'Не завершено']);
@@ -76,7 +76,7 @@ export function CardListPage() {
               <td>
                 <Timer
                   issuedAt={card.issued_at}
-                  deadlineSeconds={card.deadline_seconds}
+                  deadlineSeconds={cardDeadline(card)}
                   frozenAt={card.finished ? card.elapsed_seconds : null}
                 />
               </td>

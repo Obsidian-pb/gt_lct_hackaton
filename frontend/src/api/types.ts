@@ -18,7 +18,14 @@ export interface Card {
   notification_reasons: NotificationReason[];
   issued_at: string;
   opened_at: string | null;
-  deadline_seconds: number;
+  // Два норматива занятия: взятие в работу считается от направления
+  // карточки, обработка — от взятия в работу. Поле было одно и устарело
+  // вместе со сменой модели нормативов: список показывал «из с» без числа.
+  pickup_deadline_seconds: number;
+  handling_deadline_seconds: number;
+  /** Фактическое время взятия в работу и обработки; null — ещё не наступило. */
+  pickup_seconds: number | null;
+  handling_seconds: number | null;
   elapsed_seconds: number;
   current_status: string | null;
   available_statuses: string[];
