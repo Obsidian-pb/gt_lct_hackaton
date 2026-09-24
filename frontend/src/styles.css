@@ -297,6 +297,26 @@ button {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* Обоснование списка: почему служба в нём или при каком признаке была бы.
+   Неоповещённые — приглушённо: это подсказка на будущее, а не замечание. */
+.reasons {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.reasons__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.reasons__list li {
+  margin: 2px 0;
+}
+
+.reasons__list--off {
+  color: var(--muted);
+}
+
 /* --- Проставление статуса ----------------------------------------------- */
 
 .statuses {

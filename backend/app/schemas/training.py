@@ -20,6 +20,24 @@ class UserOut(BaseModel):
     service_ekp_name: str | None = None
 
 
+class NotificationReasonOut(BaseModel):
+    """Служба из списка оповещения и почему она там — или почему нет."""
+
+    service: str
+    incident_type: str
+    notified: bool
+    reason: str
+
+    @classmethod
+    def from_reason(cls, reason) -> "NotificationReasonOut":
+        return cls(
+            service=reason.service,
+            incident_type=reason.incident_type_in_service,
+            notified=reason.notified,
+            reason=reason.text,
+        )
+
+
 class CardOut(BaseModel):
     """Карточка происшествия глазами диспетчера ДДС."""
 
@@ -30,6 +48,8 @@ class CardOut(BaseModel):
     caller: str
     # Службы, оповещённые по этому происшествию согласно ЕКП.
     notified_services: dict[str, str] = Field(default_factory=dict)
+    # Обоснование списка: по какому признаку каждая служба в нём оказалась.
+    notification_reasons: list[NotificationReasonOut] = Field(default_factory=list)
     issued_at: datetime
     opened_at: datetime | None
     pickup_deadline_seconds: int

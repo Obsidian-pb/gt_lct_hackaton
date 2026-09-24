@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Card, Evaluation } from '../api/types';
 import { useAuth } from '../auth';
 import { EvaluationReport } from '../components/EvaluationReport';
+import { NotificationReasons } from '../components/NotificationReasons';
 import { Timer } from '../components/Timer';
 
 export function CardPage() {
@@ -146,6 +147,7 @@ export function CardPage() {
                 </div>
               ))}
             </div>
+            <NotificationReasons reasons={card.notification_reasons} />
           </div>
         )}
 

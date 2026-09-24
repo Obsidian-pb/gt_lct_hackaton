@@ -20,6 +20,7 @@ from app.models.training import (
     TrainingMode,
 )
 from app.models.user import Role, User
+from app.schemas.training import NotificationReasonOut
 from app.services.classifier_versions import current_ekp, ekp_for_session
 from app.services.ekp import EKP
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, Expected, FilledCard
@@ -102,6 +103,10 @@ class ClassificationOut(BaseModel):
     missed_services: list[str]
     extra_services: list[str]
     notified_services: dict[str, str]
+    # Обоснование по каждой службе: почему она в списке или при каком
+    # признаке была бы. Это и есть предмет обучения — список выводится
+    # из признаков, а не запоминается.
+    notification_reasons: list[NotificationReasonOut] = Field(default_factory=list)
 
 
 class OperatorEvaluationOut(BaseModel):
@@ -323,6 +328,7 @@ def classify_call(
             referral_target=scenario.referral_target,
             contact_phone=scenario.contact_phone,
             address_parts=dict(scenario.address_parts or {}),
+            flags=frozenset(scenario.flags or []),
         ),
         deadline,
         ekp,
@@ -357,6 +363,9 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
     if assessment.classification is not None:
         result = assessment.classification
         chosen = result.chosen_rule
+        # Признаки вызова — из сценария: список оповещения и его обоснование
+        # обязаны совпадать с тем, что видит диспетчер на карточке.
+        flags = frozenset(attempt.scenario.flags or [])
         classification = ClassificationOut(
             correct=result.correct,
             chosen_incident_type=chosen.incident_type if chosen else None,
@@ -367,7 +376,10 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
             extra_services=list(result.extra_services),
             # Эталонное правило уже взято из редакции занятия — список
             # оповещения берётся из него же, а не ищется заново.
-            notified_services=result.expected_rule.resolve(),
+            notified_services=result.expected_rule.resolve(flags),
+            notification_reasons=[
+                NotificationReasonOut.from_reason(r) for r in result.expected_rule.explain(flags)
+            ],
         )
     return OperatorEvaluationOut(
         attempt_id=attempt.id,

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 
 import { api, operatorApi } from '../api/client';
 import type { Call, CallerRole, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
+import { NotificationReasons } from '../components/NotificationReasons';
 import { Timer } from '../components/Timer';
 
 /**
@@ -560,6 +561,7 @@ function OperatorReport({ evaluation }: { evaluation: OperatorEvaluation }) {
                 {classification.missed_services.join(', ')}
               </div>
             )}
+            <NotificationReasons reasons={classification.notification_reasons} />
           </div>
         )}
 

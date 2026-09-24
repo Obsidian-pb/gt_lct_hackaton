@@ -33,6 +33,36 @@ class Notification:
 
 
 @dataclass(frozen=True)
+class Reason:
+    """Почему служба есть в списке оповещения — или почему её там нет.
+
+    Список сам по себе учит мало: обучающийся видит «МВД, СМП, ЦЭМП» и не
+    понимает, откуда взялась скорая. Обоснование связывает службу с признаком
+    опросной карты: «СМП — потому что отмечены пострадавшие», «МОСГАЗ — только
+    при признаке газификации, здесь не отмечен». Это и есть то, что оператор
+    должен усвоить: список выводится из признаков, а не запоминается.
+    """
+
+    service: str
+    incident_type_in_service: str
+    # always — служба оповещается при этом типе всегда; flag — её добавил
+    # отмеченный признак; conditional — оповещалась бы при признаке, которого
+    # в этом вызове нет.
+    kind: str
+    flags: tuple[str, ...]
+    notified: bool
+
+    @property
+    def text(self) -> str:
+        titles = [f"«{f.replace('_', ' ')}»" for f in self.flags]
+        if self.kind == "always":
+            return "оповещается при этом типе происшествия всегда"
+        if self.kind == "flag":
+            return "потому что отмечен признак " + " и ".join(titles)
+        return "только при признаке " + " или ".join(titles) + " — в этом вызове не отмечен"
+
+
+@dataclass(frozen=True)
 class Rule:
     number: int
     group: str
@@ -42,6 +72,66 @@ class Rule:
     main_service: str | None
     hints: str | None
     notifications: tuple[Notification, ...]
+
+    def explain(self, flags: frozenset[str] | set[str] = frozenset()) -> tuple[Reason, ...]:
+        """Список оповещения с обоснованием по каждой службе.
+
+        Сначала оповещённые в порядке классификатора, затем те, кого добавил
+        бы признак: их тоже стоит показать — именно они и есть урок.
+        """
+        flags = frozenset(flags)
+        notified = self.resolve(flags)
+        reasons: list[Reason] = []
+        seen: set[str] = set()
+        for n in self.notifications:
+            if n.service in seen or n.service not in notified:
+                continue
+            seen.add(n.service)
+            triggered = sorted(
+                f
+                for m in self.notifications
+                if m.service == n.service
+                and m.variant_kind == "flag"
+                and m.requires_flags
+                and m.requires_flags <= flags
+                and m.responds
+                for f in m.requires_flags
+            )
+            reasons.append(
+                Reason(
+                    service=n.service,
+                    incident_type_in_service=notified[n.service],
+                    kind="flag" if triggered else "always",
+                    flags=tuple(triggered),
+                    notified=True,
+                )
+            )
+        for n in self.notifications:
+            if n.service in seen:
+                continue
+            # Признаки, любой из которых добавил бы службу. Подколонки
+            # с «нет реагирования» не считаются: они службу не добавляют.
+            options = sorted(
+                {
+                    f
+                    for m in self.notifications
+                    if m.service == n.service and m.requires_flags and m.responds
+                    for f in m.requires_flags
+                }
+            )
+            if not options:
+                continue
+            seen.add(n.service)
+            reasons.append(
+                Reason(
+                    service=n.service,
+                    incident_type_in_service=n.incident_type_in_service,
+                    kind="conditional",
+                    flags=tuple(options),
+                    notified=False,
+                )
+            )
+        return tuple(reasons)
 
     def resolve(self, flags: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
         """Список оповещения при заданных флагах опросной карты.

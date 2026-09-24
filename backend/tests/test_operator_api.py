@@ -63,6 +63,35 @@ def make_call(db_factory, **scenario_fields) -> int:
         return attempt.id
 
 
+def test_разбор_объясняет_список_оповещения_по_признакам_вызова(client, db_factory):
+    """Пострадавшие есть у вызова — скорая в списке, и разбор говорит почему."""
+    attempt_id = make_call(db_factory, flags=["пострадавшие"])
+    response = client.post(
+        f"/api/operator/calls/{attempt_id}/classify",
+        json={
+            "outcome": "classify",
+            "group": "Пожары и задымления",
+            "path": ["на улице", "мусор", "открытое пламя"],
+            "address": "Москва, ул. Кировоградская, д. 24",
+            "description": "Горит контейнер, есть пострадавший",
+        },
+        headers=token(client, "student"),
+    )
+    assert response.status_code == 200, response.text
+    classification = response.json()["classification"]
+    # Список оповещения считается с признаками вызова — как на карточке диспетчера.
+    assert "СМП" in classification["notified_services"]
+    assert classification["missed_services"] == []
+    reasons = {r["service"]: r for r in classification["notification_reasons"]}
+    assert reasons["СМП"]["notified"] is True
+    assert "«пострадавшие»" in reasons["СМП"]["reason"]
+    assert reasons["МЧС"]["notified"] is True
+    assert "всегда" in reasons["МЧС"]["reason"]
+    # Служба, которой не хватило признака, названа с подсказкой, а не пропущена молча.
+    assert reasons["МОСГАЗ"]["notified"] is False
+    assert "газификация" in reasons["МОСГАЗ"]["reason"]
+
+
 def test_чужой_регион_передан_по_принадлежности(client, db_factory):
     attempt_id = make_call(
         db_factory,

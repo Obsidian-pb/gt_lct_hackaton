@@ -8,7 +8,7 @@ from app.llm import get_llm_provider
 from app.models.base import as_utc, utcnow
 from app.models.training import Attempt, Evaluation, Scenario, TrainingMode
 from app.models.user import Role, User
-from app.schemas.training import CardOut, EvaluationOut, StatusIn
+from app.schemas.training import CardOut, EvaluationOut, NotificationReasonOut, StatusIn
 from app.services import attempts as service
 from app.services import sessions as session_service
 from app.services.classifier_versions import ekp_for_session
@@ -63,14 +63,19 @@ def _load(attempt_id: int, db: Session, user: User) -> Attempt:
 def _card(attempt: Attempt) -> CardOut:
     scenario = attempt.scenario
     notified: dict[str, str] = {}
+    reasons: list[NotificationReasonOut] = []
     if scenario.ekp_rule_number:
         # Список оповещения — по редакции классификатора, по которой идёт
         # занятие: карточка обязана выглядеть так же и через год.
         ekp = ekp_for_session(attempt.session)
+        flags = frozenset(scenario.flags or [])
         try:
-            notified = ekp.rule(scenario.ekp_rule_number).resolve(set(scenario.flags or []))
+            rule = ekp.rule(scenario.ekp_rule_number)
         except KeyError:
-            notified = {}
+            rule = None
+        if rule is not None:
+            notified = rule.resolve(flags)
+            reasons = [NotificationReasonOut.from_reason(r) for r in rule.explain(flags)]
 
     current = service.current_status(attempt)
     pickup, handling = service.timings(attempt)
@@ -82,6 +87,7 @@ def _card(attempt: Attempt) -> CardOut:
         description=scenario.description,
         caller=scenario.caller,
         notified_services=notified,
+        notification_reasons=reasons,
         issued_at=attempt.issued_at,
         opened_at=attempt.opened_at,
         pickup_deadline_seconds=attempt.session.pickup_deadline_seconds,

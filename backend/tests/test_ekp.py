@@ -67,6 +67,51 @@ def test_флаги_не_меняют_итоговый_тип(ekp):
     assert len(rule.resolve({"пострадавшие", "газификация"})) > len(rule.resolve())
 
 
+# --- Обоснование списка оповещения -------------------------------------------
+
+
+def test_обоснование_повторяет_список_оповещения(ekp):
+    """Оповещённые в обосновании — ровно те, что в списке, и в том же порядке."""
+    rule = ekp.rule(FIRE_TRASH)
+    for flags in (set(), {"пострадавшие"}, {"газификация", "угроза_людям"}):
+        reasons = rule.explain(flags)
+        assert [r.service for r in reasons if r.notified] == list(rule.resolve(flags))
+        assert {r.service: r.incident_type_in_service for r in reasons if r.notified} == rule.resolve(flags)
+
+
+def test_служба_без_признака_объясняется_как_постоянная(ekp):
+    reasons = {r.service: r for r in ekp.rule(FIRE_TRASH).explain()}
+    assert reasons["МЧС"].kind == "always"
+    assert reasons["МЧС"].notified is True
+    assert "всегда" in reasons["МЧС"].text
+
+
+def test_служба_по_признаку_называет_признак(ekp):
+    reasons = {r.service: r for r in ekp.rule(FIRE_TRASH).explain({"пострадавшие"})}
+    assert reasons["СМП"].kind == "flag"
+    assert reasons["СМП"].flags == ("пострадавшие",)
+    assert reasons["СМП"].text == "потому что отмечен признак «пострадавшие»"
+
+
+def test_неоповещённая_служба_подсказывает_признак(ekp):
+    """Именно это и есть урок: скорая появится, если отметить пострадавших."""
+    reasons = {r.service: r for r in ekp.rule(FIRE_TRASH).explain()}
+    smp = reasons["СМП"]
+    assert smp.notified is False
+    assert smp.kind == "conditional"
+    assert "пострадавшие" in smp.flags
+    # Подколонка «нет реагирования» службу не добавляет — её признак не подсказывается.
+    assert "пострадавшие_не_на_месте" not in smp.flags
+    assert "только при признаке" in smp.text and "не отмечен" in smp.text
+
+
+def test_обоснование_не_выдумывает_служб(ekp):
+    """Службы, которых у правила нет ни в одной подколонке, не упоминаются."""
+    rule = ekp.rule(FIRE_TRASH)
+    listed = {r.service for r in rule.explain({"пострадавшие"})}
+    assert listed <= {n.service for n in rule.notifications}
+
+
 def test_выборка_правил_по_службе(ekp):
     rules = ekp.services_for("Мослифт")
     assert rules

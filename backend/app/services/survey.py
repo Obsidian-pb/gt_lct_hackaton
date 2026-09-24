@@ -139,14 +139,22 @@ class ClassificationResult:
 
 
 def classify(
-    expected_rule_number: int, group: str, path: list[str], ekp: EKP | None = None
+    expected_rule_number: int,
+    group: str,
+    path: list[str],
+    ekp: EKP | None = None,
+    flags: frozenset[str] | set[str] = frozenset(),
 ) -> ClassificationResult:
     """Сверяет выбранный путь с эталонным правилом.
 
     Редакция передаётся снаружи: и эталон, и выбранный путь обязаны
     читаться по одной и той же редакции — той, по которой идёт занятие.
+    Признаки вызова (пострадавшие, газификация) — тоже: список оповещения
+    зависит от них, и сравнивать эталон с флагами против выбора без флагов
+    значило бы приписать ошибке классификации чужие последствия.
     """
     ekp = ekp or get_ekp()
+    flags = frozenset(flags)
     expected = ekp.rule(expected_rule_number)
     chosen = resolve(group, path, ekp)
 
@@ -158,8 +166,8 @@ def classify(
                 break
             matched += 1
 
-    expected_services = set(expected.resolve())
-    chosen_services = set(chosen.resolve()) if chosen else set()
+    expected_services = set(expected.resolve(flags))
+    chosen_services = set(chosen.resolve(flags)) if chosen else set()
     return ClassificationResult(
         correct=chosen is not None and chosen.number == expected.number,
         chosen_rule=chosen,

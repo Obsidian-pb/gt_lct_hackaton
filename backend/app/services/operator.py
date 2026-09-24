@@ -58,6 +58,10 @@ class Expected:
     # Эталонный адрес по частям. Пустой словарь — адрес у вызова
     # описательный, разбирать в нём нечего.
     address_parts: dict[str, str] = field(default_factory=dict)
+    # Признаки вызова, влияющие на список оповещения: пострадавшие,
+    # газификация, угроза людям. Они заданы сценарием — это то, что
+    # заявитель сообщил, — и список оповещения считается с ними.
+    flags: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -136,7 +140,7 @@ def evaluate(
             )
         else:
             classification = classify(
-                expected.rule_number, card.group, list(card.path), ekp
+                expected.rule_number, card.group, list(card.path), ekp, expected.flags
             )
             result.classification = classification
             _check_classification(classification, result)

@@ -15,6 +15,7 @@ export interface Card {
   caller: string;
   /** Службы из списка оповещения ЕКП и тип происшествия в системе каждой из них. */
   notified_services: Record<string, string>;
+  notification_reasons: NotificationReason[];
   issued_at: string;
   opened_at: string | null;
   deadline_seconds: number;
@@ -172,6 +173,15 @@ export interface Classification {
   missed_services: string[];
   extra_services: string[];
   notified_services: Record<string, string>;
+  notification_reasons: NotificationReason[];
+}
+
+/** Служба из списка оповещения и почему она там — или при каком признаке была бы. */
+export interface NotificationReason {
+  service: string;
+  incident_type: string;
+  notified: boolean;
+  reason: string;
 }
 
 export interface OperatorEvaluation {

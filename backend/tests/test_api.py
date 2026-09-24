@@ -37,6 +37,12 @@ def test_карточка_содержит_список_оповещения_и�
     assert card["address"].startswith("Москва, ул. Берзарина")
     assert card["available_statuses"] == [str(S.ACCEPTED), str(S.REJECTED)]
     assert "МЧС" in card["notified_services"]
+    # Список приходит с обоснованием: оповещённые повторяют список,
+    # неоповещённые подсказывают признак, которого не хватило.
+    reasons = card["notification_reasons"]
+    assert [r["service"] for r in reasons if r["notified"]] == list(card["notified_services"])
+    assert all(r["reason"] for r in reasons)
+    assert any(not r["notified"] and "только при признаке" in r["reason"] for r in reasons)
 
 
 def test_обучающийся_не_видит_чужую_карточку(client):
