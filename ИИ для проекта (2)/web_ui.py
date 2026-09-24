@@ -8,18 +8,63 @@ import socket
 import threading
 import urllib.request
 import webbrowser
+from datetime import datetime
 
-from ai_core import Engine, FIELDS, LEVELS, VERDICTS, validate_task
+from ai_core import Engine, FIELDS, LEVELS, VERDICTS, validate_task, require_text
 from provider import GigaChat
 from dds import WORKFLOWS, ACTION_LABELS
 import card_factory
 import card_reference
 import card_caller
+import teacher_portal
 
 ROOT = Path(__file__).resolve().parent
 
 
+def student_portal_view(engine, identifier):
+    view = engine.student_view(identifier)
+    session = engine.load(identifier)
+    view['training'] = session.get('training')
+    view['reference'] = ({key: row['expected'] for key, row in session['task']['fields'].items()}
+                         if session['status'] == 'reviewed' else None)
+    view['duration_seconds'] = (max(0, int((datetime.fromisoformat(session['submitted_at']) -
+                                           datetime.fromisoformat(session['created_at'])).total_seconds()))
+                                if session.get('submitted_at') else None)
+    return view
+
+
 def dispatch(engine, action, p):
+    if action in ('teacher_dashboard', 'teacher_session', 'teacher_task', 'teacher_note', 'teacher_finish', 'teacher_launch'):
+        return teacher_portal.dispatch(engine, action, p)
+    if action == 'student_overview':
+        student = require_text(p.get('student'), 'Имя обучающегося', 160)
+        sessions = [s for s in engine.list_items('s') if s['student'] == student]
+        return {'fields': FIELDS, 'levels': LEVELS,
+                'tasks': [{'id': t['id'], 'title': t['title'], 'level': t['level'],
+                           'workflow': t.get('workflow', 'caller'), 'teacher': t.get('approved_by', ''),
+                           'created_at': t.get('approved_at', t['created_at'])} for t in engine.approved_tasks()],
+                'sessions': [{'id': s['id'], 'task_id': s['task']['id'], 'title': s['task']['title'],
+                              'level': s['task']['level'], 'workflow': s['task'].get('workflow', 'caller'),
+                              'status': s['status'], 'created_at': s['created_at'],
+                              'teacher': s['task'].get('approved_by', ''),
+                              'grade': s['teacher_decision']['grade'] if s['status'] == 'reviewed' else None}
+                             for s in sessions]}
+    if action == 'student_start':
+        student = require_text(p.get('student'), 'Имя обучающегося', 160)
+        task_id = p.get('task_id')
+        for s in engine.list_items('s'):
+            if s['student'] == student and s['task']['id'] == task_id and s['status'] == 'active':
+                return student_portal_view(engine, s['id'])
+        return student_portal_view(engine, engine.start(task_id, student)['id'])
+    if action == 'student_action':
+        student = require_text(p.get('student'), 'Имя обучающегося', 160)
+        if engine.load(p.get('id'))['student'] != student:
+            raise ValueError('Эта тренировка относится к другому обучающемуся.')
+        operation = p.get('operation')
+        if operation not in ('student', 'ask', 'hint', 'save_card', 'submit', 'connect', 'channel'):
+            raise ValueError('Действие недоступно в панели обучающегося.')
+        dispatch(engine, operation, p)
+        return student_portal_view(engine, p['id'])
     if action == 'teacher_overview':
         return {
             'sessions': [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'],
@@ -143,6 +188,9 @@ def make_server(engine, port=8878):
             if self.path == '/health':
                 self.respond(200, {'app': 'ai-project-ui', 'root': str(ROOT)}); return
             names = {'/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
+                     '/student': ('react.html', 'text/html'), '/student.css': ('student.css', 'text/css'),
+                     '/theme.css': ('theme.css', 'text/css'),
+                     '/workspace.css': ('workspace.css', 'text/css'),
                      '/react/app.js': ('react/app.js', 'text/javascript'),
                      '/welcome.css': ('welcome.css', 'text/css'),
                      '/hero-background.svg': ('hero-background.svg', 'image/svg+xml'),
@@ -158,9 +206,9 @@ def make_server(engine, port=8878):
             name, mime = names[self.path]
             body = (ROOT / 'ui' / name).read_text(encoding='utf-8').replace('__TOKEN__', token)
             if name == 'react.html':
-                styles = ['/welcome.css'] if self.path == '/' else (['/cards.css', '/teacher.css', '/making.css'] if self.path == '/cards' else ['/teacher.css'])
-                body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in styles))
-                body = body.replace('__BODY_CLASS__', '' if self.path == '/' else ('teacher-app cards-page' if self.path == '/cards' else 'teacher-app'))
+                styles = ['/welcome.css'] if self.path == '/' else (['/student.css'] if self.path == '/student' else (['/cards.css', '/teacher.css', '/making.css'] if self.path == '/cards' else ['/teacher.css']))
+                body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in ['/theme.css', *styles, *(['/workspace.css'] if self.path == '/teacher' else [])]))
+                body = body.replace('__BODY_CLASS__', '' if self.path == '/' else ('student-app' if self.path == '/student' else ('teacher-app cards-page' if self.path == '/cards' else 'teacher-app')))
             self.respond(200, body.encode(), mime + '; charset=utf-8')
 
         def do_POST(self):

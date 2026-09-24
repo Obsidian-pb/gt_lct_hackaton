@@ -1,5 +1,6 @@
 """Browser test server with a fake provider and a disposable exercise directory."""
 import tempfile
+import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path('tests').resolve()))
@@ -23,6 +24,9 @@ class FakeProvider:
             return {'reply': 'Муж заходил в гараж. Я не видела, чтобы он вышел.'}
         if 'field_labels' in payload and 'history' in payload:
             return {'hint': 'Уточните адрес у заявителя.'}
+        if 'topic' in payload and 'field_labels' in payload:
+            task = json.loads(Path('sample.json').read_text(encoding='utf-8'))
+            return {k: task[k] for k in ('title', 'opening', 'persona', 'fields')}
         raise RuntimeError('Неожиданный тестовый запрос')
 
 
