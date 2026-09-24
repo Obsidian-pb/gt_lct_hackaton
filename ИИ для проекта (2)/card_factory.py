@@ -203,7 +203,7 @@ def approve(request):
         raise ValueError('Укажите имя преподавателя.')
     if not isinstance(note, str) or len(note) > 3000:
         raise ValueError('Комментарий: не более 3000 символов.')
-    reference = validate_reference(request.get('reference'), content)
+    reference = validate_reference(request.get('reference'), content, request.get('caller_scenario'))
     if request.get('reference_checked') is not True:
         raise ValueError('Подтвердите, что преподаватель проверил эталонный ответ.')
     return {'content': content, 'reference': reference,

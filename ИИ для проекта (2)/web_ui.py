@@ -14,6 +14,7 @@ from provider import GigaChat
 from dds import WORKFLOWS, ACTION_LABELS
 import card_factory
 import card_reference
+import card_caller
 
 ROOT = Path(__file__).resolve().parent
 
@@ -35,6 +36,8 @@ def dispatch(engine, action, p):
         return card_factory.generate(engine.provider, p)
     if action == 'card_reference':
         return card_reference.generate(engine.provider, p)
+    if action == 'card_caller':
+        return card_caller.ask(engine.provider, p)
     if action == 'card_approve':
         return card_factory.approve(p)
     if action == 'card_validate':
