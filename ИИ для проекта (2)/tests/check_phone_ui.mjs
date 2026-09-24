@@ -22,7 +22,7 @@ try{
  const expected=(await current()).caller_scenario.phone_callback;
  assert.notEqual(expected,aon);assert.equal((await current()).reference.answer.expected_fields.phone_callback.value,expected);
  assert.equal(await page.locator('#f-phone_callback').inputValue(),'');
- const ask=async text=>{await page.locator('#caller-question').fill(text);await page.locator('#ask-caller').click();await idle();};
+ const ask=async text=>{if(await page.locator('.incident-dialogue-fold').getAttribute('open')===null)await page.locator('.incident-dialogue-fold>summary').click();await page.locator('#caller-question').fill(text);await page.locator('#ask-caller').click();await idle();};
  await ask('Кто внутри?');assert.equal(await page.locator('#f-phone_callback').isDisabled(),true);
  assert.equal((await current()).caller_dialogue.turns.at(-1).text.includes(expected),false);
  const previous=(await current()).caller_dialogue;

@@ -136,7 +136,7 @@ medium: неполное сообщение. hard: растерянность, �
         validate_task(task)
         return self.save(task)
 
-    def start(self, task_id, student):
+    def start(self, task_id, student, *, training=None):
         task = self.load(task_id)
         if task['status'] != 'approved':
             raise ValueError('Сначала преподаватель должен утвердить задание.')
@@ -147,6 +147,8 @@ medium: неполное сообщение. hard: растерянность, �
         if dds.workflow(task) == 'dds':
             session.update(card=copy.deepcopy(task['incoming_card']), connection='idle', call_attempts=0, next_channel='clear',
                            history=[{'id': 1, 'role': 'system', 'text': task['opening'], 'at': now(), 'event': 'assignment'}])
+        if training is not None:
+            session['training'] = copy.deepcopy(training)
         return self.save(session)
 
     def approved_tasks(self, workflow=None):
@@ -212,6 +214,8 @@ medium: неполное сообщение. hard: растерянность, �
 
     def hint(self, identifier):
         s = self._active(identifier)
+        if (s.get('training') or {}).get('mode') == 'testing':
+            raise ValueError('В режиме тестирования подсказки отключены.')
         if s['task']['level'] == 'hard':
             raise ValueError('На сложном уровне подсказки отключены.')
         result = self.provider.generate('''Ты учебный помощник диспетчера. JSON {"hint":"короткий совет"}.

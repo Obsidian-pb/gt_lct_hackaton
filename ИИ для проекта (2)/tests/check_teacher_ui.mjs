@@ -28,10 +28,10 @@ try{
  await page.locator('[data-section=home]').click();await page.waitForFunction(()=>document.body.dataset.journalReady==='true');
  await page.locator('[data-section=scenarios]').click();await page.getByRole('heading',{name:'Сценарии',exact:true}).waitFor();
  await page.locator('[data-section=students]').click();await page.getByRole('heading',{name:'Обучающиеся',exact:true}).waitFor();
- assert.ok((await page.locator('main').textContent()).includes('Назначение групп'));
- await page.locator('[data-section=results]').click();await page.getByRole('link',{name:'Открыть проверку работ'}).click();
- await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');
- assert.ok((await page.locator('#heading').textContent()).includes('Проверка'));
+ assert.ok((await page.locator('main').textContent()).includes('Добавить участников'));
+ await page.locator('[data-section=results]').click();await page.getByRole('heading',{name:'Результаты тренировок',exact:true}).waitFor();
+ await page.locator('[data-teacher-board=results]').waitFor();
+ assert.equal(await page.locator('.tw-footer').getByRole('button',{name:'Открыть карточку',exact:true}).isDisabled(),true);
  await page.goto(url);await page.getByRole('link',{name:'Войти',exact:true}).click();await page.waitForFunction(()=>document.body.dataset.journalReady==='true');
  await page.locator('#teacher-exit').click();await page.locator('#teacher-close').click();
  await page.getByRole('link',{name:'Войти',exact:true}).waitFor();
