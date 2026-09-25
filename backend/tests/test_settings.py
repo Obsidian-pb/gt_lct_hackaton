@@ -15,7 +15,7 @@ from app.models.audit import AuditAction
 from app.services import system_settings
 from tests.test_api import token
 
-SECRET = "sk-секретный-ключ-9876"
+SECRET = "sk-test-secret-1234"
 
 
 @pytest.fixture
@@ -298,3 +298,13 @@ def test_конфигурация_закрыта_преподавателю_и_�
             client.post("/api/admin/settings/llm/key/clear", headers=headers).status_code == 403
         )
         assert client.post("/api/admin/llm/test", json={}, headers=headers).status_code == 403
+
+
+def test_ключ_с_кириллицей_отклоняется_с_объяснением(admin_client):
+    """Такой ключ уходил в HTTP-заголовок и ронял каждый запрос к модели ошибкой кодировки."""
+    headers = token(admin_client, "root")
+    body = {"provider": "local", "base_url": "http://127.0.0.1:8095/v1", "model": "qwen3",
+            "api_key": "вставьте ключ", "disable_thinking": False}
+    response = admin_client.put("/api/admin/settings/llm", json=body, headers=headers)
+    assert response.status_code == 422
+    assert "недопустимые символы" in response.json()["detail"]

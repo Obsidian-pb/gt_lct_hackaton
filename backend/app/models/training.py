@@ -396,6 +396,10 @@ class Attempt(Base, TimestampMixin):
     # и от них зависит список оповещения — значит, услышать признак в вызове
     # и отметить его входит в то, чему учим. Эталон — `Scenario.flags`.
     chosen_flags: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    # Диалог с заявителем: вопросы оператора и ответы модели, играющей
+    # заявителя. Хранится при попытке: разбор показывает, что обучающийся
+    # спросил и чего не спросил, — это такая же часть работы, как карточка.
+    dialogue: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default="[]")
 
     events: Mapped[list["StatusEvent"]] = relationship(
         back_populates="attempt",

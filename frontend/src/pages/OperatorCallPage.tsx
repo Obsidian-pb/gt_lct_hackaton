@@ -5,6 +5,7 @@ import { api, operatorApi } from '../api/client';
 import type {
   Call,
   CallerRole,
+  CallerTurn,
   CallOutcome,
   Classification,
   FlagOption,
@@ -268,6 +269,91 @@ function normalizePreview(raw: Partial<PreviewResponse> | null | undefined): Pre
   };
 }
 
+/**
+ * Заявитель на линии. Запись вызова — монолог, а работа оператора — диалог:
+ * «какой подъезд?», «пострадавшие есть?». Отвечает модель по обстоятельствам
+ * сценария и на неизвестное говорит «не знаю»; без модели заявитель молчит.
+ * История сохраняется при попытке и после сдачи видна в разборе — что
+ * спросил обучающийся и чего не спросил, тоже часть работы.
+ */
+function CallerDialogue({
+  attemptId,
+  initial,
+  locked,
+}: {
+  attemptId: number;
+  initial: CallerTurn[];
+  locked: boolean;
+}) {
+  const [turns, setTurns] = useState<CallerTurn[]>(initial);
+  const [question, setQuestion] = useState('');
+  const [waiting, setWaiting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  const ask = useCallback(async () => {
+    const text = question.trim();
+    if (text.length < 2 || waiting) return;
+    setWaiting(true);
+    setNote(null);
+    try {
+      const result = await operatorApi.ask(attemptId, text);
+      if (!result.available) {
+        setNote('Заявитель не отвечает: языковая модель недоступна. Работайте по записи вызова.');
+      } else {
+        setTurns(result.dialogue);
+        setRemaining(result.remaining);
+        setQuestion('');
+      }
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Не удалось задать вопрос');
+    } finally {
+      setWaiting(false);
+    }
+  }, [attemptId, question, waiting]);
+
+  const exhausted = remaining === 0;
+  return (
+    <div className="dialogue">
+      <div className="card__label">Уточнить у заявителя</div>
+      {turns.length > 0 && (
+        <ul className="dialogue__turns">
+          {turns.map((turn, index) => (
+            <li key={index}>
+              <div className="dialogue__q">— {turn.question}</div>
+              <div className="dialogue__a">— {turn.answer}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!locked && !exhausted && (
+        <div className="dialogue__ask">
+          <input
+            value={question}
+            disabled={waiting}
+            placeholder="Например: есть ли пострадавшие? какой подъезд?"
+            maxLength={300}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') ask();
+            }}
+          />
+          <button className="btn btn--ghost" onClick={ask} disabled={waiting || question.trim().length < 2}>
+            {waiting ? 'Заявитель отвечает…' : 'Спросить'}
+          </button>
+        </div>
+      )}
+      {exhausted && !locked && (
+        <div className="card__meta">Заявитель ответил на все вопросы, которые можно было задать, — заполняйте карточку.</div>
+      )}
+      {locked && turns.length === 0 && (
+        <div className="card__meta">Уточняющих вопросов заявителю не задавалось.</div>
+      )}
+      {note && <div className="card__meta">{note}</div>}
+    </div>
+  );
+}
+
 export function OperatorCallPage() {
   const { id } = useParams();
   const attemptId = Number(id);
@@ -480,6 +566,12 @@ export function OperatorCallPage() {
           </div>
           <div className="card__description">{call.legend}</div>
           <div className="legend__address">Со слов заявителя: {call.reported_address}</div>
+          <CallerDialogue
+            key={`dialogue-${call.attempt_id}`}
+            attemptId={call.attempt_id}
+            initial={call.dialogue ?? []}
+            locked={locked}
+          />
         </div>
 
         {/* Блок рабочей карточки «Регистрация и контроль». Появляется после

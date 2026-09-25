@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.attempts import complete_attempt
 from app.api.deps import forbid_admin_to_student_work, get_current_user
 from app.core.db import get_session
+from app.llm import get_llm_provider
 from app.models.base import as_utc, utcnow
 from app.models.training import (
     Attempt,
@@ -22,6 +23,7 @@ from app.models.training import (
 from app.models.user import Role, User
 from app.schemas.training import NotificationReasonOut
 from app.services import flags as flag_titles
+from app.services import caller as caller_service
 from app.services.classifier_versions import current_ekp, ekp_for_session
 from app.services.ekp import EKP
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, Expected, FilledCard
@@ -102,6 +104,31 @@ class CallOut(BaseModel):
     control_by: str | None = None
     control_at: str | None = None
     control_note: str | None = None
+    # Диалог с заявителем: что оператор спросил и что услышал.
+    dialogue: list["CallerTurnOut"] = Field(default_factory=list)
+
+
+class CallerTurnOut(BaseModel):
+    question: str
+    answer: str
+    at: str
+
+
+# CallOut ссылается на CallerTurnOut строкой: класс объявлен ниже, и pydantic
+# должен достроить модель после того, как он появился в модуле.
+CallOut.model_rebuild()
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=2, max_length=300)
+
+
+class AskOut(BaseModel):
+    # available=False — модели нет, заявитель молчит; вопрос не записан.
+    available: bool
+    turn: CallerTurnOut | None = None
+    dialogue: list[CallerTurnOut]
+    remaining: int
 
 
 class ClassifyIn(BaseModel):
@@ -207,6 +234,7 @@ def _call(attempt: Attempt) -> CallOut:
             else None
         ),
         control_note=evaluation.teacher_feedback if evaluation else None,
+        dialogue=[CallerTurnOut(**t) for t in (attempt.dialogue or [])],
         attempt_id=attempt.id,
         legend=attempt.scenario.description,
         reported_address=attempt.scenario.address,
@@ -349,6 +377,39 @@ def get_call(
     user: User = Depends(get_current_user),
 ) -> CallOut:
     return _call(_load(attempt_id, db, user))
+
+
+@router.post("/calls/{attempt_id}/ask", response_model=AskOut)
+async def ask_caller(
+    attempt_id: int,
+    payload: AskIn,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> AskOut:
+    """Уточняющий вопрос заявителю.
+
+    Отвечает модель, играющая заявителя по обстоятельствам сценария. Вопрос
+    записывается только вместе с ответом: без модели заявитель молчит, и в
+    разборе не должно быть вопросов, на которые никто не отвечал.
+    """
+    attempt = _load(attempt_id, db, user)
+    if attempt.finished_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Карточка уже сдана, разговор окончен")
+    if len(attempt.dialogue or []) >= caller_service.MAX_TURNS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Заявитель ответил уже на {caller_service.MAX_TURNS} вопросов — пора заполнять карточку",
+        )
+    reply = await caller_service.ask(attempt, payload.question.strip(), get_llm_provider())
+    if reply.available:
+        db.commit()
+    dialogue = [CallerTurnOut(**t) for t in (attempt.dialogue or [])]
+    return AskOut(
+        available=reply.available,
+        turn=dialogue[-1] if reply.available else None,
+        dialogue=dialogue,
+        remaining=max(0, caller_service.MAX_TURNS - len(dialogue)),
+    )
 
 
 @router.post("/calls/{attempt_id}/classify", response_model=OperatorEvaluationOut)

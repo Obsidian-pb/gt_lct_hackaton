@@ -1717,3 +1717,40 @@ button {
   font-style: italic;
   font-size: 13px;
 }
+
+/* --- Диалог с заявителем ----------------------------------------------------- */
+
+.dialogue {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.dialogue__turns {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  font-size: 14px;
+}
+
+.dialogue__turns li {
+  margin: 4px 0;
+}
+
+.dialogue__q {
+  color: var(--muted);
+}
+
+.dialogue__a {
+  padding-left: 14px;
+}
+
+.dialogue__ask {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.dialogue__ask input {
+  flex: 1;
+}

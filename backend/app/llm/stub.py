@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from app.llm.base import CommentReview, GeneratedScenario
+from app.llm.base import CallerReply, CommentReview, GeneratedScenario
 
 
 class StubProvider:
@@ -49,3 +49,9 @@ class StubProvider:
             expected_primary_status="Принята",
             required_comment_points=[],
         )
+
+    async def caller_reply(
+        self, *, facts: str, history: list[tuple[str, str]], question: str, difficulty: str
+    ) -> CallerReply:
+        # Без модели заявитель молчит: сочинять ответ за него нельзя.
+        return CallerReply(available=False)

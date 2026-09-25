@@ -697,15 +697,20 @@ async def update_llm_settings(
     admin: User = Depends(require_admin),
 ) -> LlmSettingsOut:
     _check_llm_payload(payload)
-    config, key_changed = system_settings.save_llm(
-        db,
-        provider=payload.provider,
-        base_url=payload.base_url.strip(),
-        model=payload.model.strip(),
-        api_key=payload.api_key,
-        disable_thinking=payload.disable_thinking,
-        actor=admin,
-    )
+    try:
+        config, key_changed = system_settings.save_llm(
+            db,
+            provider=payload.provider,
+            base_url=payload.base_url.strip(),
+            model=payload.model.strip(),
+            api_key=payload.api_key,
+            disable_thinking=payload.disable_thinking,
+            actor=admin,
+        )
+    except ValueError as failure:
+        # Негодный ключ — ошибка ввода, и ответ на неё должен быть по-русски
+        # и с объяснением, а не 500 из глубины кодировок.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(failure)) from None
     audit.record(
         db,
         AuditAction.SETTINGS_LLM_UPDATED,

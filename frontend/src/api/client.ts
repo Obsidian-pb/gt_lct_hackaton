@@ -1,5 +1,6 @@
 import type {
   AdminUser,
+  AskResult,
   AuditEvent,
   Call,
   CallOutcome,
@@ -461,6 +462,12 @@ export const classifierApi = {
  * api.surveyOptions) остаются для справочного просмотра по действующей.
  */
 export const operatorApi = {
+  // Уточняющий вопрос заявителю: отвечает модель по обстоятельствам вызова.
+  ask: (attemptId: number, question: string) =>
+    request<AskResult>(`/api/operator/calls/${attemptId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    }),
   surveyGroups: (attemptId: number) =>
     request<string[]>(`/api/operator/groups?attempt_id=${attemptId}`),
   surveyOptions: (attemptId: number, group: string, path: string[]) =>

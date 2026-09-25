@@ -51,6 +51,15 @@ class GeneratedScenario:
         )
 
 
+@dataclass
+class CallerReply:
+    """Ответ заявителя на вопрос оператора. available=False — модели нет,
+    и заявитель молчит; выдумывать реплику за него нельзя."""
+
+    available: bool
+    text: str = ""
+
+
 class LLMProvider(Protocol):
     name: str
 
@@ -79,3 +88,12 @@ class LLMProvider(Protocol):
         is_profile: bool | None = ...,
         other_services: list[str] | None = ...,
     ) -> GeneratedScenario: ...
+
+    async def caller_reply(
+        self,
+        *,
+        facts: str,
+        history: list[tuple[str, str]],
+        question: str,
+        difficulty: str,
+    ) -> CallerReply: ...

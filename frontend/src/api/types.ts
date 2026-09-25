@@ -739,3 +739,22 @@ export interface StudentSessionBrief {
   critical: number;
   passed: boolean | null;
 }
+
+// --- Диалог с заявителем --------------------------------------------------------
+export interface CallerTurn {
+  question: string;
+  answer: string;
+  at: string;
+}
+
+export interface AskResult {
+  /** Ложь — модели нет, заявитель молчит; вопрос не записан. */
+  available: boolean;
+  turn: CallerTurn | null;
+  dialogue: CallerTurn[];
+  remaining: number;
+}
+
+export interface Call {
+  dialogue: CallerTurn[];
+}

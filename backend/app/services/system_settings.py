@@ -220,6 +220,14 @@ def save_llm(
         "disable_thinking": disable_thinking,
     }
     key = api_key.strip()
+    # Ключ уходит в HTTP-заголовок, а заголовок не переносит ничего, кроме
+    # ASCII: кириллица или пробел внутри ключа роняли бы каждый запрос к модели
+    # непонятной ошибкой кодировки. Отказать сразу и по-русски честнее.
+    if key and (not key.isascii() or any(ch.isspace() for ch in key)):
+        raise ValueError(
+            "Ключ доступа содержит недопустимые символы: допустимы только латинские "
+            "буквы, цифры и знаки без пробелов. Проверьте, что вставлен сам ключ."
+        )
     key_changed = bool(key) and key != stored.get("api_key")
     if key:
         value["api_key"] = key
