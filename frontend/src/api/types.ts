@@ -652,3 +652,48 @@ export interface PersonalProgress {
   repeats_finished: number;
   repeats_fixed: number;
 }
+
+// --- Карточка оператора по образцу АРМ-112 -----------------------------------
+// Контракт — docs/operator-card-contract.md. Признаки опросной карты приходят
+// с бэкенда вместе с названиями: фронт ключи не расшифровывает.
+
+/** Признак опросной карты: ключ классификатора и подпись для кнопки. */
+export interface FlagOption {
+  key: string;
+  title: string;
+  hint: string | null;
+}
+
+/**
+ * Какие признаки показывать оператору. `global` — три кнопки, как в АРМ-112,
+ * всегда; `rule` — признаки правила, к которому ведёт выбранный путь, и пока
+ * путь не доведён до правила, список пуст.
+ */
+export interface FlagsResponse {
+  global: FlagOption[];
+  rule: FlagOption[];
+}
+
+/**
+ * Список оповещения по выбору оператора — то, что настоящий АРМ-112
+ * показывает в полосе служб по мере заполнения. Это не подсказка эталона:
+ * считается по правилу и признакам, которые выбрал сам оператор.
+ */
+export interface PreviewResponse {
+  incident_type: string | null;
+  services: NotificationReason[];
+}
+
+export interface Call {
+  /** Признаки, отмеченные оператором при сдаче карточки. */
+  chosen_flags: string[];
+}
+
+export interface Classification {
+  expected_flags: string[];
+  chosen_flags: string[];
+  /** Признак есть в вызове, но не отмечен — из-за него служба не оповещена. */
+  missed_flags: string[];
+  /** Признак отмечен без оснований — добавил службу, которой не должно быть. */
+  extra_flags: string[];
+}
