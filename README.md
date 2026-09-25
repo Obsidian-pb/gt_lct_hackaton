@@ -170,15 +170,30 @@
 
 ### Контейнеры для учебного центра
 
+Поставка — архив образов `dds112-images.tar` и папка `dds112-deploy`
+с файлами развёртывания. На месте:
+
 ```bash
-sh ops/llm/fetch_model.sh                     # один раз, на машине с интернетом
-docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d --build
+docker load -i dds112-images.tar
+cd dds112-deploy && cp .env.example .env      # заполнить пароли и ключ
+docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d
 ```
 
 Обязательные переменные в `.env`: `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
-`SECRET_KEY`, `DEMO_PASSWORD`. Перенос в контур без выхода в интернет — одним архивом
-образов: `scripts/package_offline.sh`, на месте — `docker load`.
-Суточные резервные копии снимает отдельный контейнер.
+`SECRET_KEY`, `DEMO_PASSWORD`. Модель поднимается в контейнере `llm`,
+суточные резервные копии снимает контейнер `backup`.
+
+### Сборка поставки
+
+Выполняется у разработчика; заказчику передаются только готовые архивы.
+
+```bash
+sh ops/llm/fetch_model.sh                     # файл модели для образа llm
+sh scripts/package_offline.sh                 # архив образов под linux/amd64
+sh scripts/package_portable.sh                # переносной комплект для Windows
+sh scripts/package_portable.sh --update       # архив обновления комплекта
+python backend/scripts/make_voices.py         # озвучка вызовов (на Mac)
+```
 
 ### Разработка
 
