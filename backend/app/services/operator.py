@@ -43,6 +43,10 @@ class FilledCard:
     caller_phone: str = ""
     # Адрес по частям: субъект, населённый пункт, улица, дом и подробности.
     address_parts: dict[str, str] = field(default_factory=dict)
+    # Признаки опросной карты, которые оператор отметил кнопками:
+    # пострадавшие, нет доступа, угроза людям. Список оповещения считается
+    # с ними, поэтому неотмеченный признак — не оформление, а пропавшая служба.
+    flags: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -140,10 +144,16 @@ def evaluate(
             )
         else:
             classification = classify(
-                expected.rule_number, card.group, list(card.path), ekp, expected.flags
+                expected.rule_number,
+                card.group,
+                list(card.path),
+                ekp,
+                expected.flags,
+                chosen_flags=card.flags,
             )
             result.classification = classification
             _check_classification(classification, result)
+            _check_flags(card, expected, classification, result)
 
     if not card.address.strip():
         result.violations.append(Violation("O5", "Адрес происшествия не внесён в карточку"))
@@ -382,13 +392,67 @@ def _check_classification(
         )
 
     if classification.missed_services:
-        listed = ", ".join(classification.missed_services[:6])
-        more = len(classification.missed_services) - 6
         result.violations.append(
             Violation(
                 "O4",
-                f"Из-за ошибки в классификации не были бы оповещены: {listed}"
-                + (f" и ещё {more}" if more > 0 else ""),
+                "Из-за ошибки в классификации не были бы оповещены: "
+                + _services_list(list(classification.missed_services)),
                 evidence=f"{len(classification.missed_services)} служб",
+            )
+        )
+
+
+def _services_list(services: list[str]) -> str:
+    listed = ", ".join(services[:6])
+    more = len(services) - 6
+    return listed + (f" и ещё {more}" if more > 0 else "")
+
+
+def _check_flags(
+    card: FilledCard,
+    expected: Expected,
+    classification: ClassificationResult,
+    result: OperatorAssessment,
+) -> None:
+    """Сверяет признаки, отмеченные оператором, с признаками вызова.
+
+    Признак сам по себе не оценивается — только его последствия для списка
+    оповещения. «Нет доступа» на пожаре мусора ничего не меняет: МЧС
+    оповещается и так, лишь через другую подколонку; такое расхождение
+    нарушением не считается. А без «пострадавших» на том же пожаре
+    не поедет скорая — это и есть ошибка, и разбор называет её службами,
+    а не ключом признака.
+
+    Последствия считаются по эталонному правилу: что список потерял бы без
+    этого признака и что приобрёл бы с лишним. Считать по выбранному
+    правилу нельзя — при ошибке в типе оно другое, и пропуск признака
+    смешался бы с ошибкой классификации, которая разобрана отдельно.
+    """
+    rule = classification.expected_rule
+    reference = set(rule.resolve(expected.flags))
+
+    for flag in sorted(expected.flags - card.flags):
+        lost = sorted(reference - set(rule.resolve(expected.flags - {flag})))
+        if not lost:
+            continue
+        result.violations.append(
+            Violation(
+                "O14",
+                f"Не отмечен признак «{flag.replace('_', ' ')}»: без него не были бы "
+                f"оповещены {_services_list(lost)}",
+                evidence=f"{len(lost)} служб",
+            )
+        )
+
+    for flag in sorted(card.flags - expected.flags):
+        added = sorted(set(rule.resolve(expected.flags | {flag})) - reference)
+        if not added:
+            continue
+        result.violations.append(
+            Violation(
+                "O15",
+                f"Отмечен признак «{flag.replace('_', ' ')}», которого в вызове нет: "
+                f"без оснований оповещены {_services_list(added)}",
+                evidence=flag,
             )
         )

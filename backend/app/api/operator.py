@@ -21,11 +21,12 @@ from app.models.training import (
 )
 from app.models.user import Role, User
 from app.schemas.training import NotificationReasonOut
+from app.services import flags as flag_titles
 from app.services.classifier_versions import current_ekp, ekp_for_session
 from app.services.ekp import EKP
 from app.services.operator import DEFAULT_CALL_DEADLINE_SECONDS, Expected, FilledCard
 from app.services.operator import evaluate as evaluate_card
-from app.services.survey import options_at, survey_tree
+from app.services.survey import options_at, resolve, survey_tree
 
 router = APIRouter(prefix="/api/operator", tags=["Рабочее место оператора 112"])
 
@@ -35,6 +36,31 @@ class OptionOut(BaseModel):
     has_children: bool
     is_final: bool
     incident_type: str | None = None
+
+
+class FlagOut(BaseModel):
+    """Кнопка признака на карточке: ключ для запроса и подпись для оператора."""
+
+    key: str
+    title: str
+    hint: str
+
+
+class FlagsOut(BaseModel):
+    # Три кнопки, которые на карточке АРМ-112 есть всегда. Имя поля
+    # в ответе — `global`, как в контракте; в Python оно зарезервировано.
+    global_: list[FlagOut] = Field(default_factory=list, alias="global")
+    # Признаки, от которых зависит список оповещения у выбранного правила.
+    rule: list[FlagOut] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
+
+
+class PreviewOut(BaseModel):
+    """Нижняя полоса служб: кто будет оповещён при текущем заполнении."""
+
+    incident_type: str | None = None
+    services: list[NotificationReasonOut] = Field(default_factory=list)
 
 
 class CallOut(BaseModel):
@@ -61,6 +87,8 @@ class CallOut(BaseModel):
     chosen_referral_target: str | None
     entered_caller_phone: str | None
     entered_address_parts: dict[str, str]
+    # Признаки, которые оператор отметил кнопками на карточке.
+    chosen_flags: list[str] = Field(default_factory=list)
     # Готовая запись голоса заявителя, если для сценария она озвучена.
     audio_url: str | None
     # Повторная выдача проваленного вызова: тот же заявитель, вторая попытка.
@@ -92,6 +120,8 @@ class ClassifyIn(BaseModel):
     # Адрес по частям. Строка `address` остаётся описательной частью:
     # в карточке Системы-112 она есть наравне с формализованным адресом.
     address_parts: dict[str, str] = Field(default_factory=dict)
+    # Признаки опросной карты, отмеченные оператором: ключи из `GET /flags`.
+    flags: list[str] = Field(default_factory=list)
 
 
 class ClassificationOut(BaseModel):
@@ -100,8 +130,16 @@ class ClassificationOut(BaseModel):
     expected_incident_type: str
     matched_depth: int
     expected_depth: int
+    # Расхождение по службам: список эталона с признаками вызова против
+    # списка по выбору оператора с его признаками. Пропущенный признак
+    # проявляется здесь неоповещённой службой.
     missed_services: list[str]
     extra_services: list[str]
+    # Признаки: что было в вызове, что отметил оператор и разница.
+    expected_flags: list[str] = Field(default_factory=list)
+    chosen_flags: list[str] = Field(default_factory=list)
+    missed_flags: list[str] = Field(default_factory=list)
+    extra_flags: list[str] = Field(default_factory=list)
     notified_services: dict[str, str]
     # Обоснование по каждой службе: почему она в списке или при каком
     # признаке была бы. Это и есть предмет обучения — список выводится
@@ -184,6 +222,7 @@ def _call(attempt: Attempt) -> CallOut:
         chosen_referral_target=attempt.chosen_referral_target,
         entered_caller_phone=attempt.entered_caller_phone,
         entered_address_parts=dict(attempt.entered_address_parts or {}),
+        chosen_flags=list(attempt.chosen_flags or []),
         audio_url=_audio_url(attempt.scenario),
         is_repeat=attempt.repeat_of_id is not None,
     )
@@ -200,6 +239,11 @@ def _survey_ekp(attempt_id: int | None, db: Session, user: User) -> EKP:
     if attempt_id is None:
         return current_ekp(db)
     return ekp_for_session(_load(attempt_id, db, user).session)
+
+
+def _split_path(path: str) -> list[str]:
+    """Путь признаков из строки запроса: через «|», пустые звенья отбрасываются."""
+    return [p for p in path.split("|") if p]
 
 
 @router.get("/groups", response_model=list[str])
@@ -221,9 +265,61 @@ def options(
     user: User = Depends(get_current_user),
 ) -> list[OptionOut]:
     """Признаки, доступные на текущем шаге. Путь передаётся через «|»."""
-    selected = [p for p in path.split("|") if p]
+    selected = _split_path(path)
     ekp = _survey_ekp(attempt_id, db, user)
     return [OptionOut(**o) for o in options_at(group, selected, ekp)]
+
+
+@router.get("/flags", response_model=FlagsOut, response_model_by_alias=True)
+def flags(
+    group: str = "",
+    path: str = "",
+    attempt_id: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> FlagsOut:
+    """Какие кнопки признаков показывать на карточке.
+
+    Три глобальные — всегда, как в АРМ-112. Остальные зависят от правила,
+    к которому привёл путь: пока путь не доведён, показывать нечего —
+    неизвестно ещё, чей список оповещения эти признаки меняют.
+    """
+    ekp = _survey_ekp(attempt_id, db, user)
+    rule = resolve(group, _split_path(path), ekp) if group else None
+    return FlagsOut(
+        global_=[FlagOut(**vars(f)) for f in flag_titles.global_flags()],
+        rule=[FlagOut(**vars(f)) for f in flag_titles.flags_for_rule(rule)] if rule else [],
+    )
+
+
+@router.get("/preview", response_model=PreviewOut)
+def preview(
+    group: str = "",
+    path: str = "",
+    flags: str = "",
+    attempt_id: int | None = None,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> PreviewOut:
+    """Список оповещения по текущему заполнению карточки.
+
+    Это то, что настоящий АРМ-112 показывает в полосе служб по мере
+    заполнения: считается по правилу и признакам, которые выбрал оператор,
+    а не по эталону, — подсказкой быть не должно. Неоповещённые службы
+    не возвращаются: в рабочей полосе их нет, а объяснение «кого не хватило»
+    остаётся разбору после сдачи.
+    """
+    ekp = _survey_ekp(attempt_id, db, user)
+    rule = resolve(group, _split_path(path), ekp) if group else None
+    if rule is None:
+        return PreviewOut()
+    chosen = frozenset(_split_path(flags))
+    return PreviewOut(
+        incident_type=rule.incident_type,
+        services=[
+            NotificationReasonOut.from_reason(r) for r in rule.explain(chosen) if r.notified
+        ],
+    )
 
 
 @router.get("/calls/my", response_model=list[CallOut])
@@ -296,9 +392,25 @@ def classify_call(
                 "классификатора, по которой идёт занятие",
             ) from None
 
+    # Ключи признаков — только те, что есть в редакции занятия: чужой ключ
+    # список оповещения не изменит, и оператор решил бы, что нажал кнопку,
+    # которой не было.
+    chosen_flags = list(dict.fromkeys(payload.flags))
+    allowed = flag_titles.known_keys(ekp)
+    unknown = sorted(set(chosen_flags) - allowed)
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Неизвестные признаки: "
+            + ", ".join(unknown)
+            + ". Допустимые: "
+            + ", ".join(sorted(allowed)),
+        )
+
     now = utcnow()
     attempt.chosen_group = payload.group or None
     attempt.chosen_path = list(payload.path)
+    attempt.chosen_flags = chosen_flags
     attempt.entered_address = payload.address.strip() or None
     attempt.entered_description = payload.description.strip() or None
     attempt.entered_caller_phone = payload.caller_phone.strip() or None
@@ -321,6 +433,7 @@ def classify_call(
             referral_target=payload.referral_target,
             caller_phone=payload.caller_phone,
             address_parts=attempt.entered_address_parts,
+            flags=frozenset(chosen_flags),
         ),
         Expected(
             outcome=scenario.expected_outcome,
@@ -366,6 +479,7 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
         # Признаки вызова — из сценария: список оповещения и его обоснование
         # обязаны совпадать с тем, что видит диспетчер на карточке.
         flags = frozenset(attempt.scenario.flags or [])
+        chosen_flags = frozenset(attempt.chosen_flags or [])
         classification = ClassificationOut(
             correct=result.correct,
             chosen_incident_type=chosen.incident_type if chosen else None,
@@ -374,6 +488,10 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
             expected_depth=result.expected_depth,
             missed_services=list(result.missed_services),
             extra_services=list(result.extra_services),
+            expected_flags=sorted(flags),
+            chosen_flags=list(attempt.chosen_flags or []),
+            missed_flags=sorted(flags - chosen_flags),
+            extra_flags=sorted(chosen_flags - flags),
             # Эталонное правило уже взято из редакции занятия — список
             # оповещения берётся из него же, а не ищется заново.
             notified_services=result.expected_rule.resolve(flags),

@@ -66,6 +66,56 @@ def test_признаки_вызова_учитываются_с_обеих_ст
     assert "СМП" not in without.missed_services
 
 
+def test_признаки_оператора_считаются_отдельно_от_признаков_вызова():
+    """Пострадавшие есть у вызова, оператор кнопку не нажал: скорой в его списке нет.
+
+    Тип при этом верный — ошибка проявляется тем, чем обернулась бы
+    в рабочей системе: неоповещённой службой и сниженным баллом.
+    """
+    result = classify(
+        FIRE_TRASH,
+        FIRES,
+        ["на улице", "мусор", "открытое пламя"],
+        flags={"пострадавшие"},
+        chosen_flags=frozenset(),
+    )
+    assert result.correct is True
+    assert "СМП" in result.missed_services
+    assert result.extra_services == ()
+    assert 0 < result.score < 1.0
+
+
+def test_лишний_признак_оператора_даёт_лишнюю_службу():
+    result = classify(
+        FIRE_TRASH,
+        FIRES,
+        ["на улице", "мусор", "открытое пламя"],
+        flags=frozenset(),
+        chosen_flags={"правонарушение"},
+    )
+    assert result.correct is True
+    assert result.missed_services == ()
+    assert "МВД" in result.extra_services
+    # Лишняя служба балл за классификацию не снижает: список эталона покрыт.
+    assert result.score == 1.0
+
+
+def test_без_признаков_оператора_обе_стороны_считаются_по_вызову():
+    """Карточка диспетчера и кабинет преподавателя признаков оператора не знают."""
+    same = classify(
+        FIRE_TRASH, FIRES, ["на улице", "мусор", "открытое пламя"], flags={"пострадавшие"}
+    )
+    explicit = classify(
+        FIRE_TRASH,
+        FIRES,
+        ["на улице", "мусор", "открытое пламя"],
+        flags={"пострадавшие"},
+        chosen_flags={"пострадавшие"},
+    )
+    assert same == explicit
+    assert same.score == 1.0
+
+
 def test_ошибка_в_последнем_признаке_даёт_частичный_балл():
     """Дым вместо открытого пламени — ошибка, но путь начат верно."""
     result = classify(FIRE_TRASH, FIRES, ["на улице", "мусор", "дым"])
