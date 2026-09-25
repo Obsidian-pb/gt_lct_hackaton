@@ -6,6 +6,7 @@ import type {
   Card,
   Catalog,
   Evaluation,
+  FlagsResponse,
   GenerateResult,
   OperatorEvaluation,
   Report,
@@ -14,6 +15,7 @@ import type {
   SessionMember,
   SessionMonitor,
   PersonalProgress,
+  PreviewResponse,
   SurveyOption,
   SystemState,
   TrainingSession,
@@ -143,6 +145,8 @@ export const api = {
       description: string;
       caller_phone?: string;
       address_parts?: Record<string, string>;
+      /** Признаки опросной карты, отмеченные оператором (ключи из /api/operator/flags). */
+      flags?: string[];
     },
   ) =>
     request<OperatorEvaluation>(`/api/operator/calls/${id}/classify`, {
@@ -453,6 +457,22 @@ export const operatorApi = {
       `/api/operator/options?attempt_id=${attemptId}&group=${encodeURIComponent(
         group,
       )}&path=${encodeURIComponent(path.join('|'))}`,
+    ),
+  // Признаки и предпросмотр списка оповещения — по docs/operator-card-contract.md.
+  // Путь и признаки передаются через «|», как в /options.
+  flags: (attemptId: number, group: string | null, path: string[]) =>
+    request<FlagsResponse>(
+      `/api/operator/flags?attempt_id=${attemptId}&group=${encodeURIComponent(
+        group ?? '',
+      )}&path=${encodeURIComponent(path.join('|'))}`,
+    ),
+  preview: (attemptId: number, group: string, path: string[], flags: string[]) =>
+    request<PreviewResponse>(
+      `/api/operator/preview?attempt_id=${attemptId}&group=${encodeURIComponent(
+        group,
+      )}&path=${encodeURIComponent(path.join('|'))}&flags=${encodeURIComponent(
+        flags.join('|'),
+      )}`,
     ),
 };
 

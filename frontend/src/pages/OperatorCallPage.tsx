@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api, operatorApi } from '../api/client';
-import type { Call, CallerRole, CallOutcome, OperatorEvaluation, SurveyOption } from '../api/types';
+import type {
+  Call,
+  CallerRole,
+  CallOutcome,
+  Classification,
+  FlagOption,
+  FlagsResponse,
+  OperatorEvaluation,
+  PreviewResponse,
+  SurveyOption,
+} from '../api/types';
 import { NotificationReasons } from '../components/NotificationReasons';
 import { Timer } from '../components/Timer';
 
@@ -185,6 +195,79 @@ function SurveyStep({
   );
 }
 
+/**
+ * Признак правила как пара «Да / Нет» с подписью слева — как в АРМ-112
+ * («Угроза людям», «Проведена ли газификация»). Пока оператор не ответил,
+ * не нажата ни одна кнопка: неотвеченный вопрос должен быть виден, а не
+ * выглядеть как «нет».
+ */
+function YesNoFlag({
+  option,
+  value,
+  disabled,
+  onChange,
+}: {
+  option: FlagOption;
+  value: boolean | null;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="arm-row">
+      <div className="arm-row__label" title={option.hint ?? undefined}>
+        {option.title}
+      </div>
+      <div className="arm-yn">
+        <button
+          type="button"
+          disabled={disabled}
+          className={`arm-yn__btn${value === true ? ' arm-yn__btn--on' : ''}`}
+          onClick={() => onChange(true)}
+        >
+          Да
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`arm-yn__btn${value === false ? ' arm-yn__btn--on' : ''}`}
+          onClick={() => onChange(false)}
+        >
+          Нет
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_FLAGS: FlagsResponse = { global: [], rule: [] };
+
+/** Предпросмотр списка оповещения и ключ выбора, для которого он посчитан. */
+interface PreviewState {
+  key: string;
+  data: PreviewResponse | null;
+  failed: boolean;
+}
+
+/** Ответ бэкенда может прийти неполным (старая редакция, ошибка) — не падать. */
+function normalizeFlags(raw: Partial<FlagsResponse> | null | undefined): FlagsResponse {
+  const pick = (list: unknown): FlagOption[] =>
+    Array.isArray(list)
+      ? list
+          .filter((f): f is FlagOption => !!f && typeof f === 'object' && typeof (f as FlagOption).key === 'string')
+          .map((f) => ({ key: f.key, title: f.title || f.key, hint: f.hint ?? null }))
+      : [];
+  return { global: pick(raw?.global), rule: pick(raw?.rule) };
+}
+
+function normalizePreview(raw: Partial<PreviewResponse> | null | undefined): PreviewResponse {
+  return {
+    incident_type: typeof raw?.incident_type === 'string' ? raw.incident_type : null,
+    // В предпросмотре нужны только оповещаемые службы; бэкенд и так отдаёт
+    // только их, но старая редакция могла бы прислать и остальные.
+    services: Array.isArray(raw?.services) ? raw.services.filter((s) => s && s.notified !== false) : [],
+  };
+}
+
 export function OperatorCallPage() {
   const { id } = useParams();
   const attemptId = Number(id);
@@ -200,12 +283,39 @@ export function OperatorCallPage() {
   const [phone, setPhone] = useState('');
   const [addressParts, setAddressParts] = useState<Record<string, string>>({});
   const [referral, setReferral] = useState('');
+  // Признаки опросной карты: что предлагает бэкенд и что отметил оператор.
+  // «Нет» у признака правила — состояние только экрана: в карточку уходит
+  // список отмеченных, а явный отказ нужен, чтобы отличить его от неответа.
+  const [flagOptions, setFlagOptions] = useState<FlagsResponse>(EMPTY_FLAGS);
+  const [flags, setFlags] = useState<string[]>([]);
+  const [denied, setDenied] = useState<string[]>([]);
+  // Предпросмотр хранится вместе с ключом выбора, для которого он посчитан:
+  // показывается только совпадающий с текущим, поэтому устаревший ответ не
+  // нужно вычищать отдельным сбросом состояния.
+  const [preview, setPreview] = useState<PreviewState | null>(null);
   const [evaluation, setEvaluation] = useState<OperatorEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.call(attemptId).then(setCall).catch((e) => setError(String(e.message ?? e)));
+    api
+      .call(attemptId)
+      .then((loaded) => {
+        setCall(loaded);
+        // Сданную карточку показываем такой, какой её сохранил оператор: поля
+        // заблокированы, и пустая форма над разбором вводила бы в заблуждение.
+        if (!loaded.finished) return;
+        setGroup(loaded.chosen_group);
+        setPath(loaded.chosen_path ?? []);
+        setAddress(loaded.entered_address ?? '');
+        setDescription(loaded.entered_description ?? '');
+        setPhone(loaded.entered_caller_phone ?? '');
+        setAddressParts(loaded.entered_address_parts ?? {});
+        setFlags(Array.isArray(loaded.chosen_flags) ? loaded.chosen_flags : []);
+        if (loaded.chosen_outcome) setOutcome(loaded.chosen_outcome);
+        setReferral(loaded.chosen_referral_target ?? '');
+      })
+      .catch((e) => setError(String(e.message ?? e)));
     // Опросная карта — по редакции классификатора занятия, а не по
     // действующей: эталон вызова считается по ней же.
     operatorApi.surveyGroups(attemptId).then(setGroups).catch(() => undefined);
@@ -232,9 +342,78 @@ export function OperatorCallPage() {
     };
   }, [attemptId, group, path]);
 
+  // Набор признаков зависит от того, к какому правилу привёл путь: при каждом
+  // шаге запрашиваем заново, устаревший ответ отбрасываем. Признаки правила,
+  // которых у нового правила нет, снимаются — они к нему не относятся.
+  useEffect(() => {
+    let cancelled = false;
+    operatorApi
+      .flags(attemptId, group, path)
+      .then((raw) => {
+        if (cancelled) return;
+        const next = normalizeFlags(raw);
+        setFlagOptions(next);
+        const offered = new Set([...next.global, ...next.rule].map((f) => f.key));
+        // Тот же массив, если снимать нечего: иначе каждый ответ дёргал бы
+        // предпросмотр заново без изменения признаков.
+        const prune = (current: string[]) => {
+          const kept = current.filter((key) => offered.has(key));
+          return kept.length === current.length ? current : kept;
+        };
+        setFlags(prune);
+        setDenied(prune);
+      })
+      .catch(() => {
+        // Без ручки признаков карточка остаётся рабочей: глобальные кнопки
+        // сохраняем, какие были, признаки правила не показываем.
+        if (!cancelled) setFlagOptions((current) => ({ global: current.global, rule: [] }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attemptId, group, path]);
+
+  // Полоса служб — по текущему выбору оператора, как в настоящем АРМ-112:
+  // пересчитывается при каждом изменении категории, пути или признаков.
+  const previewKey =
+    outcome === 'classify' && group ? [group, path.join('|'), flags.join('|')].join('\n') : null;
+  useEffect(() => {
+    if (!previewKey || !group) return;
+    let cancelled = false;
+    operatorApi
+      .preview(attemptId, group, path, flags)
+      .then((raw) => {
+        if (!cancelled) setPreview({ key: previewKey, data: normalizePreview(raw), failed: false });
+      })
+      .catch(() => {
+        if (!cancelled) setPreview({ key: previewKey, data: null, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attemptId, group, path, flags, previewKey]);
+
   const selectAt = useCallback((depth: number, label: string) => {
     // Выбор на верхнем уровне отменяет всё, что было выбрано ниже.
     setPath((current) => [...current.slice(0, depth), label]);
+  }, []);
+
+  const toggleFlag = useCallback((key: string) => {
+    setFlags((current) =>
+      current.includes(key) ? current.filter((k) => k !== key) : [...current, key],
+    );
+    setDenied((current) => current.filter((k) => k !== key));
+  }, []);
+
+  const answerFlag = useCallback((key: string, yes: boolean) => {
+    setFlags((current) => {
+      const without = current.filter((k) => k !== key);
+      return yes ? [...without, key] : without;
+    });
+    setDenied((current) => {
+      const without = current.filter((k) => k !== key);
+      return yes ? without : [...without, key];
+    });
   }, []);
 
   const submit = useCallback(async () => {
@@ -253,6 +432,8 @@ export function OperatorCallPage() {
           description,
           caller_phone: phone,
           address_parts: addressParts,
+          // Признаки имеют смысл только у зарегистрированного происшествия.
+          flags: outcome === 'classify' ? flags : [],
         }),
       );
       setCall(await api.call(attemptId));
@@ -261,12 +442,22 @@ export function OperatorCallPage() {
     } finally {
       setBusy(false);
     }
-  }, [attemptId, group, path, address, description, outcome, referral, phone, addressParts]);
+  }, [attemptId, group, path, address, description, outcome, referral, phone, addressParts, flags]);
+
+  // Подписи признаков для разбора: ключи классификатора фронт не расшифровывает,
+  // но названия кнопок, которые прислал бэкенд, уже есть — используем их.
+  const flagTitles = useMemo(() => {
+    const titles: Record<string, string> = {};
+    for (const f of [...flagOptions.global, ...flagOptions.rule]) titles[f.key] = f.title;
+    return titles;
+  }, [flagOptions]);
 
   if (error && !call) return <div className="alert">{error}</div>;
   if (!call) return <div className="empty">Загрузка вызова…</div>;
 
   const locked = call.finished || evaluation !== null;
+  const canSave = !busy && (outcome !== 'classify' || !!group);
+  const shown = preview && preview.key === previewKey ? preview : null;
 
   return (
     <>
@@ -275,36 +466,15 @@ export function OperatorCallPage() {
       </p>
 
       <div className="card">
-        <div className="card__head">
-          <div style={{ flex: 1 }}>
-            <h1 className="card__type">Входящий вызов</h1>
-            <div className="card__meta">
-              Заявитель: {call.caller}
-              {call.caller_role && ` · ${ROLE_NAMES[call.caller_role]}`}
-            </div>
-            {/* Номер определяется автоматически при поступлении вызова —
-                оператор видит его сразу, как в рабочей системе. */}
-            <div className="card__meta">
-              Определившийся номер: {call.caller_phone_aon ?? 'не определился'}
-              {call.is_repeat && ' · повторная выдача'}
-            </div>
-            {call.is_repeat && (
-              <div className="repeat-note">
-                Повторная выдача. Это тот же вызов, с которым не удалось справиться
-                в первый раз: он возвращён для повторной отработки. Выслушайте
-                заявителя и заполните карточку заново — время считается с этого момента.
-              </div>
-            )}
-          </div>
-          <Timer
-            issuedAt={call.issued_at}
-            deadlineSeconds={call.deadline_seconds}
-            frozenAt={call.finished ? call.elapsed_seconds : null}
-          />
-        </div>
-
         <div className="card__block legend">
           <CallAudio key={call.attempt_id} src={call.audio_url} />
+          {call.is_repeat && (
+            <div className="repeat-note">
+              Повторная выдача. Это тот же вызов, с которым не удалось справиться
+              в первый раз: он возвращён для повторной отработки. Выслушайте
+              заявителя и заполните карточку заново — время считается с этого момента.
+            </div>
+          )}
           <div className="card__label" style={{ marginTop: 12 }}>
             Что сообщает заявитель
           </div>
@@ -343,58 +513,76 @@ export function OperatorCallPage() {
           onChange={setOutcome}
           onTarget={setReferral}
         />
+      </div>
 
-        {outcome === 'classify' && (
-        <div className="card__block">
-          <div className="card__label">Опросная карта — классифицируйте происшествие</div>
-
-          <div className="field" style={{ maxWidth: 460, marginTop: 8 }}>
-            <label htmlFor="group">Категория происшествия</label>
-            <select
-              id="group"
-              value={group ?? ''}
-              disabled={locked}
-              onChange={(e) => {
-                setGroup(e.target.value || null);
-                setPath([]);
-              }}
-            >
-              <option value="">— выберите —</option>
-              {groups.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {levels.map((options, depth) => (
-            <SurveyStep
-              key={depth}
-              title={`Признак ${depth + 1}`}
-              options={options}
-              selected={path[depth] ?? null}
-              disabled={locked}
-              onSelect={(label) => selectAt(depth, label)}
+      {/* Карточка по образцу АРМ-112: телефоны и таймер сверху, заявитель и
+          адрес слева, классификатор с признаками справа, полоса служб снизу.
+          Это отдельный контейнер, а не .card: у той overflow: hidden, и
+          прилипающая полоса служб внутри неё не работала бы. */}
+      <div className="arm">
+        <div className="arm-head">
+          <div className="arm-phone">
+            <label className="arm-phone__label" htmlFor="phone-aon">
+              АОН
+            </label>
+            {/* Номер определяется автоматически при поступлении вызова —
+                оператор видит его сразу, как в рабочей системе, и не правит. */}
+            <input
+              id="phone-aon"
+              className="arm-phone__value arm-ro"
+              readOnly
+              value={call.caller_phone_aon ?? 'не определился'}
             />
-          ))}
-        </div>
-        )}
-
-        <div className="card__block">
-          <div className="field" style={{ maxWidth: 460 }}>
-            <label htmlFor="phone">Телефон для связи с заявителем</label>
+          </div>
+          <div className="arm-phone">
+            <label className="arm-phone__label" htmlFor="phone">
+              предоставленный
+            </label>
             <input
               id="phone"
+              className="arm-phone__value"
               value={phone}
               disabled={locked}
-              placeholder="Запишите номер со слов заявителя"
+              placeholder="со слов заявителя"
               onChange={(e) => setPhone(e.target.value)}
             />
           </div>
-          <div className="card__label" style={{ marginTop: 6 }}>
-            Адрес происшествия по частям
+          <div className="arm-incident">
+            <div>
+              <div className="arm-incident__title">Происшествие № {call.attempt_id}</div>
+              <div className="card__meta">
+                Выдано {new Date(call.issued_at).toLocaleString('ru-RU', ISSUED_FORMAT)}
+                {call.is_repeat && ' · повторная выдача'}
+              </div>
+            </div>
+            <div className="arm-timer">
+              <Timer
+                issuedAt={call.issued_at}
+                deadlineSeconds={call.deadline_seconds}
+                frozenAt={call.finished ? call.elapsed_seconds : null}
+              />
+            </div>
           </div>
+        </div>
+
+        <div className="arm-col">
+          <div className="arm-caller">
+            <div className="field">
+              <label htmlFor="caller-name">Фамилия и имя заявителя</label>
+              <input id="caller-name" className="arm-ro" readOnly value={call.caller} />
+            </div>
+            <div className="field">
+              <label htmlFor="caller-role">Статус</label>
+              <input
+                id="caller-role"
+                className="arm-ro"
+                readOnly
+                value={call.caller_role ? ROLE_NAMES[call.caller_role] : 'не указан'}
+              />
+            </div>
+          </div>
+
+          <div className="arm-section-title">Адрес</div>
           <div className="address-grid">
             {ADDRESS_FIELDS.map((f) => (
               <div key={f.key} className={`field${f.wide ? ' field--wide' : ''}`}>
@@ -415,18 +603,17 @@ export function OperatorCallPage() {
           </div>
 
           <div className="field">
-            <label htmlFor="address">Адрес со слов заявителя, как сказано</label>
+            <label htmlFor="address">Описательный адрес</label>
             <input
               id="address"
               value={address}
               disabled={locked}
-              placeholder="Уточните адрес у заявителя и внесите его в карточку"
+              placeholder="Адрес со слов заявителя, как сказано"
               onChange={(e) => setAddress(e.target.value)}
             />
           </div>
-          <div className="card__label" style={{ marginTop: 10 }}>
-            Описание происшествия
-          </div>
+
+          <div className="arm-section-title">Описание со слов заявителя</div>
           <textarea
             className="comment-area"
             value={description}
@@ -434,24 +621,128 @@ export function OperatorCallPage() {
             placeholder="Детали, которые нельзя передать выбором признаков, но которые важны для реагирования"
             onChange={(e) => setDescription(e.target.value)}
           />
+        </div>
 
-          {error && <div className="alert" style={{ marginTop: 10 }}>{error}</div>}
-
-          {!locked && (
-            <div className="actions">
-              <button
-                className="btn"
-                onClick={submit}
-                disabled={busy || (outcome === 'classify' && !group)}
-              >
-                {busy ? 'Сохранение…' : 'Сохранить карточку'}
-              </button>
+        <div className="arm-col">
+          {outcome !== 'classify' ? (
+            <div className="arm-note">
+              {outcome === 'refer'
+                ? 'Опросная карта не заполняется: вызов передаётся по принадлежности в систему-112 другого субъекта.'
+                : 'Опросная карта не заполняется: обращение не является происшествием.'}
             </div>
+          ) : (
+            <>
+              {flagOptions.global.length > 0 && (
+                <div className="arm-flags">
+                  {flagOptions.global.map((option) => {
+                    const on = flags.includes(option.key);
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        disabled={locked}
+                        aria-pressed={on}
+                        title={option.hint ?? undefined}
+                        className={`arm-flag${on ? ' arm-flag--on' : ''}`}
+                        onClick={() => toggleFlag(option.key)}
+                      >
+                        {option.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="arm-section-title">добавить тип происшествия</div>
+
+              <div className="arm-classifier">
+                <div className="arm-row">
+                  <label className="arm-row__label" htmlFor="group">
+                    Категория
+                  </label>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <select
+                      id="group"
+                      value={group ?? ''}
+                      disabled={locked}
+                      onChange={(e) => {
+                        setGroup(e.target.value || null);
+                        setPath([]);
+                      }}
+                    >
+                      <option value="">— выберите —</option>
+                      {groups.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {levels.map((options, depth) => (
+                  <SurveyStep
+                    key={depth}
+                    title={`Признак ${depth + 1}`}
+                    options={options}
+                    selected={path[depth] ?? null}
+                    disabled={locked}
+                    onSelect={(label) => selectAt(depth, label)}
+                  />
+                ))}
+
+                {flagOptions.rule.map((option) => (
+                  <YesNoFlag
+                    key={option.key}
+                    option={option}
+                    disabled={locked}
+                    value={flags.includes(option.key) ? true : denied.includes(option.key) ? false : null}
+                    onChange={(yes) => answerFlag(option.key, yes)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {error && <div className="alert arm-alert">{error}</div>}
+
+        <div className="arm-services">
+          <div className="arm-services__title">Службы:</div>
+          <div className="arm-services__list">
+            {outcome !== 'classify' ? (
+              <span className="arm-services__empty">
+                {outcome === 'refer'
+                  ? 'Список оповещения не формируется: вызов передаётся по принадлежности'
+                  : 'Список оповещения не формируется: обращение не регистрируется'}
+              </span>
+            ) : shown?.failed ? (
+              <span className="arm-services__empty">Предпросмотр списка оповещения недоступен</span>
+            ) : !shown?.data?.incident_type ? (
+              <span className="arm-services__empty">Определите тип происшествия</span>
+            ) : shown.data.services.length === 0 ? (
+              <span className="arm-services__empty">
+                {shown.data.incident_type} — службы для оповещения не определены
+              </span>
+            ) : (
+              shown.data.services.map((s) => (
+                <span key={s.service} className="arm-service" title={s.reason}>
+                  <span className="arm-service__name">{s.service}</span>{' '}
+                  <span className="arm-service__type">{s.incident_type}</span>
+                  <span className="arm-service__reason">{s.reason}</span>
+                </span>
+              ))
+            )}
+          </div>
+          {!locked && (
+            <button type="button" className="arm-save" onClick={submit} disabled={!canSave}>
+              {busy ? 'Сохранение…' : 'Сохранить карточку'}
+            </button>
           )}
         </div>
       </div>
 
-      {evaluation && <OperatorReport evaluation={evaluation} />}
+      {evaluation && <OperatorReport evaluation={evaluation} flagTitles={flagTitles} />}
     </>
   );
 }
@@ -495,13 +786,78 @@ const DATE_FORMAT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 };
 
+/** В шапке АРМ-112 время выдачи стоит с секундами: по нему сверяют таймер. */
+const ISSUED_FORMAT: Intl.DateTimeFormatOptions = {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+};
+
 const OUTCOME_NAMES: Record<CallOutcome, string> = {
   classify: 'зарегистрировать происшествие',
   refer: 'передать по принадлежности',
   reject: 'не регистрировать: не происшествие',
 };
 
-function OperatorReport({ evaluation }: { evaluation: OperatorEvaluation }) {
+/**
+ * Разбор признаков опросной карты. Пропущенный признак — красным: из-за него
+ * служба не получила оповещение; лишний — жёлтым: он добавил службу без
+ * оснований; верно отмеченный — зелёным. Списки могут отсутствовать у ответа
+ * старой редакции бэкенда — тогда блока просто нет.
+ */
+function FlagsReview({
+  classification,
+  titles,
+}: {
+  classification: Classification;
+  titles: Record<string, string>;
+}) {
+  const expected = classification.expected_flags ?? [];
+  const chosen = classification.chosen_flags ?? [];
+  const missed = new Set(classification.missed_flags ?? []);
+  const extra = classification.extra_flags ?? [];
+  if (expected.length === 0 && chosen.length === 0 && extra.length === 0) return null;
+
+  const name = (key: string) => titles[key] ?? key;
+  const correct = chosen.filter((key) => expected.includes(key));
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <b>Признаки опросной карты:</b>
+      <div className="arm-flagchips">
+        {correct.map((key) => (
+          <span key={`ok-${key}`} className="chip chip--ok" title="отмечен верно">
+            {name(key)}
+          </span>
+        ))}
+        {[...missed].map((key) => (
+          <span key={`missed-${key}`} className="chip chip--danger" title="есть в вызове, но не отмечен">
+            не отмечен: {name(key)}
+          </span>
+        ))}
+        {extra.map((key) => (
+          <span key={`extra-${key}`} className="chip chip--warn" title="отмечен, но в вызове его нет">
+            лишний: {name(key)}
+          </span>
+        ))}
+        {expected.length === 0 && chosen.length === 0 && (
+          <span className="card__meta">признаков в вызове нет, и отмечено ничего не было</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OperatorReport({
+  evaluation,
+  flagTitles,
+}: {
+  evaluation: OperatorEvaluation;
+  flagTitles: Record<string, string>;
+}) {
   const classification = evaluation.classification;
   const outcomeWrong =
     evaluation.chosen_outcome !== null &&
@@ -555,6 +911,7 @@ function OperatorReport({ evaluation }: { evaluation: OperatorEvaluation }) {
                 </span>
               </div>
             )}
+            <FlagsReview classification={classification} titles={flagTitles} />
             {classification.missed_services.length > 0 && (
               <div className="missed">
                 <b>Не получили бы оповещение:</b>{' '}

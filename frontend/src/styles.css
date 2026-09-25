@@ -1258,3 +1258,373 @@ button {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* --- Карточка оператора по образцу АРМ-112 -------------------------------- */
+
+/* Компоновка настоящего АРМ-112: полоса телефонов и таймера на всю ширину,
+   слева заявитель и адрес, справа классификатор с признаками, снизу полоса
+   служб. Это не .card: у той overflow: hidden, и прилипающая полоса внутри
+   неё не прилипала бы. */
+.arm {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 12px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.arm-head {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.arm-phone {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 8px 14px 10px;
+}
+
+.arm-phone__label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+/* Номер — крупно и без рамки, как в АРМ: это первое, что видит оператор. */
+.arm-phone__value {
+  width: 100%;
+  font: inherit;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0 4px;
+  background: transparent;
+}
+
+.arm-phone__value:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.arm-incident {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 8px 8px 8px 16px;
+}
+
+.arm-incident__title {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Таймер — тёмная плашка с крупными цифрами, как красный счётчик в АРМ.
+   Цвета норматива из .timer--* на тёмном фоне не читаются, поэтому здесь
+   свои: белый, пока в норме, жёлтый на подходе, розовый при просрочке. */
+.arm-timer {
+  background: var(--text);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  min-width: 132px;
+  text-align: center;
+}
+
+.arm-timer .timer {
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.arm-timer .timer__value {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.arm-timer .timer--ok .timer__value {
+  color: #fff;
+}
+
+.arm-timer .timer--soon .timer__value {
+  color: #ffd166;
+}
+
+.arm-timer .timer--over .timer__value {
+  color: #ff8a80;
+}
+
+.arm-timer .timer__limit {
+  color: rgb(255 255 255 / 70%);
+}
+
+.arm-col {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.arm-caller {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 0 12px;
+}
+
+/* Поля только для чтения — приглушённые: заявителя и АОН оператор не правит. */
+.arm-ro,
+.arm .field input.arm-ro {
+  background: var(--bg);
+  color: var(--text);
+  cursor: default;
+}
+
+.arm .field select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--surface);
+}
+
+.arm-section-title {
+  font-size: 16px;
+  color: var(--muted);
+  margin: 14px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.arm-section-title:first-child {
+  margin-top: 0;
+}
+
+.arm-note {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+/* Три глобальных признака в одну строку, крупными кнопками: от них зависит
+   список оповещения, и нажатое состояние должно быть видно через весь зал. */
+.arm-flags {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.arm-flag {
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-weight: 600;
+  line-height: 1.25;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.arm-flag:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.arm-flag--on,
+.arm-flag--on:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 30%);
+}
+
+.arm-flag:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Строка классификатора: подпись слева, кнопки справа — как в АРМ
+   («Где», «Признак пожара»). Шаги опросной карты рисует общий SurveyStep,
+   поэтому его разметка переводится в строку здесь, а не в самом компоненте. */
+.arm-row,
+.arm-classifier .survey__step {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 10px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.arm-row__label,
+.arm-classifier .survey__step .card__label {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0;
+  padding-top: 8px;
+}
+
+.arm-yn {
+  display: flex;
+  gap: 6px;
+}
+
+.arm-yn__btn {
+  padding: 7px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.arm-yn__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.arm-yn__btn--on,
+.arm-yn__btn--on:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.arm-yn__btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.arm-alert {
+  grid-column: 1 / -1;
+}
+
+/* Полоса служб — оранжевая и прилипает к низу окна, как в АРМ: список
+   оповещения оператор видит всё время, пока заполняет карточку. */
+.arm-services {
+  grid-column: 1 / -1;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--notify);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  box-shadow: 0 -2px 8px rgb(23 34 46 / 20%);
+}
+
+.arm-services__title {
+  font-weight: 700;
+  align-self: start;
+  padding-top: 5px;
+}
+
+.arm-services__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.arm-services__empty {
+  font-size: 13px;
+  opacity: 0.9;
+  padding-top: 5px;
+}
+
+.arm-service {
+  display: inline-block;
+  background: var(--notify-soft);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  font-size: 12px;
+  max-width: 260px;
+  line-height: 1.3;
+}
+
+.arm-service__name {
+  font-weight: 700;
+  color: var(--notify);
+}
+
+.arm-service__type {
+  color: var(--muted);
+}
+
+.arm-service__reason {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.arm-save {
+  background: #fff;
+  color: var(--notify);
+  border: 1px solid #fff;
+  border-radius: var(--radius);
+  padding: 10px 22px;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.arm-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.arm-flagchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* На узком экране колонки складываются в одну, а полоса служб перестаёт
+   прилипать: иначе она закрывала бы половину экрана телефона. */
+@media (max-width: 900px) {
+  .arm,
+  .arm-head,
+  .arm-flags,
+  .arm-caller {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .arm-row,
+  .arm-classifier .survey__step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .arm-row__label,
+  .arm-classifier .survey__step .card__label {
+    padding-top: 0;
+  }
+
+  .arm-services {
+    position: static;
+    grid-template-columns: minmax(0, 1fr);
+    box-shadow: var(--shadow);
+  }
+
+  .arm-services__title,
+  .arm-services__empty {
+    padding-top: 0;
+  }
+}
