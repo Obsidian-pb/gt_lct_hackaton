@@ -1,5 +1,6 @@
 """Рабочее место оператора Службы 112: приём вызова и заполнение карточки."""
 
+import random
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -213,11 +214,22 @@ def _load(attempt_id: int, db: Session, user: User) -> Attempt:
 TICKET_TITLE = re.compile(r"Билет (\d+), вызов (\d+)")
 
 
-def _audio_url(scenario: Scenario) -> str | None:
+# Каждый вызов озвучен несколькими голосами пола заявителя (scripts/make_voices.py).
+# Вариант выбирается по номеру попытки: у обучающегося при повторном
+# прослушивании голос тот же, у соседа по классу — другой.
+AUDIO_VARIANTS = 3
+
+
+def _audio_url(scenario: Scenario, attempt_id: int | None = None) -> str | None:
     if scenario.source is not ScenarioSource.TICKET:
         return None
     found = TICKET_TITLE.match(scenario.title)
-    return f"/audio/ticket-{found[1]}-{found[2]}.mp3" if found else None
+    if not found:
+        return None
+    # Перемешивание, а не остаток от деления: иначе у попыток, выданных
+    # подряд одному классу, голоса шли бы по кругу 1-2-3-1-2-3.
+    variant = random.Random(attempt_id or 0).randint(1, AUDIO_VARIANTS)
+    return f"/audio/ticket-{found[1]}-{found[2]}-v{variant}.mp3"
 
 
 def _call(attempt: Attempt) -> CallOut:
@@ -254,7 +266,7 @@ def _call(attempt: Attempt) -> CallOut:
         entered_caller_phone=attempt.entered_caller_phone,
         entered_address_parts=dict(attempt.entered_address_parts or {}),
         chosen_flags=list(attempt.chosen_flags or []),
-        audio_url=_audio_url(attempt.scenario),
+        audio_url=_audio_url(attempt.scenario, attempt.id),
         is_repeat=attempt.repeat_of_id is not None,
     )
 

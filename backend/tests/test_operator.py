@@ -1,5 +1,7 @@
 """Оценка работы оператора Службы 112: классификация и оформление карточки."""
 
+import re
+
 import pytest
 
 from app.api.operator import _audio_url
@@ -102,9 +104,15 @@ def scenario(title: str, source: ScenarioSource) -> Scenario:
 
 
 def test_запись_вызова_находится_по_номеру_билета():
-    """Файлы озвучены заранее и названы по билету и номеру вызова в нём."""
+    """Файлы озвучены заранее и названы по билету, номеру вызова и варианту голоса."""
     ticket = scenario("Билет 12, вызов 3", ScenarioSource.TICKET)
-    assert _audio_url(ticket) == "/audio/ticket-12-3.mp3"
+    assert re.fullmatch(r"/audio/ticket-12-3-v[123]\.mp3", _audio_url(ticket, 5))
+
+
+def test_голос_закреплён_за_попыткой_и_различается_между_попытками():
+    ticket = scenario("Билет 12, вызов 3", ScenarioSource.TICKET)
+    assert _audio_url(ticket, 41) == _audio_url(ticket, 41)
+    assert len({_audio_url(ticket, attempt_id) for attempt_id in range(1, 40)}) == 3
 
 
 @pytest.mark.parametrize(
