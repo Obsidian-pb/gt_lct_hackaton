@@ -176,7 +176,7 @@ docker compose -f docker-compose.prod.yml -f docker-compose.offline.yml up -d --
 ```
 
 Обязательные переменные в `.env`: `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
-`SECRET_KEY`, `DEMO_PASSWORD`. Перенос в контур без сети — одним архивом
+`SECRET_KEY`, `DEMO_PASSWORD`. Перенос в контур без выхода в интернет — одним архивом
 образов: `scripts/package_offline.sh`, на месте — `docker load`.
 Суточные резервные копии снимает отдельный контейнер.
 
