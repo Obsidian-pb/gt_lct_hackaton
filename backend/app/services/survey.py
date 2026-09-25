@@ -130,9 +130,17 @@ class ClassificationResult:
         начатый путь: оператор, выбравший «жилой дом / лифт» вместо
         «жилой дом / лифт / открытое пламя», ошибся куда меньше того,
         кто ушёл в другую группу.
+
+        Тип верный, а службы в списке не хватает — так бывает только из-за
+        признака карты, который оператор не отметил. Для сил реагирования
+        это та же беда, что и ошибка в последнем признаке пути: скорая
+        не поедет. Поэтому балл считается как за путь с ещё одним,
+        несовпавшим, звеном — отдельного коэффициента за признаки нет.
         """
         if self.correct:
-            return 1.0
+            if not self.missed_services:
+                return 1.0
+            return round(0.6 * self.expected_depth / (self.expected_depth + 1), 3)
         if not self.same_group:
             return 0.0
         return round(0.6 * self.matched_depth / max(self.expected_depth, 1), 3)
@@ -144,17 +152,25 @@ def classify(
     path: list[str],
     ekp: EKP | None = None,
     flags: frozenset[str] | set[str] = frozenset(),
+    chosen_flags: frozenset[str] | set[str] | None = None,
 ) -> ClassificationResult:
     """Сверяет выбранный путь с эталонным правилом.
 
     Редакция передаётся снаружи: и эталон, и выбранный путь обязаны
     читаться по одной и той же редакции — той, по которой идёт занятие.
-    Признаки вызова (пострадавшие, газификация) — тоже: список оповещения
-    зависит от них, и сравнивать эталон с флагами против выбора без флагов
-    значило бы приписать ошибке классификации чужие последствия.
+
+    Признаки вызова (пострадавшие, газификация) — две стороны: `flags`
+    задал сценарий, `chosen_flags` отметил оператор на карточке. Список
+    эталона считается с первыми, список выбора — со вторыми, и пропущенный
+    признак проявляется тем, чем он обернулся бы в рабочей системе, —
+    неоповещённой службой. Без `chosen_flags` обе стороны считаются
+    с признаками сценария: так вызывают карточка диспетчера и кабинет
+    преподавателя, где оператор признаков не отмечает, и приписывать
+    ошибке классификации чужие последствия там нельзя.
     """
     ekp = ekp or get_ekp()
     flags = frozenset(flags)
+    chosen_flags = flags if chosen_flags is None else frozenset(chosen_flags)
     expected = ekp.rule(expected_rule_number)
     chosen = resolve(group, path, ekp)
 
@@ -167,7 +183,7 @@ def classify(
             matched += 1
 
     expected_services = set(expected.resolve(flags))
-    chosen_services = set(chosen.resolve(flags)) if chosen else set()
+    chosen_services = set(chosen.resolve(chosen_flags)) if chosen else set()
     return ClassificationResult(
         correct=chosen is not None and chosen.number == expected.number,
         chosen_rule=chosen,

@@ -263,6 +263,88 @@ def test_прежние_вызовы_с_номером_правила_работ
     assert result.score == 1.0
 
 
+# --- Признаки опросной карты -------------------------------------------------
+#
+# В настоящем АРМ-112 «Пострадавшие», «Нет доступа», «Угроза людям» — кнопки
+# на карточке, и от них зависит список оповещения. Оценивается не сама
+# кнопка, а её последствия: какой службы из-за неё не хватило или какая
+# приехала бы напрасно.
+
+
+def with_flags(*flags: str) -> Expected:
+    return Expected(outcome=CallOutcome.CLASSIFY, rule_number=FIRE_TRASH, flags=frozenset(flags))
+
+
+def test_неотмеченный_признак_с_последствиями_это_критическая_ошибка():
+    """Заявитель сказал о пострадавших, кнопка не нажата — скорая не поедет."""
+    result = evaluate(card(), with_flags("пострадавшие"), DEFAULT_CALL_DEADLINE_SECONDS)
+    assert codes(result) == ["O14"]
+    missed = result.violations[0]
+    assert "пострадавшие" in missed.detail
+    assert "СМП" in missed.detail
+    assert result.classification.correct is True
+    assert "СМП" in result.classification.missed_services
+    assert result.score < 1.0
+
+
+def test_неотмеченный_признак_без_последствий_не_нарушение():
+    """«Нет доступа» на пожаре мусора список не меняет: МЧС оповещается и так."""
+    result = evaluate(card(), with_flags("нет_доступа"), DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+    assert result.score == 1.0
+
+
+def test_лишний_признак_добавивший_службу_это_нарушение():
+    result = evaluate(
+        card(flags=frozenset({"правонарушение"})),
+        with_flags(),
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert codes(result) == ["O15"]
+    extra = result.violations[0]
+    assert "правонарушение" in extra.detail
+    assert "МВД" in extra.detail
+
+
+def test_лишний_признак_без_последствий_не_нарушение():
+    """«Мед. помощь» при уже отмеченных пострадавших ЦЭМП второй раз не добавит."""
+    result = evaluate(
+        card(flags=frozenset({"пострадавшие", "мед_помощь"})),
+        with_flags("пострадавшие"),
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+    assert result.score == 1.0
+
+
+def test_верно_отмеченные_признаки_без_замечаний():
+    result = evaluate(
+        card(flags=frozenset({"пострадавшие"})),
+        with_flags("пострадавшие"),
+        DEFAULT_CALL_DEADLINE_SECONDS,
+    )
+    assert result.violations == []
+    assert result.classification.missed_services == ()
+    assert result.score == 1.0
+
+
+def test_признаки_не_проверяются_если_карточка_не_классифицирована():
+    """Без пути признакам не по чему считать последствия — достаточно O1."""
+    result = evaluate(
+        card(group=None, path=()), with_flags("пострадавшие"), DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert "O14" not in codes(result)
+    assert "O1" in codes(result)
+
+
+def test_прежние_вызовы_без_признаков_карточки_работают_как_раньше():
+    """У карточки по умолчанию признаков нет, и без признаков у вызова всё как было."""
+    assert FilledCard.__dataclass_fields__["flags"].default == frozenset()
+    result = evaluate(card(), with_flags(), DEFAULT_CALL_DEADLINE_SECONDS)
+    assert result.violations == []
+    assert result.score == 1.0
+
+
 # --- Телефон для связи -------------------------------------------------------
 #
 # Поля заявителя взяты из разбора карточки происшествия, который сделал
