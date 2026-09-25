@@ -806,3 +806,39 @@ export interface AdminDashboard {
   audit: AuditEvent[];
   errors: ErrorGroup[];
 }
+
+// --- Работы: сквозной список по всем занятиям --------------------------------
+// Файл общий и правится только дописыванием в конец: поля к работе добавлены
+// слиянием объявлений. Их же отдаёт и список работ занятия — построитель один.
+
+export interface SessionWork {
+  session_id: number;
+  session_title: string;
+  mode: string;
+  /** Зачёт по критериям своего занятия; null — оценки ещё нет. */
+  passed: boolean | null;
+}
+
+export interface WorksPage {
+  items: SessionWork[];
+  total: number;
+}
+
+/** Справочники фильтров: только те, у кого есть завершённые работы. */
+export interface WorksFilters {
+  students: { id: number; full_name: string }[];
+  sessions: { id: number; title: string; mode: string }[];
+}
+
+export interface WorksQuery {
+  student_id?: number;
+  session_id?: number;
+  mode?: string;
+  /** Даты ISO (ГГГГ-ММ-ДД), по завершению работы, сутки включительно. */
+  date_from?: string;
+  date_to?: string;
+  passed?: boolean;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}

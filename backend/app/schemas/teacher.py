@@ -123,6 +123,43 @@ class WorkOut(BaseModel):
     teacher_feedback_by: str | None = None
     # Заполнено у повторной выдачи: номер проваленной попытки.
     repeat_of_id: int | None = None
+    # Откуда работа: в сквозном списке по всем занятиям строки без занятия
+    # неразличимы, а по режиму преподаватель отбирает их в первую очередь.
+    session_id: int
+    session_title: str
+    mode: str
+    # Зачёт по критериям своего занятия: балл не ниже порога и ни одного
+    # критического нарушения. None — оценки ещё нет.
+    passed: bool | None = None
+
+
+class WorkFilterStudentOut(BaseModel):
+    id: int
+    full_name: str
+
+
+class WorkFilterSessionOut(BaseModel):
+    id: int
+    title: str
+    mode: str
+
+
+class WorksFiltersOut(BaseModel):
+    """Справочники для выпадающих фильтров списка работ.
+
+    Только обучающиеся и занятия, у которых есть завершённые работы:
+    пункт, по которому список заведомо пуст, только вводит в заблуждение.
+    """
+
+    students: list[WorkFilterStudentOut]
+    sessions: list[WorkFilterSessionOut]
+
+
+class WorksPageOut(BaseModel):
+    """Страница сквозного списка работ и общее число найденных."""
+
+    items: list[WorkOut]
+    total: int
 
 
 class RepeatResultOut(BaseModel):

@@ -1,8 +1,8 @@
 """Кабинет преподавателя: настройка среды, сценарии, отчёт о занятии."""
 
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -49,6 +49,10 @@ from app.schemas.teacher import (
     SessionPatch,
     StudentResultOut,
     WorkOut,
+    WorksFiltersOut,
+    WorksPageOut,
+    WorkFilterSessionOut,
+    WorkFilterStudentOut,
 )
 from app.services import audit
 from app.services import export as export_service
@@ -499,6 +503,14 @@ def _work_out(attempt: Attempt) -> WorkOut:
             else None
         ),
         repeat_of_id=attempt.repeat_of_id,
+        session_id=attempt.session_id,
+        session_title=attempt.session.title,
+        mode=str(attempt.session.mode),
+        passed=(
+            not report_service.attempt_failed(evaluation, attempt.session.pass_score)
+            if evaluation
+            else None
+        ),
     )
 
 
@@ -518,6 +530,105 @@ def session_works(
         select(Attempt).where(Attempt.session_id == session_id).order_by(Attempt.id)
     ).all()
     return [_work_out(a) for a in attempts]
+
+
+def _matches_query(attempt: Attempt, q: str) -> bool:
+    """Подходит ли работа под строку поиска: сценарий, тип, адрес."""
+    scenario = attempt.scenario
+    return any(
+        q in (value or "").casefold()
+        for value in (scenario.title, scenario.incident_type, scenario.address)
+    )
+
+
+@router.get("/works", response_model=WorksPageOut)
+def works(
+    student_id: int | None = None,
+    session_id: int | None = None,
+    mode: TrainingMode | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    passed: bool | None = None,
+    q: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_session),
+    user: User = Depends(require_teacher),
+) -> WorksPageOut:
+    """Сквозной список завершённых работ по всем занятиям, новые первыми.
+
+    Отчёт показывает работы одного занятия, личный кабинет — одного
+    обучающегося; здесь преподаватель находит работу, не зная заранее,
+    где она: по обучающемуся, режиму, дате, зачёту или словам из карточки.
+
+    Отбор по зачёту и поиск делаются после выборки, а не в запросе: зачёт
+    не хранится в базе, а считается по каталогу нарушений и порогу
+    занятия — единственным способом, которым его считают отчёт и повтор
+    карточки. Поиск туда же намеренно: регистронезависимое сравнение
+    кириллицы в SQLite не работает, а комплекс на нём тестируется.
+    Список завершённых работ учебного комплекса невелик, и полная выборка
+    по остальным условиям обходится дешевле расхождения в правилах зачёта.
+    """
+    stmt = (
+        select(Attempt)
+        .join(Attempt.session)
+        .where(Attempt.finished_at.is_not(None))
+        .order_by(Attempt.finished_at.desc(), Attempt.id.desc())
+    )
+    if student_id is not None:
+        stmt = stmt.where(Attempt.student_id == student_id)
+    if session_id is not None:
+        stmt = stmt.where(Attempt.session_id == session_id)
+    if mode is not None:
+        stmt = stmt.where(TrainingSession.mode == mode)
+    # Границы периода — сутки целиком: «по 25.09» включает работы 25 сентября.
+    if date_from is not None:
+        stmt = stmt.where(
+            Attempt.finished_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        stmt = stmt.where(
+            Attempt.finished_at
+            < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+        )
+
+    needle = (q or "").strip().casefold()
+    rows = []
+    for attempt in db.scalars(stmt):
+        if needle and not _matches_query(attempt, needle):
+            continue
+        item = _work_out(attempt)
+        if passed is not None and item.passed is not passed:
+            continue
+        rows.append(item)
+    return WorksPageOut(items=rows[offset : offset + limit], total=len(rows))
+
+
+@router.get("/works/filters", response_model=WorksFiltersOut)
+def works_filters(
+    db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> WorksFiltersOut:
+    finished = Attempt.finished_at.is_not(None)
+    students = db.scalars(
+        select(User)
+        .join(Attempt, Attempt.student_id == User.id)
+        .where(finished)
+        .distinct()
+        .order_by(User.full_name)
+    ).all()
+    sessions = db.scalars(
+        select(TrainingSession)
+        .join(Attempt, Attempt.session_id == TrainingSession.id)
+        .where(finished)
+        .distinct()
+        .order_by(TrainingSession.id.desc())
+    ).all()
+    return WorksFiltersOut(
+        students=[WorkFilterStudentOut(id=u.id, full_name=u.full_name) for u in students],
+        sessions=[
+            WorkFilterSessionOut(id=s.id, title=s.title, mode=str(s.mode)) for s in sessions
+        ],
+    )
 
 
 @router.post("/attempts/{attempt_id}/feedback", response_model=WorkOut)

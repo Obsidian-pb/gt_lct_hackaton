@@ -21,6 +21,7 @@ import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherSessionPage } from './pages/TeacherSessionPage';
 import { TeacherSessionsPage } from './pages/TeacherSessionsPage';
 import { TeacherScenariosPage } from './pages/TeacherScenariosPage';
+import { TeacherWorksPage } from './pages/TeacherWorksPage';
 
 function Header({ role }: { role: string }) {
   const { user, signOut } = useAuth();
@@ -69,6 +70,9 @@ function Header({ role }: { role: string }) {
             </NavLink>
             <NavLink to="/report" className={({ isActive }) => (isActive ? 'active' : '')}>
               Отчёт
+            </NavLink>
+            <NavLink to="/works" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Работы
             </NavLink>
             <NavLink to="/materials" className={({ isActive }) => (isActive ? 'active' : '')}>
               Справочная база
@@ -140,6 +144,7 @@ export default function App() {
               <Route path="/sessions" element={<TeacherSessionsPage />} />
               <Route path="/sessions/:id" element={<TeacherSessionPage />} />
               <Route path="/report" element={<TeacherReportPage />} />
+              <Route path="/works" element={<TeacherWorksPage />} />
               <Route path="/materials" element={<MaterialsManagePage />} />
               <Route path="*" element={<Navigate to="/teacher" replace />} />
             </>
