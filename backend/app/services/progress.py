@@ -192,7 +192,7 @@ def build(attempts: list[Attempt]) -> Progress:
                     title=attempt.scenario.title,
                     mode=mode,
                     finished_at=as_utc(attempt.finished_at).isoformat(),
-                    score=evaluation.score,
+                    score=evaluation.effective_score,
                     violations=len(evaluation.violations or []),
                     critical=critical_violations(evaluation.violations),
                     teacher_feedback=evaluation.teacher_feedback,
@@ -232,8 +232,8 @@ def build(attempts: list[Attempt]) -> Progress:
             continue
 
         stats.finished += 1
-        stats.scores.append(evaluation.score)
-        scores.append(evaluation.score)
+        stats.scores.append(evaluation.effective_score)
+        scores.append(evaluation.effective_score)
         grammar += len(evaluation.grammar_issues or [])
 
         critical = 0
@@ -251,7 +251,7 @@ def build(attempts: list[Attempt]) -> Progress:
                 title=attempt.scenario.title,
                 mode=mode,
                 finished_at=as_utc(attempt.finished_at).isoformat(),
-                score=evaluation.score,
+                score=evaluation.effective_score,
                 violations=len(evaluation.violations or []),
                 critical=critical,
                 teacher_feedback=evaluation.teacher_feedback,

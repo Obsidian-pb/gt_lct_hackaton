@@ -366,3 +366,56 @@ def test_карточки_поступают_от_простых_к_сложны
     # Порядок задаётся зерном из номеров занятия и обучающегося, поэтому
     # различие воспроизводимо, а не случайно от запуска к запуску.
     assert orders[0] != orders[1]
+
+
+# --- Итоговый балл преподавателя --------------------------------------------------
+
+
+def _feedback(client, attempt_id, **body):
+    return client.post(
+        f"/api/teacher/attempts/{attempt_id}/feedback",
+        json={"text": "Обоснование: ошибка учтена устно на разборе", **body},
+        headers=token(client, "teacher"),
+    )
+
+
+def test_итоговый_балл_меняет_итог_но_не_машинную_оценку(client, graded):
+    response = _feedback(client, graded, final_score=0.9)
+    assert response.status_code == 200, response.text
+    work = response.json()
+    assert work["final_score"] == 0.9 and work["score"] == 0.9
+    assert work["machine_score"] is not None and work["machine_score"] != 0.9
+    assert work["final_score_by"] == "Преподаватель"
+    # Обучающийся видит и машинный, и итоговый.
+    body = client.get(f"/api/attempts/{graded}/evaluation", headers=token(client, "student")).json()
+    assert body["final_score"] == 0.9 and body["score"] == work["machine_score"]
+    # Личный кабинет считает по итоговому.
+    progress = client.get("/api/student/progress", headers=token(client, "student")).json()
+    assert next(w for w in progress["works"] if w["attempt_id"] == graded)["score"] == 0.9
+
+
+def test_примечание_без_балла_не_снимает_итог(client, graded):
+    _feedback(client, graded, final_score=0.8)
+    work = _feedback(client, graded).json()
+    assert work["final_score"] == 0.8
+
+
+def test_итог_снимается_явным_null(client, graded):
+    _feedback(client, graded, final_score=0.8)
+    work = _feedback(client, graded, final_score=None).json()
+    assert work["final_score"] is None and work["score"] == work["machine_score"]
+
+
+def test_итоговый_балл_в_журнале_аудита(client, graded, db_factory):
+    _feedback(client, graded, final_score=0.75)
+    with db_factory() as db:
+        events = db.scalars(
+            select(AuditEvent).where(AuditEvent.action == AuditAction.FINAL_SCORE_SET)
+        ).all()
+    assert len(events) == 1
+    assert events[0].detail["стало"] == 75 and "обоснование" in events[0].detail
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.5])
+def test_итоговый_балл_вне_шкалы_отклоняется(client, graded, value):
+    assert _feedback(client, graded, final_score=value).status_code == 422

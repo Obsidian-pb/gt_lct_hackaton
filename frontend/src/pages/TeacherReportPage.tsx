@@ -46,14 +46,30 @@ export function WorkFeedback({
   onSaved: (work: SessionWork) => void;
 }) {
   const [text, setText] = useState(work.teacher_feedback ?? '');
+  // Итоговый балл — строкой: поле может быть пустым, это «итог = машинный».
+  const initialFinal = work.final_score != null ? String(Math.round(work.final_score * 100)) : '';
+  const [finalText, setFinalText] = useState(initialFinal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const finalValue = finalText.trim() === '' ? null : Number(finalText);
+  const finalInvalid =
+    finalValue !== null && (!Number.isFinite(finalValue) || finalValue < 0 || finalValue > 100);
+  const finalChanged = finalText.trim() !== initialFinal;
 
   async function save() {
     setBusy(true);
     setError(null);
     try {
-      onSaved(await teacherApi.leaveFeedback(work.attempt_id, text.trim()));
+      onSaved(
+        await teacherApi.leaveFeedback(
+          work.attempt_id,
+          text.trim(),
+          // Балл уходит, только если его правили: примечание без правки
+          // итог не трогает.
+          finalChanged ? (finalValue === null ? null : finalValue / 100) : undefined,
+        ),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить примечание');
     } finally {
@@ -74,6 +90,15 @@ export function WorkFeedback({
           ) : (
             <span className={work.score >= 0.7 ? 'chip chip--ok' : 'chip chip--danger'}>
               {Math.round(work.score * 100)} баллов
+            </span>
+          )}
+          {work.final_score != null && work.machine_score != null && (
+            <span
+              className="chip chip--neutral"
+              title={`Итог подтвердил ${work.final_score_by ?? 'преподаватель'}`}
+            >
+              машинный {Math.round(work.machine_score * 100)} → итоговый{' '}
+              {Math.round(work.final_score * 100)}
             </span>
           )}
           {work.critical > 0 && (
@@ -106,9 +131,36 @@ export function WorkFeedback({
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      {work.score !== null && (
+        <div className="field final-score">
+          <label htmlFor={`final-${work.attempt_id}`}>
+            Итоговый балл{' '}
+            <span className="card__meta">
+              · пусто — равен машинному ({Math.round((work.machine_score ?? work.score) * 100)}); при
+              изменении обоснуйте в примечании
+            </span>
+          </label>
+          <input
+            id={`final-${work.attempt_id}`}
+            inputMode="numeric"
+            value={finalText}
+            placeholder="0–100"
+            onChange={(e) => setFinalText(e.target.value)}
+          />
+          {finalInvalid && <span className="card__meta">от 0 до 100</span>}
+        </div>
+      )}
       <div className="actions">
-        <button className="btn btn--ghost" disabled={busy || text.trim().length < 3} onClick={save}>
-          {work.teacher_feedback ? 'Изменить примечание' : 'Оставить примечание'}
+        <button
+          className="btn btn--ghost"
+          disabled={busy || text.trim().length < 3 || finalInvalid}
+          onClick={save}
+        >
+          {finalChanged
+            ? 'Сохранить примечание и итоговый балл'
+            : work.teacher_feedback
+              ? 'Изменить примечание'
+              : 'Оставить примечание'}
         </button>
       </div>
       {error && <div className="alert">{error}</div>}

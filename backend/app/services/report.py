@@ -37,7 +37,7 @@ def attempt_failed(evaluation: Evaluation, pass_score: float) -> bool:
     занятие, а одна карточка с критической ошибкой — это происшествие,
     на которое служба не выехала бы, и именно её стоит вернуть.
     """
-    return evaluation.score < pass_score or critical_violations(evaluation.violations) > 0
+    return evaluation.effective_score < pass_score or critical_violations(evaluation.violations) > 0
 
 
 @dataclass(frozen=True)
@@ -203,8 +203,8 @@ def _repeat_results(
                 attempt_id=repeat.repeat_of_id,
                 repeat_attempt_id=repeat.id,
                 scenario_title=repeat.scenario.title,
-                first_score=first.score if first is not None else None,
-                repeat_score=second.score if second is not None else None,
+                first_score=first.effective_score if first is not None else None,
+                repeat_score=second.effective_score if second is not None else None,
                 fixed=(
                     not attempt_failed(second, session.pass_score)
                     if second is not None
@@ -255,8 +255,8 @@ def build(session: TrainingSession, attempts: list[Attempt]) -> SessionReport:
 
         finished += 1
         result.finished += 1
-        scores.append(evaluation.score)
-        result.scores.append(evaluation.score)
+        scores.append(evaluation.effective_score)
+        result.scores.append(evaluation.effective_score)
         grammar += len(evaluation.grammar_issues or [])
         for item in evaluation.violations or []:
             code = item.get("code")

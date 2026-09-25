@@ -455,7 +455,23 @@ class Evaluation(Base, TimestampMixin):
     teacher_feedback: Mapped[str | None] = mapped_column(Text)
     teacher_feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     teacher_feedback_by_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"))
-    teacher_feedback_by: Mapped[User | None] = relationship()
+    teacher_feedback_by: Mapped[User | None] = relationship(foreign_keys=[teacher_feedback_by_id])
+
+    # Итоговый балл, подтверждённый преподавателем. Пусто — итог равен
+    # машинному. Машинная оценка и нарушения при этом не трогаются: разбор
+    # остаётся тем, что посчитал классификатор, а преподаватель правит только
+    # итог — с обоснованием в примечании и записью в журнале аудита.
+    final_score: Mapped[float | None] = mapped_column(Float)
+    final_score_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    final_score_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("app_user.id", name="fk_evaluation_final_score_by")
+    )
+    final_score_by: Mapped[User | None] = relationship(foreign_keys=[final_score_by_id])
+
+    @property
+    def effective_score(self) -> float:
+        """Балл, по которому считаются средние и зачёт: итоговый, если он есть."""
+        return self.final_score if self.final_score is not None else self.score
 
 
 class GenerationState(StrEnum):

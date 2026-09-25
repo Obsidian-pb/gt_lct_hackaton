@@ -345,10 +345,11 @@ export const teacherApi = {
     }),
   sessionWorks: (sessionId: number) =>
     request<SessionWork[]>(`/api/teacher/sessions/${sessionId}/works`),
-  leaveFeedback: (attemptId: number, text: string) =>
+  // Итоговый балл (0–1): undefined — не менять, null — снять, число — поставить.
+  leaveFeedback: (attemptId: number, text: string, finalScore?: number | null) =>
     request<SessionWork>(`/api/teacher/attempts/${attemptId}/feedback`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(finalScore === undefined ? { text } : { text, final_score: finalScore }),
     }),
   /** Сводка для главной страницы: идущие занятия, работы за неделю, что ждёт внимания. */
   dashboard: () => request<TeacherDashboard>('/api/teacher/dashboard'),

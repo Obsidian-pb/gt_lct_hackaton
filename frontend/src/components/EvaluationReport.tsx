@@ -18,6 +18,12 @@ export function EvaluationReport({ evaluation }: { evaluation: Evaluation }) {
           <span className="score__value">{percent}</span>
           <span className="card__meta">из 100 — {scoreLabel(evaluation.score)}</span>
         </div>
+        {evaluation.final_score != null && (
+          <div className="card__meta">
+            Итоговый балл преподавателя: <b>{Math.round(evaluation.final_score * 100)}</b> — он
+            идёт в зачёт; машинная оценка выше оставлена для разбора.
+          </div>
+        )}
 
         <div className="criteria">
           {Object.entries(evaluation.criteria).map(([name, passed]) => (

@@ -98,4 +98,6 @@ class EvaluationOut(BaseModel):
     # и временем: обучающийся должен видеть, кто и когда его оставил.
     teacher_feedback: str | None = None
     teacher_feedback_at: datetime | None = None
+    # Итоговый балл преподавателя; пусто — итог равен машинному score.
+    final_score: float | None = None
     teacher_feedback_by: str | None = None

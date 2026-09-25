@@ -842,3 +842,16 @@ export interface WorksQuery {
   limit?: number;
   offset?: number;
 }
+
+// --- Итоговый балл преподавателя --------------------------------------------------
+export interface SessionWork {
+  /** Машинный балл классификатора; score — итоговый (подтверждённый или машинный). */
+  machine_score: number | null;
+  final_score: number | null;
+  final_score_by: string | null;
+}
+
+export interface Evaluation {
+  /** Итоговый балл преподавателя; null — итог равен машинному score. */
+  final_score?: number | null;
+}

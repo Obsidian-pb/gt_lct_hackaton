@@ -101,9 +101,14 @@ class GrammarCheckOut(BaseModel):
 
 
 class FeedbackIn(BaseModel):
-    """Примечание преподавателя к конкретной работе обучающегося."""
+    """Примечание преподавателя к конкретной работе обучающегося.
+
+    Вместе с ним — необязательный итоговый балл (0–1). Поле не прислано —
+    итог не меняется; прислано null — итог снимается и снова равен машинному.
+    """
 
     text: str = Field(min_length=3, max_length=2000)
+    final_score: float | None = Field(default=None, ge=0, le=1)
 
 
 class WorkOut(BaseModel):
@@ -114,7 +119,13 @@ class WorkOut(BaseModel):
     student_name: str
     scenario_title: str
     finished_at: datetime | None
+    # Итоговый балл: подтверждённый преподавателем, иначе машинный.
     score: float | None
+    # Машинный балл классификатора и итоговый преподавателя по отдельности —
+    # отчёт показывает оба, если они расходятся.
+    machine_score: float | None = None
+    final_score: float | None = None
+    final_score_by: str | None = None
     violations: int
     critical: int
     teacher_feedback: str | None = None

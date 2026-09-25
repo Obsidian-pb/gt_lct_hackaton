@@ -492,7 +492,12 @@ def _work_out(attempt: Attempt) -> WorkOut:
         student_name=attempt.student.full_name,
         scenario_title=attempt.scenario.title,
         finished_at=attempt.finished_at,
-        score=evaluation.score if evaluation else None,
+        score=evaluation.effective_score if evaluation else None,
+        machine_score=evaluation.score if evaluation else None,
+        final_score=evaluation.final_score if evaluation else None,
+        final_score_by=(
+            evaluation.final_score_by.full_name if evaluation and evaluation.final_score_by else None
+        ),
         violations=len(evaluation.violations or []) if evaluation else 0,
         critical=critical,
         teacher_feedback=evaluation.teacher_feedback if evaluation else None,
@@ -666,6 +671,28 @@ def leave_feedback(
         detail={"обучающийся": attempt.student.full_name, "примечание": payload.text[:200]},
         request=request,
     )
+
+    # Итоговый балл меняется, только если поле прислано: примечание без него
+    # не должно молча снимать поставленный раньше итог.
+    if "final_score" in payload.model_fields_set:
+        before = evaluation.final_score
+        after = round(payload.final_score, 3) if payload.final_score is not None else None
+        if after != before:
+            evaluation.final_score = after
+            evaluation.final_score_at = utcnow() if after is not None else None
+            evaluation.final_score_by = user if after is not None else None
+            audit.record(
+                db, AuditAction.FINAL_SCORE_SET, actor=user, object_type="attempt",
+                object_id=attempt.id,
+                detail={
+                    "обучающийся": attempt.student.full_name,
+                    "машинный": round(evaluation.score * 100),
+                    "было": round(before * 100) if before is not None else None,
+                    "стало": round(after * 100) if after is not None else "машинный",
+                    "обоснование": payload.text[:200],
+                },
+                request=request,
+            )
     db.commit()
     return _work_out(attempt)
 
@@ -1093,7 +1120,7 @@ def dashboard(
         groups_total=count(StudyGroup),
         works_7d=len(finished),
         average_score_7d=(
-            round(sum(a.evaluation.score for a in first) / len(first), 3) if first else None
+            round(sum(a.evaluation.effective_score for a in first) / len(first), 3) if first else None
         ),
         passed_share_7d=round(passed / len(first), 3) if first else None,
         feedback_missing=sum(1 for a in finished if not a.evaluation.teacher_feedback),
@@ -1105,7 +1132,7 @@ def dashboard(
                 scenario_title=a.scenario.title,
                 session_id=a.session_id,
                 session_title=a.session.title,
-                score=a.evaluation.score,
+                score=a.evaluation.effective_score,
                 critical=report_service.critical_violations(a.evaluation.violations),
                 finished_at=a.finished_at,
                 has_feedback=bool(a.evaluation.teacher_feedback),
