@@ -107,6 +107,7 @@ def client(db_factory, monkeypatch):
             yield session
 
     monkeypatch.setattr("app.api.attempts.SessionLocal", db_factory)
+    monkeypatch.setattr("app.services.generation_jobs.SessionLocal", db_factory)
     app.dependency_overrides[get_session] = override_session
     with TestClient(app) as c:
         yield c

@@ -76,4 +76,6 @@ class LLMProvider(Protocol):
         service: str = ...,
         signs: list[str] | None = ...,
         note: str | None = ...,
+        is_profile: bool | None = ...,
+        other_services: list[str] | None = ...,
     ) -> GeneratedScenario: ...

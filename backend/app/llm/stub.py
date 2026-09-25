@@ -38,6 +38,8 @@ class StubProvider:
         service: str = "",
         signs: list[str] | None = None,
         note: str | None = None,
+        is_profile: bool | None = None,
+        other_services: list[str] | None = None,
     ) -> GeneratedScenario:
         return GeneratedScenario(
             incident_description=f"{incident_type} ({group}, сложность: {difficulty})",

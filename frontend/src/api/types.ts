@@ -85,10 +85,19 @@ export interface Scenario {
   teacher_note: string | null;
 }
 
-export interface GenerateResult {
+/** Ход формирования карточек в фоне: страница опрашивает, пока state !== 'running'. */
+export interface GenerationJob {
+  id: number;
+  state: 'running' | 'done' | 'failed';
+  group: string;
+  service_name: string;
   requested: number;
+  finished: number;
   created: number;
-  scenarios: Scenario[];
+  scenario_ids: number[];
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
   warning: string | null;
 }
 

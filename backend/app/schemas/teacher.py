@@ -54,11 +54,21 @@ class ScenarioOut(BaseModel):
     teacher_note: str | None = None
 
 
-class GenerateOut(BaseModel):
+class GenerationJobOut(BaseModel):
+    """Ход формирования карточек: страница опрашивает его, пока не done."""
+
+    id: int
+    state: str
+    group: str
+    service_name: str
     requested: int
+    finished: int
     created: int
-    scenarios: list[ScenarioOut]
-    # Заполняется, если модель сформировала меньше, чем просили.
+    scenario_ids: list[int]
+    error: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+    # Заполняется по завершении, если модель сформировала меньше, чем просили.
     warning: str | None = None
 
 

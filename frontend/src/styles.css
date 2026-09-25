@@ -1646,3 +1646,11 @@ button {
 .draft__flags button.chip:hover:not(:disabled) {
   border-color: var(--accent);
 }
+
+/* Ход формирования карточек: полоса под кнопкой, обновляется опросом. */
+.generation-progress progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin-top: 6px;
+}

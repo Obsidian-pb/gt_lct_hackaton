@@ -1,6 +1,6 @@
 """Кабинет преподавателя: настройка среды, сценарии, отчёт о занятии."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,8 @@ from app.models.training import (
     SessionState,
     TrainingMode,
     TrainingSession,
+    GenerationJob,
+    GenerationState,
 )
 from app.models.user import DispatchService, Role, User
 from app.schemas.teacher import (
@@ -30,7 +32,7 @@ from app.schemas.teacher import (
     CorrectIn,
     FeedbackIn,
     GenerateIn,
-    GenerateOut,
+    GenerationJobOut,
     GrammarCheckOut,
     RepeatResultOut,
     ReportOut,
@@ -48,9 +50,10 @@ from app.services import export as export_service
 from app.services import report as report_service
 from app.services import sessions as session_service
 from app.services.flags import known_keys
+from app.services import generation_jobs
 from app.services.classifier_versions import active_version, current_ekp
 from app.services.ekp import EKP
-from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
+from app.services.generation import DIFFICULTY_LABELS, draft_from_rule
 from app.services.response_status import PRIMARY, ResponseStatus
 
 router = APIRouter(prefix="/api/teacher", tags=["Кабинет преподавателя"])
@@ -108,70 +111,76 @@ def _to_out(scenario: Scenario, ekp: EKP) -> ScenarioOut:
     )
 
 
-def _save_draft(db: Session, draft, service: DispatchService, author: User) -> Scenario:
-    scenario = Scenario(
-        title=draft.incident_type,
-        incident_type=draft.incident_type,
-        ekp_rule_number=draft.ekp_rule_number,
-        address=draft.address,
-        description=draft.description,
-        caller=draft.caller,
-        target_service=service,
-        expected_primary_status=str(draft.expected_primary_status),
-        is_profile=draft.is_profile,
-        required_comment_points=list(draft.required_comment_points),
-        difficulty=draft.difficulty,
-        source=ScenarioSource.GENERATED,
-        author=author,
+def _job_out(job: GenerationJob) -> GenerationJobOut:
+    warning = None
+    if job.state is GenerationState.DONE and job.created < job.requested:
+        warning = (
+            f"Сформировано {job.created} из {job.requested}: модель ответила "
+            "не на все запросы. Повторите формирование, чтобы добрать недостающие."
+        )
+    return GenerationJobOut(
+        id=job.id,
+        state=str(job.state),
+        group=job.group,
+        service_name=job.service.name,
+        requested=job.requested,
+        finished=job.finished,
+        created=job.created,
+        scenario_ids=list(job.scenario_ids or []),
+        error=job.error,
+        started_at=job.created_at,
+        finished_at=job.finished_at,
+        warning=warning,
     )
-    db.add(scenario)
-    return scenario
 
 
-@router.post("/scenarios/generate", response_model=GenerateOut)
-async def generate(
+@router.post(
+    "/scenarios/generate",
+    response_model=GenerationJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generate(
     payload: GenerateIn,
-    request: Request,
+    background: BackgroundTasks,
     db: Session = Depends(get_session),
     user: User = Depends(require_teacher),
-) -> GenerateOut:
+) -> GenerationJobOut:
+    """Запускает формирование карточек в фоне и сразу возвращает задание.
+
+    Модель на процессоре пишет карточку около минуты; держать запрос
+    открытым на пять карточек нельзя. Готовые появляются в списке по одной,
+    ход виден по GET /scenarios/generate/{id}.
+    """
     service = db.get(DispatchService, payload.service_id)
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Служба не найдена")
-
-    ekp = current_ekp(db)
-    drafts = await generate_batch(
-        get_llm_provider(),
+    job = generation_jobs.start(
+        db,
+        teacher=user,
         group=payload.group,
         count=payload.count,
-        service=service.classifier_name,
         difficulty=payload.difficulty,
-        ekp=ekp,
+        service=service,
     )
-    scenarios = [_save_draft(db, d, service, user) for d in drafts]
-    db.flush()
-    audit.record(
-        db,
-        AuditAction.SCENARIO_GENERATED,
-        actor=user,
-        object_type="scenario",
-        detail={"группа": payload.group, "служба": service.name, "создано": len(scenarios)},
-        request=request,
-    )
-    db.commit()
+    background.add_task(generation_jobs.run, job.id)
+    return _job_out(job)
 
-    warning = None
-    if len(scenarios) < payload.count:
-        warning = (
-            f"Сформировано {len(scenarios)} из {payload.count}: модель ответила "
-            "не на все запросы. Повторите генерацию, чтобы добрать недостающие."
-        )
-    return GenerateOut(
-        requested=payload.count,
-        created=len(scenarios),
-        scenarios=[_to_out(s, ekp) for s in scenarios],
-        warning=warning,
-    )
+
+@router.get("/scenarios/generate/active", response_model=list[GenerationJobOut])
+def active_generations(
+    db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> list[GenerationJobOut]:
+    return [_job_out(j) for j in generation_jobs.active_for(db, user)]
+
+
+@router.get("/scenarios/generate/{job_id}", response_model=GenerationJobOut)
+def generation_status(
+    job_id: int, db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> GenerationJobOut:
+    job = db.get(GenerationJob, job_id)
+    if job is None or job.teacher_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задание не найдено")
+    return _job_out(job)
 
 
 @router.get("/scenarios", response_model=list[ScenarioOut])

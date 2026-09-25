@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, teacherApi } from '../api/client';
-import type { Catalog, GrammarCheck, Scenario } from '../api/types';
+import type { Catalog, GenerationJob, GrammarCheck, Scenario } from '../api/types';
 
 /**
  * Признаки опросной карты вызова: то, что заявитель назвал и что оператор
@@ -244,23 +244,60 @@ export function TeacherScenariosPage() {
     reload().catch(() => undefined);
   }, [reload]);
 
+  // Формирование идёт на сервере в фоне: модель на процессоре пишет карточку
+  // около минуты, и держать кнопку нажатой пять минут нельзя. Страница
+  // опрашивает задание, а готовые карточки подтягивает в список по мере
+  // появления — первая видна через минуту, а не когда закончатся все.
+  const [job, setJob] = useState<GenerationJob | null>(null);
+  const seenRef = useRef(0);
+
+  useEffect(() => {
+    api
+      .activeGenerations()
+      .then((jobs) => setJob((current) => current ?? jobs[0] ?? null))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!job || job.state !== 'running') return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await api.generationJob(job.id);
+        if (fresh.created !== seenRef.current) {
+          seenRef.current = fresh.created;
+          await reload();
+        }
+        setJob(fresh);
+        if (fresh.state !== 'running') {
+          setMessage(
+            fresh.state === 'failed'
+              ? `Формирование прервано: ${fresh.error ?? 'ошибка модели'}. Готовые карточки сохранены.`
+              : (fresh.warning ?? `Сформировано карточек: ${fresh.created}. Проверьте и утвердите.`),
+          );
+        }
+      } catch {
+        // Одиночный сбой опроса не повод останавливаться: следующий тик повторит.
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [job, reload]);
+
   async function generate() {
     if (!group || serviceId == null) return;
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await api.generate(group, count, difficulty, serviceId);
-      setMessage(
-        result.warning ?? `Сформировано карточек: ${result.created}. Проверьте и утвердите.`,
-      );
-      await reload();
+      seenRef.current = 0;
+      setJob(await api.generate(group, count, difficulty, serviceId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось сформировать сценарии');
+      setError(e instanceof Error ? e.message : 'Не удалось запустить формирование');
     } finally {
       setBusy(false);
     }
   }
+
+  const generating = job?.state === 'running';
 
   async function act(action: Promise<Scenario>) {
     setBusy(true);
@@ -339,11 +376,23 @@ export function TeacherScenariosPage() {
             ))}
           </select>
         </div>
-        <button className="btn" onClick={generate} disabled={busy}>
-          {busy ? 'Формирование…' : 'Сформировать'}
+        <button className="btn" onClick={generate} disabled={busy || generating}>
+          {generating ? 'Формируется…' : 'Сформировать'}
         </button>
       </div>
 
+      {job && job.state === 'running' && (
+        <div className="pending generation-progress">
+          <div>
+            Формируется: готово {job.created} из {job.requested}
+            {job.finished > job.created && ` (модель отказалась: ${job.finished - job.created})`}
+            {' · '}
+            {job.group}, {job.service_name}. Карточки появляются в списке по мере готовности,
+            страницу можно закрыть — работа продолжится.
+          </div>
+          <progress max={job.requested} value={job.finished} />
+        </div>
+      )}
       {error && <div className="alert">{error}</div>}
       {message && <div className="pending">{message}</div>}
 

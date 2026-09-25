@@ -452,3 +452,51 @@ class Evaluation(Base, TimestampMixin):
     teacher_feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     teacher_feedback_by_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"))
     teacher_feedback_by: Mapped[User | None] = relationship()
+
+
+class GenerationState(StrEnum):
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class GenerationJob(Base, TimestampMixin):
+    """Задание на формирование карточек языковой моделью.
+
+    Модель на процессоре пишет карточку около минуты, а преподаватель просит
+    пять или десять. Держать запрос открытым всё это время нельзя: кнопка
+    «думает» шесть минут, а любой обрыв связи теряет уже готовое. Поэтому
+    формирование идёт в фоне, по одной карточке, и каждая готовая сразу
+    сохраняется черновиком. Задание хранится в базе, а не в памяти процесса:
+    после перезапуска сервера преподаватель должен увидеть, на чём всё
+    остановилось, а не пустой экран.
+    """
+
+    __tablename__ = "generation_job"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    teacher: Mapped[User] = relationship()
+    group: Mapped[str] = mapped_column(String(255))
+    difficulty: Mapped[int] = mapped_column(Integer, default=2)
+    service_id: Mapped[int] = mapped_column(ForeignKey("dispatch_service.id"))
+    service: Mapped[DispatchService] = relationship()
+
+    requested: Mapped[int] = mapped_column(Integer)
+    # Сколько запросов к модели уже завершилось (удачно или нет) и сколько
+    # карточек из них получилось. Разница — отказы модели.
+    finished: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    state: Mapped[GenerationState] = mapped_column(
+        SAEnum(GenerationState, native_enum=False, length=16),
+        default=GenerationState.RUNNING,
+        server_default=GenerationState.RUNNING.name,
+    )
+    # Номера созданных сценариев — чтобы страница подсветила новые карточки.
+    scenario_ids: Mapped[list[int]] = mapped_column(JSON, default=list, server_default="[]")
+    error: Mapped[str | None] = mapped_column(String(500))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def done(self) -> bool:
+        return self.state is not GenerationState.RUNNING

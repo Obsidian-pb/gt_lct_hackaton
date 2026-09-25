@@ -7,7 +7,7 @@ import type {
   Catalog,
   Evaluation,
   FlagsResponse,
-  GenerateResult,
+  GenerationJob,
   OperatorEvaluation,
   Report,
   Scenario,
@@ -113,11 +113,14 @@ export const api = {
     const suffix = query.toString();
     return request<Scenario[]>(`/api/teacher/scenarios${suffix ? `?${suffix}` : ''}`);
   },
+  // Формирование идёт в фоне: ответ — задание, ход которого опрашивается.
   generate: (group: string, count: number, difficulty: number, serviceId: number) =>
-    request<GenerateResult>('/api/teacher/scenarios/generate', {
+    request<GenerationJob>('/api/teacher/scenarios/generate', {
       method: 'POST',
       body: JSON.stringify({ group, count, difficulty, service_id: serviceId }),
     }),
+  generationJob: (id: number) => request<GenerationJob>(`/api/teacher/scenarios/generate/${id}`),
+  activeGenerations: () => request<GenerationJob[]>('/api/teacher/scenarios/generate/active'),
   approveScenario: (id: number) =>
     request<Scenario>(`/api/teacher/scenarios/${id}/approve`, { method: 'POST' }),
   correctScenario: (id: number, note: string) =>
