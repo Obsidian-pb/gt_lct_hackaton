@@ -3,6 +3,66 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, teacherApi } from '../api/client';
 import type { Catalog, GrammarCheck, Scenario } from '../api/types';
 
+/**
+ * Признаки опросной карты вызова: то, что заявитель назвал и что оператор
+ * обязан отметить. Из речи распознаются только явные упоминания, поэтому
+ * преподаватель может поправить их здесь — иначе верно услышанные
+ * пострадавшие засчитались бы обучающемуся как лишний признак.
+ */
+const GLOBAL_FLAGS: Array<{ key: string; title: string }> = [
+  { key: 'пострадавшие', title: 'Пострадавшие' },
+  { key: 'пострадавшие_не_на_месте', title: 'Нет на месте / Отказ от скорой' },
+  { key: 'нет_доступа', title: 'Нет доступа / Заблокированные' },
+];
+
+function ScenarioFlags({ scenario }: { scenario: Scenario }) {
+  const [flags, setFlags] = useState<string[]>(scenario.flags ?? []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(key: string) {
+    const next = flags.includes(key) ? flags.filter((f) => f !== key) : [...flags, key];
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await api.editScenario(scenario.id, { flags: next });
+      setFlags(saved.flags ?? next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить признаки');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const other = flags.filter((f) => !GLOBAL_FLAGS.some((g) => g.key === f));
+  return (
+    <div className="draft__flags">
+      <span className="card__meta">Признаки вызова:</span>
+      {GLOBAL_FLAGS.map((flag) => (
+        <button
+          key={flag.key}
+          type="button"
+          disabled={saving}
+          className={`chip ${flags.includes(flag.key) ? 'chip--ok' : 'chip--neutral'}`}
+          title={flags.includes(flag.key) ? 'Отмечен — нажмите, чтобы снять' : 'Не отмечен — нажмите, чтобы отметить'}
+          onClick={() => toggle(flag.key)}
+        >
+          {flag.title}
+        </button>
+      ))}
+      {other.map((key) => (
+        <span key={key} className="chip chip--ok">
+          {key.replace(/_/g, ' ')}
+        </span>
+      ))}
+      {flags.length === 0 && (
+        <span className="card__meta">не размечены — выбор оператора не оценивается</span>
+      )}
+      {error && <span className="alert">{error}</span>}
+    </div>
+  );
+}
+
 function ScenarioCard({
   scenario,
   onApprove,
@@ -79,6 +139,8 @@ function ScenarioCard({
           Оповещаются по ЕКП: {Object.keys(scenario.notified_services).join(', ')}
         </div>
       )}
+
+      <ScenarioFlags scenario={scenario} />
 
       {scenario.teacher_note && (
         <div className="draft__note">Учтено замечание: {scenario.teacher_note}</div>

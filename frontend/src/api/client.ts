@@ -125,6 +125,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ note }),
     }),
+  // Правка полей сценария руками; сейчас — признаки опросной карты.
+  editScenario: (id: number, body: { flags?: string[] }) =>
+    request<Scenario>(`/api/teacher/scenarios/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   myCalls: () => request<Call[]>('/api/operator/calls/my'),
   call: (id: number) => request<Call>(`/api/operator/calls/${id}`),
   surveyGroups: () => request<string[]>('/api/operator/groups'),

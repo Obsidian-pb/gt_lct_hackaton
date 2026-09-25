@@ -143,17 +143,23 @@ def evaluate(
                 Violation("O1", "Признаки происшествия не выбраны, карточка не классифицирована")
             )
         else:
+            # Признаки сверяются только там, где эталон их знает. У сценария
+            # без признаков это не «признаков нет», а «признаки не размечены»:
+            # наказывать оператора за верно услышанных пострадавших, о которых
+            # эталон молчит, значило бы учить не слушать заявителя.
+            flags_known = bool(expected.flags)
             classification = classify(
                 expected.rule_number,
                 card.group,
                 list(card.path),
                 ekp,
                 expected.flags,
-                chosen_flags=card.flags,
+                chosen_flags=card.flags if flags_known else None,
             )
             result.classification = classification
             _check_classification(classification, result)
-            _check_flags(card, expected, classification, result)
+            if flags_known:
+                _check_flags(card, expected, classification, result)
 
     if not card.address.strip():
         result.violations.append(Violation("O5", "Адрес происшествия не внесён в карточку"))

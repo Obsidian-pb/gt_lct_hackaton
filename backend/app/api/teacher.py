@@ -47,6 +47,7 @@ from app.services import audit
 from app.services import export as export_service
 from app.services import report as report_service
 from app.services import sessions as session_service
+from app.services.flags import known_keys
 from app.services.classifier_versions import active_version, current_ekp
 from app.services.ekp import EKP
 from app.services.generation import DIFFICULTY_LABELS, draft_from_rule, generate_batch
@@ -92,6 +93,7 @@ def _to_out(scenario: Scenario, ekp: EKP) -> ScenarioOut:
         description=scenario.description,
         caller=scenario.caller,
         difficulty=scenario.difficulty,
+        flags=list(scenario.flags or []),
         source=str(scenario.source),
         expected_primary_status=scenario.expected_primary_status,
         expected_outcome=str(scenario.expected_outcome),
@@ -304,6 +306,17 @@ def edit(
             )
         scenario.is_profile = target is ResponseStatus.ACCEPTED
         data["expected_primary_status"] = str(target)
+
+    if "flags" in data:
+        # Ключи признаков — из классификатора: опечатка в признаке молча
+        # выключила бы сверку, а не дала бы ошибку.
+        unknown = sorted(set(data["flags"]) - known_keys(current_ekp(db)))
+        if unknown:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Неизвестные признаки: " + ", ".join(unknown),
+            )
+        data["flags"] = list(dict.fromkeys(data["flags"]))
 
     for key, value in data.items():
         setattr(scenario, key, value)

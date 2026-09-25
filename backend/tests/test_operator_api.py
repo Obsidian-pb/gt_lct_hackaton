@@ -375,3 +375,31 @@ def test_предпросмотр_списка_оповещения_по_выб�
     assert services["СМП"]["notified"] is True
     assert "«пострадавшие»" in services["СМП"]["reason"]
     assert all(s["notified"] for s in marked["services"])
+
+
+def test_без_разметки_признаков_выбор_оператора_не_сверяется(client, db_factory):
+    """Сценарий из билета без признаков: оператор отметил пострадавших — это не ошибка."""
+    attempt_id = make_call(db_factory)  # flags у сценария не заданы
+    response = client.post(
+        f"/api/operator/calls/{attempt_id}/classify",
+        json={
+            "outcome": "classify",
+            "group": "Пожары и задымления",
+            "path": ["на улице", "мусор", "открытое пламя"],
+            "address": "Москва, ул. Кировоградская, д. 24",
+            "description": "Горит контейнер",
+            "flags": ["пострадавшие"],
+        },
+        headers=token(client, "student"),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    classification = body["classification"]
+    assert classification["flags_checked"] is False
+    assert classification["chosen_flags"] == ["пострадавшие"]
+    assert classification["extra_flags"] == [] and classification["missed_flags"] == []
+    assert classification["extra_services"] == []
+    assert not any(v["code"] in ("O14", "O15") for v in body["violations"])
+    # Отметка сохранена и видна в карточке вызова.
+    call = client.get(f"/api/operator/calls/{attempt_id}", headers=token(client, "student")).json()
+    assert call["chosen_flags"] == ["пострадавшие"]

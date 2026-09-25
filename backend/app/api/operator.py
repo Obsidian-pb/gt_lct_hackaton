@@ -140,6 +140,9 @@ class ClassificationOut(BaseModel):
     chosen_flags: list[str] = Field(default_factory=list)
     missed_flags: list[str] = Field(default_factory=list)
     extra_flags: list[str] = Field(default_factory=list)
+    # Ложь — у сценария признаки не размечены, и выбор оператора не сверялся:
+    # интерфейс не должен рисовать зелёные галочки там, где проверки не было.
+    flags_checked: bool = True
     notified_services: dict[str, str]
     # Обоснование по каждой службе: почему она в списке или при каком
     # признаке была бы. Это и есть предмет обучения — список выводится
@@ -490,8 +493,11 @@ def _out(attempt: Attempt, evaluation: Evaluation, assessment) -> OperatorEvalua
             extra_services=list(result.extra_services),
             expected_flags=sorted(flags),
             chosen_flags=list(attempt.chosen_flags or []),
-            missed_flags=sorted(flags - chosen_flags),
-            extra_flags=sorted(chosen_flags - flags),
+            # Без размеченных признаков сверки не было — пропущенных и лишних
+            # нет по определению, а не потому, что оператор всё угадал.
+            missed_flags=sorted(flags - chosen_flags) if flags else [],
+            extra_flags=sorted(chosen_flags - flags) if flags else [],
+            flags_checked=bool(flags),
             # Эталонное правило уже взято из редакции занятия — список
             # оповещения берётся из него же, а не ищется заново.
             notified_services=result.expected_rule.resolve(flags),

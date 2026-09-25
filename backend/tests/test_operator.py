@@ -295,9 +295,10 @@ def test_неотмеченный_признак_без_последствий_�
 
 
 def test_лишний_признак_добавивший_службу_это_нарушение():
+    # У сценария признаки размечены («нет доступа»), иначе сверки не было бы.
     result = evaluate(
-        card(flags=frozenset({"правонарушение"})),
-        with_flags(),
+        card(flags=frozenset({"нет_доступа", "правонарушение"})),
+        with_flags("нет_доступа"),
         DEFAULT_CALL_DEADLINE_SECONDS,
     )
     assert codes(result) == ["O15"]
@@ -529,3 +530,18 @@ def test_округ_и_район_не_спрашиваются():
     )
     result = evaluate(card(address_parts=dict(MOSCOW_ADDRESS)), expected, DEFAULT_CALL_DEADLINE_SECONDS)
     assert result.violations == []
+
+
+def test_без_размеченных_признаков_выбор_оператора_не_оценивается():
+    """Эталон молчит о признаках — значит, они не размечены, а не отсутствуют.
+
+    Оператор верно услышал пострадавших; наказывать его за это, потому что
+    сценарий из билета не размечен, значило бы учить не слушать заявителя.
+    """
+    result = evaluate(
+        card(flags=frozenset({"пострадавшие"})), with_flags(), DEFAULT_CALL_DEADLINE_SECONDS
+    )
+    assert result.violations == []
+    assert result.classification is not None
+    assert result.classification.extra_services == ()
+    assert result.classification.score == 1.0

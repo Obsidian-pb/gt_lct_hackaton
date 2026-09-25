@@ -48,6 +48,7 @@ class ScenarioOut(BaseModel):
     service_name: str
     # Список оповещения по ЕКП — показывает, на чём основан эталон.
     notified_services: dict[str, str] = Field(default_factory=dict)
+    flags: list[str] = Field(default_factory=list)
     approved: bool
     approved_at: datetime | None = None
     teacher_note: str | None = None
@@ -73,6 +74,10 @@ class ScenarioEditIn(BaseModel):
     expected_primary_status: str | None = None
     required_comment_points: list[str] | None = None
     difficulty: int | None = Field(default=None, ge=1, le=3)
+    # Признаки опросной карты вызова: то, что заявитель назвал и что оператор
+    # обязан отметить. Правятся руками, когда автоматический разбор речи
+    # промолчал или ошибся.
+    flags: list[str] | None = None
 
 
 class GrammarCheckOut(BaseModel):

@@ -819,9 +819,22 @@ function FlagsReview({
   const chosen = classification.chosen_flags ?? [];
   const missed = new Set(classification.missed_flags ?? []);
   const extra = classification.extra_flags ?? [];
-  if (expected.length === 0 && chosen.length === 0 && extra.length === 0) return null;
-
   const name = (key: string) => titles[key] ?? key;
+
+  // У сценария признаки не размечены — сверки не было. Сказать об этом
+  // прямо честнее, чем рисовать зелёные галочки за отсутствие проверки.
+  if (classification.flags_checked === false) {
+    return (
+      <div style={{ marginTop: 10 }}>
+        <b>Признаки опросной карты:</b>{' '}
+        <span className="card__meta">
+          в этом вызове не размечены, выбор оператора не оценивался
+          {chosen.length > 0 && ` (отмечено: ${chosen.map(name).join(', ')})`}
+        </span>
+      </div>
+    );
+  }
+  if (expected.length === 0 && chosen.length === 0 && extra.length === 0) return null;
   const correct = chosen.filter((key) => expected.includes(key));
 
   return (

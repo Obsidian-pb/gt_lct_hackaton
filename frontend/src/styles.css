@@ -1628,3 +1628,21 @@ button {
     padding-top: 0;
   }
 }
+
+/* Признаки вызова в карточке сценария: кнопки-чипы в одну строку. */
+.draft__flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.draft__flags button.chip {
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.draft__flags button.chip:hover:not(:disabled) {
+  border-color: var(--accent);
+}
