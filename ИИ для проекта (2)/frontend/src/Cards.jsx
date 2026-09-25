@@ -6,7 +6,7 @@ import {Cascade,Flags,ServiceDialog} from './Classification.jsx';
 function Generator({store,snapshot,onStart}){
  const {state,meta,generating,reviewing}=snapshot,b=state.batch;
  const [topic,setTopic]=useState(b?.topic||''),[category,setCategory]=useState(b?.category||'1'),[count,setCount]=useState(b?.total||1);
- const [selection,setSelection]=useState(b?.classification||{}),[flags,setFlags]=useState(b?.flags||{}),[location,setLocation]=useState(b?.location||'Учебный город');
+ const [selection,setSelection]=useState(b?.classification||{}),[flags,setFlags]=useState(b?.flags||{}),[location,setLocation]=useState(b?.location||'Железногорск, Красноярский край');
  const changeGroup=k=>{setCategory(k);setSelection({});setFlags({});};
 
  const entries=meta.catalog.filter(x=>(category==='mixed'||x.category===category)&&Object.entries(selection).every(([k,v])=>!v||x[k]===v));

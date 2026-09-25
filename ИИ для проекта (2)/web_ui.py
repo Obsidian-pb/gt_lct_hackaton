@@ -1,5 +1,6 @@
 """Local single-user browser client for the independent training engine."""
 import argparse
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ import secrets
 import socket
 import threading
 import urllib.request
+from urllib.parse import urlsplit
 import webbrowser
 from datetime import datetime
 
@@ -17,19 +19,27 @@ import card_factory
 import card_reference
 import card_caller
 import teacher_portal
+import incident_training
+from ui_release import release_id, validate_ui, compatible_server
 
 ROOT = Path(__file__).resolve().parent
+# Capture once: changing files must not make an old process claim to run new code.
+UI_REVISION = release_id()
 
 
-def student_portal_view(engine, identifier):
+def student_portal_view(engine, identifier, full_form=False):
     view = engine.student_view(identifier)
     session = engine.load(identifier)
     view['training'] = session.get('training')
+    if incident_training.is_full(session['task']):
+        view.update(incident_training.public_metadata(session))
     view['reference'] = ({key: row['expected'] for key, row in session['task']['fields'].items()}
                          if session['status'] == 'reviewed' else None)
     view['duration_seconds'] = (max(0, int((datetime.fromisoformat(session['submitted_at']) -
                                            datetime.fromisoformat(session['created_at'])).total_seconds()))
                                 if session.get('submitted_at') else None)
+    if full_form and not incident_training.is_full(session['task']):
+        return incident_training.legacy_projection(session, view)
     return view
 
 
@@ -54,8 +64,8 @@ def dispatch(engine, action, p):
         task_id = p.get('task_id')
         for s in engine.list_items('s'):
             if s['student'] == student and s['task']['id'] == task_id and s['status'] == 'active':
-                return student_portal_view(engine, s['id'])
-        return student_portal_view(engine, engine.start(task_id, student)['id'])
+                return student_portal_view(engine, s['id'], p.get('full_form', False))
+        return student_portal_view(engine, engine.start(task_id, student)['id'], p.get('full_form', False))
     if action == 'student_action':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
         if engine.load(p.get('id'))['student'] != student:
@@ -64,7 +74,7 @@ def dispatch(engine, action, p):
         if operation not in ('student', 'ask', 'hint', 'save_card', 'submit', 'connect', 'channel'):
             raise ValueError('Действие недоступно в панели обучающегося.')
         dispatch(engine, operation, p)
-        return student_portal_view(engine, p['id'])
+        return student_portal_view(engine, p['id'], p.get('full_form', False))
     if action == 'teacher_overview':
         return {
             'sessions': [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'],
@@ -75,6 +85,8 @@ def dispatch(engine, action, p):
             'tasks': [{key: t.get(key) for key in ('id', 'title', 'status', 'workflow', 'level')}
                       for t in engine.list_items('t')],
         }
+    if action == 'card_publish':
+        return incident_training.publish(engine, p)
     if action == 'card_meta':
         return card_factory.metadata()
     if action == 'card_generate':
@@ -84,7 +96,10 @@ def dispatch(engine, action, p):
     if action == 'card_caller':
         return card_caller.ask(engine.provider, p)
     if action == 'card_approve':
-        return card_factory.approve(p)
+        result = card_factory.approve(p)
+        if p.get('publish_training'):
+            result.update(incident_training.publish(engine, p))
+        return result
     if action == 'card_validate':
         return card_factory.validate_content(p.get('content'))
     if action == 'home':
@@ -127,6 +142,12 @@ def dispatch(engine, action, p):
     if action in ('save_card', 'submit'):
         s = engine._active(p['id'])
         card = p['card']
+        if incident_training.is_full(s['task']):
+            incident_training.save_card(engine, s, card, action == 'submit')
+            return student_portal_view(engine, p['id'], p.get('full_form', False))
+        if p.get('full_form'):
+            incident_training.save_legacy_card(engine, s, card, action == 'submit')
+            return student_portal_view(engine, p['id'], True)
         if not isinstance(card, dict) or set(card) != set(FIELDS) or any(not isinstance(v, str) or len(v) > 2000 for v in card.values()):
             raise ValueError('Проверьте поля карточки: не более 2000 символов в каждом.')
         # Validate the entire card before changing any fields.
@@ -185,11 +206,23 @@ def make_server(engine, port=8878):
         def do_GET(self):
             if not self.local_host():
                 self.respond(403, {'error': 'Доступ только через 127.0.0.1.'}); return
-            if self.path == '/health':
-                self.respond(200, {'app': 'ai-project-ui', 'root': str(ROOT)}); return
+            path = urlsplit(self.path).path
+            if path == '/health':
+                self.respond(200, {'app': 'ai-project-ui', 'root': str(ROOT),
+                                   'revision': UI_REVISION, 'pid': os.getpid(),
+                                   'pages': ['/', '/teacher', '/student', '/cards', '/training']}); return
+            if path in ('/student/', '/teacher/', '/cards/', '/training/'):
+                self.send_response(302)
+                self.send_header('Location', path.rstrip('/'))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                return
             names = {'/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
                      '/student': ('react.html', 'text/html'), '/student.css': ('student.css', 'text/css'),
                      '/theme.css': ('theme.css', 'text/css'),
+                     '/address.css': ('address.css', 'text/css'),
+                     '/geo/addresses.json': ('geo/addresses.json', 'application/json'),
+                     '/geo/map.json': ('geo/map.json', 'application/json'),
                      '/workspace.css': ('workspace.css', 'text/css'),
                      '/react/app.js': ('react/app.js', 'text/javascript'),
                      '/welcome.css': ('welcome.css', 'text/css'),
@@ -201,14 +234,14 @@ def make_server(engine, port=8878):
                      '/training': ('index.html', 'text/html'), '/cards.js': ('cards.js', 'text/javascript'),
                      '/making.css': ('making.css', 'text/css'), '/cards.css': ('cards.css', 'text/css'), '/app.js': ('app.js', 'text/javascript'),
                      '/app.css': ('app.css', 'text/css'), '/workflows.js': ('workflows.js', 'text/javascript')}
-            if self.path not in names:
+            if path not in names:
                 self.respond(404, {'error': 'Не найдено'}); return
-            name, mime = names[self.path]
+            name, mime = names[path]
             body = (ROOT / 'ui' / name).read_text(encoding='utf-8').replace('__TOKEN__', token)
             if name == 'react.html':
-                styles = ['/welcome.css'] if self.path == '/' else (['/student.css'] if self.path == '/student' else (['/cards.css', '/teacher.css', '/making.css'] if self.path == '/cards' else ['/teacher.css']))
-                body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in ['/theme.css', *styles, *(['/workspace.css'] if self.path == '/teacher' else [])]))
-                body = body.replace('__BODY_CLASS__', '' if self.path == '/' else ('student-app' if self.path == '/student' else ('teacher-app cards-page' if self.path == '/cards' else 'teacher-app')))
+                styles = ['/welcome.css'] if path == '/' else (['/student.css'] if path == '/student' else (['/cards.css', '/teacher.css', '/making.css'] if path == '/cards' else ['/teacher.css']))
+                body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in ['/theme.css', '/address.css', *styles, *(['/workspace.css'] if path == '/teacher' else [])]))
+                body = body.replace('__BODY_CLASS__', '' if path == '/' else ('student-app' if path == '/student' else ('teacher-app cards-page' if path == '/cards' else 'teacher-app')))
             self.respond(200, body.encode(), mime + '; charset=utf-8')
 
         def do_POST(self):
@@ -243,6 +276,7 @@ def main():
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir')
     args = parser.parse_args()
+    validate_ui()
     engine = Engine(GigaChat(), args.data_dir)
     try:
         server = make_server(engine, args.port)
@@ -251,11 +285,15 @@ def main():
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health', timeout=2) as r:
                     status = json.load(r)
-                if status == {'app': 'ai-project-ui', 'root': str(ROOT)}:
+                if compatible_server(status, ROOT, UI_REVISION):
                     webbrowser.open(f'http://127.0.0.1:{args.port}'); return
             except Exception:
                 pass
-        server = make_server(engine, 0)
+        raise RuntimeError(
+            f'Порт {args.port} уже занят. Возможно, после обновления остался старый сервер.\n'
+            'Закончите текущую работу и запустите RESTART.cmd из этой же папки.\n'
+            'Если программа запущена из другой папки, сначала закройте ту копию.\n'
+            f'Текущая папка: {ROOT}\nДиагностика: http://127.0.0.1:{args.port}/health') from None
     url = f'http://127.0.0.1:{server.server_port}'
     if not args.no_browser:
         threading.Timer(.4, lambda: webbrowser.open(url)).start()
@@ -272,4 +310,10 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         (ROOT / 'ui-error.log').write_text(str(exc), encoding='utf-8')
+        if os.name == 'nt':
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(None, str(exc), '112 — не удалось запустить интерфейс', 0x10)
+            except Exception:
+                pass
         raise

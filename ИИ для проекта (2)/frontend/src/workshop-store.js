@@ -1,3 +1,4 @@
+import {ADDRESS_KEYS,LOCATION_KEYS,addressFields} from './address-search.js';
 import {api} from './api.js';
 import {syncServices,chooseService} from './service-routing.js';
 import {referenceCurrent} from './reference-state.js';
@@ -23,6 +24,7 @@ export function createWorkshopStore(){
    if(state.batch){const b=state.batch;if(!Number.isInteger(b.total)||b.total<1||b.total>100||!Number.isInteger(b.done)||b.done<0||b.done>b.total||!(b.category in meta.categories)&&!['fire','road','medical','gas'].includes(b.category))state.batch=null;else {b.category=({fire:'1',road:'2',medical:'22',gas:'13'})[b.category]||b.category;if(b.status==='running')b.status='paused';}}
   }}catch{storageOK=false;warning='Не удалось прочитать сохранённую подборку. Она не перезаписана. Новые карточки можно скачать в JSON; автосохранение отключено.';}
   if(storageOK){const before=JSON.stringify(state.cards);state.cards.forEach(card=>{if(ensureCallerId(card)){const at=new Date().toISOString();card.updated_at=at;card.revision++;card.reference_checked=false;card.history.push({at,action:'caller_id_simulated',text:'Добавлен условный номер входящего звонка (АОН)'});}syncServices(meta,card);});if(before!==JSON.stringify(state.cards))persist();}
+  if(storageOK){for(const card of state.cards.filter(c=>c.status==='approved'&&!c.training_task_id&&c.caller_scenario&&c.reference)){try{const published=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:card.training_level||'medium',opening:card.training_opening||undefined});card.training_task_id=published.task_id;}catch{warning='Некоторые ранее утверждённые карточки не добавлены в тренировки. Откройте карточку и нажмите «Добавить в тренировки обучающегося».';}}persist();}
   ready=true;emit();
  }catch(e){notify(e.message,true);}}
  async function buildReference(card){
@@ -41,15 +43,16 @@ export function createWorkshopStore(){
  }
  async function review(action){const card=selected();if(!card||reviewing||generating||card.status!=='draft')return;reviewing=true;emit();try{
   if(action==='validate'){await api('card_validate',{content:card.content});notify('Формат полей корректен. Смысл и полноту сведений проверяет преподаватель.');}
-  else{const result=await api('card_approve',{content:card.content,caller_scenario:card.caller_scenario,reference:card.reference,reference_checked:card.reference_checked===true,teacher:state.teacher,note:card.review_note||''});card.content=result.content;card.reference=result.reference;card.review=result.review;card.status='approved';card.updated_at=result.review.at;card.history.push({at:result.review.at,action:'approved',text:`Утверждено: ${result.review.teacher}`,review:structuredClone(result.review),content:structuredClone(card.content),reference:structuredClone(card.reference)});persist();notify('Карточка и эталон утверждены.');}
+  else{const result=await api('card_approve',{content:card.content,caller_scenario:card.caller_scenario,reference:card.reference,reference_checked:card.reference_checked===true,teacher:state.teacher,note:card.review_note||'',publish_training:true,level:card.training_level||'medium',opening:card.training_opening||undefined});card.training_task_id=result.task_id;card.content=result.content;card.reference=result.reference;card.review=result.review;card.status='approved';card.updated_at=result.review.at;card.history.push({at:result.review.at,action:'approved',text:`Утверждено: ${result.review.teacher}`,review:structuredClone(result.review),content:structuredClone(card.content),reference:structuredClone(card.reference)});persist();notify('Карточка и эталон утверждены.');}
  }catch(e){notify(e.message,true);}finally{reviewing=false;emit();}}
  function edit(kind,key,value){const card=selected();if(!card||card.status==='approved'||reviewing)return;
   if(kind==='reference_checked'){card.reference_checked=value&&referenceCurrent(card);persist();emit();return;}
   if(kind==='teacher'){state.teacher=value;persist();emit();return;}
   if(kind==='note'){card.review_note=value;persist();emit();return;}
+  if(kind==='training'){card[key]=value;touch(card);return;}
   const c=card.content;
   if(kind==='flag'){c.flags={...(c.flags||{}),[key]:value};}
-  else if(kind==='field'){if(key==='phone_aon'||key==='phone_callback'&&card.caller_scenario&&!card.caller_dialogue?.callback_disclosed)return;c.fields[key]=value;}
+  else if(kind==='field'){if(key==='phone_aon'||key==='phone_callback'&&card.caller_scenario&&!card.caller_dialogue?.callback_disclosed)return;if(LOCATION_KEYS.includes(key)&&c.fields[key]!==value){c.fields.latitude='';c.fields.longitude='';card.geocoding=null;}if(['latitude','longitude'].includes(key))card.geocoding=null;c.fields[key]=value;}
   else if(kind==='content'){c[key]=value;if(key==='report'&&card.caller_scenario)card.caller_dialogue={turns:[],callback_disclosed:false};}
   else if(kind==='class_ids'){c.class_ids=value?Array.from(new Set([...c.class_ids,key])):c.class_ids.filter(x=>x!==key);}
   else if(kind==='services'){chooseService(meta,card,key,value);}
@@ -72,6 +75,9 @@ export function createWorkshopStore(){
  emit();return {
   subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getSnapshot:()=>snapshot,
   init,edit,review,notify,generateReference,askCaller,
+  async publishTraining(){const card=selected();if(!card||card.status!=='approved'||reviewing)return;reviewing=true;emit();try{const result=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:card.training_level||'medium',opening:card.training_opening||undefined});card.training_task_id=result.task_id;persist();notify('Карточка доступна обучающемуся в списке тренировок.');}catch(e){notify(e.message,true);}finally{reviewing=false;emit();}},
+  selectAddress(record){const card=selected();if(!card||card.status==='approved'||reviewing)return;Object.assign(card.content.fields,Object.fromEntries(ADDRESS_KEYS.map(k=>[k,''])),addressFields(record));card.geocoding={source:'OpenStreetMap',id:record.id,kind:record.kind,point:record.point,selected_at:new Date().toISOString()};card.history.push({at:new Date().toISOString(),action:'address_selected',text:'Выбран адрес OSM: '+record.street+' '+record.house});touch(card);},
+  clearAddress(){const card=selected();if(!card||card.status==='approved'||reviewing)return;Object.assign(card.content.fields,Object.fromEntries([...ADDRESS_KEYS,'latitude','longitude'].map(k=>[k,''])));card.geocoding=null;touch(card);},
   prepareCaller(){const card=selected();if(!card||card.status==='approved'||reviewing||generating||card.caller_scenario)return;prepareCaller(card);touch(card);notify('Разговор подготовлен. Обновите эталон: в нём появится телефон заявителя.');},
   resetCaller(){const card=selected();if(!card||reviewing||generating)return;card.caller_dialogue={turns:[],callback_disclosed:false};persist();emit();},
   replaceClass(previous,next){const card=selected();if(!card||card.status==='approved'||reviewing||!meta.catalog.some(x=>x.id===next))return;card.content.class_ids=[...new Set(card.content.class_ids.map(id=>id===previous?next:id).concat(previous?[]:[next]))];syncServices(meta,card);touch(card);},

@@ -36,7 +36,7 @@ try{
  await page.screenshot({path:'test-output/student-card.png',fullPage:true});
  await page.locator('#student-submit').click();await page.locator('#student-download-report').waitFor();
  await page.getByText('Работа передана преподавателю',{exact:true}).waitFor();
- assert.equal(await page.locator('.student-compare').getByText('Доступен после проверки',{exact:true}).count(),7);
+ assert.equal(await page.locator('.student-compare').getByText('Доступен после проверки',{exact:true}).count(),39);
  const overview=await call('student_overview',{student:'Обучающийся'}),sid=overview.sessions[0].id;
  await call('assess',{id:sid});
  const review=await call('review',{id:sid});

@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timezone
 from ai_core import FIELDS, VERDICTS, require_text, now
 from dds import ACTION_LABELS
+from incident_training import LABELS as INCIDENT_LABELS
 
 
 def session(engine, identifier):
@@ -23,14 +24,14 @@ def overview(engine):
             'task_id': s['task']['id'], 'status': s['status'], 'level': s['task']['level'],
             'workflow': s['task'].get('workflow', 'caller'), 'created_at': s['created_at'],
             'updated_at': s.get('updated_at'), 'duration_seconds': seconds,
-            'filled': sum(bool(v.strip()) for v in s['card'].values()), 'total_fields': len(FIELDS),
+            'filled': sum(bool(v.strip()) for v in s['card'].values()), 'total_fields': len(s['card']),
             'grade': (s.get('teacher_decision') or {}).get('grade'),
             'ai_remarks': (sum(r['verdict'] in ('partial', 'incorrect', 'missing')
                                for r in assessment['fields'].values()) if assessment else None),
             'training': s.get('training'), 'comment': s.get('teacher_note', ''),
         })
-    return {'sessions': rows, 'fields': FIELDS, 'labels': FIELDS | ACTION_LABELS, 'verdicts': VERDICTS,
-            'tasks': [{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow')}
+    return {'sessions': rows, 'fields': FIELDS, 'labels': INCIDENT_LABELS | FIELDS | ACTION_LABELS, 'verdicts': VERDICTS,
+            'tasks': [{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format')}
                       for t in engine.list_items('t')]}
 
 
