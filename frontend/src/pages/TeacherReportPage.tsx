@@ -34,8 +34,11 @@ function ViolationBar({ code, count, total }: { code: string; count: number; tot
   );
 }
 
-/** Одна работа с полем для примечания преподавателя. */
-function WorkFeedback({
+/**
+ * Одна работа с полем для примечания преподавателя. Экспортируется:
+ * сквозной список работ показывает ту же форму, а не свою копию.
+ */
+export function WorkFeedback({
   work,
   onSaved,
 }: {

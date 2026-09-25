@@ -1759,3 +1759,54 @@ button {
   margin-left: 10px;
   white-space: nowrap;
 }
+
+/* --- Работы: сквозной список по всем занятиям --------------------------- */
+
+.works-filters .field--date {
+  flex: 0 0 150px;
+}
+
+.works-filters .field--search {
+  flex: 2 1 260px;
+}
+
+.works-count {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.works-table td {
+  white-space: nowrap;
+}
+
+.works-table td.works-cell--wrap {
+  white-space: normal;
+}
+
+.works-table tr.works-row--open {
+  background: var(--accent-soft);
+}
+
+/* Строка разбора: не строка таблицы, а вкладка под ней. */
+.works-table tr.works-details:hover {
+  background: transparent;
+  cursor: default;
+}
+
+.works-table tr.works-details > td {
+  padding: 14px 18px 18px;
+  background: var(--bg);
+  white-space: normal;
+}
+
+.works-critical {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.works-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}

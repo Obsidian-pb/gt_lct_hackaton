@@ -349,6 +349,16 @@ export const teacherApi = {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
+  /** Сквозной список завершённых работ по всем занятиям с фильтрами. */
+  works: (params: WorksQuery) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    }
+    const suffix = query.toString();
+    return request<WorksPage>(`/api/teacher/works${suffix ? `?${suffix}` : ''}`);
+  },
+  worksFilters: () => request<WorksFilters>('/api/teacher/works/filters'),
 };
 
 // --- Учебные группы ---------------------------------------------------------
@@ -534,3 +544,8 @@ export const repeatApi = {
       body: JSON.stringify(body),
     }),
 };
+
+// --- Работы: сквозной список по всем занятиям --------------------------------
+// Типы для teacherApi.works: импорт внизу, потому что файл правится только
+// дописыванием в конец, а импорты в модуле поднимаются вне зависимости от места.
+import type { WorksFilters, WorksPage, WorksQuery } from './types';
