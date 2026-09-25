@@ -159,7 +159,7 @@ for f in runtime/python/python.exe runtime/python/Lib/site-packages/uvicorn/__in
          runtime/python/Lib/site-packages/psycopg_binary/__init__.py \
          runtime/pgsql/bin/initdb.exe runtime/pgsql/bin/pg_ctl.exe runtime/pgsql/bin/postgres.exe \
          runtime/pgsql/share/postgres.bki runtime/llama/llama-server.exe runtime/llama/msvcp140.dll \
-         app/backend/app/main.py app/backend/data/ekp.json app/web/index.html app/web/audio/ticket-1-1.mp3 \
+         app/backend/app/main.py app/backend/data/ekp.json app/web/index.html app/web/audio/ticket-1-1-v1.mp3 app/web/audio/ticket-32-3-v3.mp3 \
          "models/$MODEL_FILE" start.cmd stop.cmd; do
   [ -e "$KIT/$f" ] || { echo "в комплекте нет $f" >&2; exit 1; }
 done
