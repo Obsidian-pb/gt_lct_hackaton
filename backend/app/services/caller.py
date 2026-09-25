@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta, timezone
 
 from app.llm.base import CallerReply, LLMProvider
 from app.models.base import utcnow
@@ -17,6 +18,7 @@ from app.models.training import Attempt, CallerRole, Scenario
 # Восемь вопросов — с запасом: в настоящем разговоре оператор уточняет три-пять
 # вещей, а бесконечный диалог превращает тренажёр в чат.
 MAX_TURNS = 8
+MOSCOW = timezone(timedelta(hours=3))
 
 ROLE_TEXT = {
     CallerRole.PARTICIPANT: "ты участник происшествия, оно случилось с тобой",
@@ -43,7 +45,13 @@ class Turn:
 
 def facts_for(scenario: Scenario) -> str:
     """Что заявитель знает. Только сценарий — ни типа по классификатору, ни служб."""
-    lines = [f"- Что случилось: {scenario.description.strip()}"]
+    now = utcnow().astimezone(MOSCOW)
+    lines = [
+        # Дата и время — из часов сервера, а не из головы модели: у неё
+        # «сегодня» — день, на котором закончили её обучение.
+        f"- Сейчас: {now.strftime('%d.%m.%Y, %H:%M')} по московскому времени",
+        f"- Что случилось: {scenario.description.strip()}",
+    ]
     if scenario.address:
         lines.append(f"- Где: {scenario.address.strip()}")
     if scenario.caller:
