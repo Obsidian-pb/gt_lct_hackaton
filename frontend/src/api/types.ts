@@ -758,3 +758,51 @@ export interface AskResult {
 export interface Call {
   dialogue: CallerTurn[];
 }
+
+// --- Стартовые сводки: главная преподавателя и администратора ---------------
+// Файл общий и правится только дописыванием в конец.
+
+/** Идущее занятие одной строкой на главной преподавателя. */
+export interface DashboardSession {
+  id: number;
+  title: string;
+  mode: string;
+  students: number;
+  issued: number;
+  finished: number;
+}
+
+/** Недавно завершённая работа — строка ленты на главной преподавателя. */
+export interface DashboardWork {
+  attempt_id: number;
+  student_name: string;
+  scenario_title: string;
+  session_id: number;
+  session_title: string;
+  score: number;
+  critical: number;
+  finished_at: string;
+  has_feedback: boolean;
+}
+
+export interface TeacherDashboard {
+  active_sessions: number;
+  students_total: number;
+  scenarios_pending: number;
+  groups_total: number;
+  works_7d: number;
+  /** null — завершённых работ за неделю нет, среднего не по чему считать. */
+  average_score_7d: number | null;
+  passed_share_7d: number | null;
+  feedback_missing: number;
+  sessions: DashboardSession[];
+  recent_works: DashboardWork[];
+}
+
+/** Сводка администратора: счётчики, состояние, хвост аудита, сбои за сутки. */
+export interface AdminDashboard {
+  system: SystemState;
+  health: SystemHealth;
+  audit: AuditEvent[];
+  errors: ErrorGroup[];
+}

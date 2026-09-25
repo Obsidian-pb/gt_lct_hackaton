@@ -1,7 +1,9 @@
 """Кабинет преподавателя: настройка среды, сценарии, отчёт о занятии."""
 
+from datetime import timedelta
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_teacher
@@ -30,6 +32,9 @@ from app.schemas.teacher import (
     MonitorOut,
     ProgressOut,
     CorrectIn,
+    DashboardOut,
+    DashboardSessionOut,
+    DashboardWorkOut,
     FeedbackIn,
     GenerateIn,
     GenerationJobOut,
@@ -880,6 +885,7 @@ def monitor(
     session = _load_session(session_id, db)
     attempts = list(db.scalars(select(Attempt).where(Attempt.session_id == session_id)).all())
     rows = session_service.progress(session, attempts)
+    issued, finished = _progress_totals(rows)
     return MonitorOut(
         session_id=session.id,
         state=str(session.state),
@@ -887,7 +893,112 @@ def monitor(
         call_interval_seconds=session.call_interval_seconds,
         pickup_deadline_seconds=session.pickup_deadline_seconds,
         total_planned=len(attempts),
-        issued=sum(r.issued for r in rows),
-        finished=sum(r.finished for r in rows),
+        issued=issued,
+        finished=finished,
         students=[ProgressOut(**vars(r)) for r in rows],
+    )
+
+
+def _progress_totals(rows: list[session_service.StudentProgress]) -> tuple[int, int]:
+    """Поступило и обработано по занятию в целом — сумма по обучающимся.
+
+    Общая для монитора и главной страницы: цифра «поступило» на сводке
+    обязана совпадать с той, что преподаватель увидит, открыв занятие.
+    """
+    return sum(r.issued for r in rows), sum(r.finished for r in rows)
+
+
+# Горизонт сводки на главной. Неделя — обычный цикл занятий группы: за неё
+# видно, как прошла последняя серия, и не тонут занятия прошлого месяца.
+DASHBOARD_DAYS = 7
+DASHBOARD_SESSIONS = 5
+DASHBOARD_WORKS = 8
+
+
+@router.get("/dashboard", response_model=DashboardOut)
+def dashboard(
+    db: Session = Depends(get_session), user: User = Depends(require_teacher)
+) -> DashboardOut:
+    """Сводка для главной страницы преподавателя.
+
+    Отвечает на два вопроса при входе: что идёт прямо сейчас и что ждёт
+    его действий — сценарии без утверждения и работы без примечания.
+    Только чтение: сводка ничего не меняет и ничего не запускает.
+    """
+
+    def count(model, *where) -> int:
+        return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
+
+    since = utcnow() - timedelta(days=DASHBOARD_DAYS)
+    # Работа завершена, когда по ней есть оценка: карточку, закрытую
+    # по окончании занятия без действий обучающегося, finish тоже оценивает,
+    # и она здесь считается — до неё обучающийся не добрался, это результат.
+    completed = (
+        select(Attempt)
+        .join(Evaluation, Evaluation.attempt_id == Attempt.id)
+        .where(Attempt.finished_at.is_not(None))
+        .order_by(Attempt.finished_at.desc(), Attempt.id.desc())
+    )
+    finished = db.scalars(completed.where(Attempt.finished_at >= since)).all()
+    # Лента последних работ — без горизонта: после перерыва в занятиях
+    # преподаватель всё равно должен видеть, на чём остановился.
+    recent = db.scalars(completed.limit(DASHBOARD_WORKS)).all()
+    # Средний балл и доля зачтённых — по первым попыткам, как в отчёте
+    # занятия: повтор в средний балл первого прохода не входит.
+    first = [a for a in finished if a.repeat_of_id is None]
+    passed = sum(
+        1
+        for a in first
+        if not report_service.attempt_failed(a.evaluation, a.session.pass_score)
+    )
+
+    active = db.scalars(
+        select(TrainingSession)
+        .where(TrainingSession.state == SessionState.ACTIVE)
+        .order_by(TrainingSession.started_at.desc(), TrainingSession.id.desc())
+        .limit(DASHBOARD_SESSIONS)
+    ).all()
+    sessions: list[DashboardSessionOut] = []
+    for session in active:
+        attempts = list(
+            db.scalars(select(Attempt).where(Attempt.session_id == session.id)).all()
+        )
+        issued, done = _progress_totals(session_service.progress(session, attempts))
+        sessions.append(
+            DashboardSessionOut(
+                id=session.id,
+                title=session.title,
+                mode=str(session.mode),
+                students=len(session.students),
+                issued=issued,
+                finished=done,
+            )
+        )
+
+    return DashboardOut(
+        active_sessions=count(TrainingSession, TrainingSession.state == SessionState.ACTIVE),
+        students_total=count(User, User.role == Role.STUDENT, User.is_active.is_(True)),
+        scenarios_pending=count(Scenario, Scenario.approved_at.is_(None)),
+        groups_total=count(StudyGroup),
+        works_7d=len(finished),
+        average_score_7d=(
+            round(sum(a.evaluation.score for a in first) / len(first), 3) if first else None
+        ),
+        passed_share_7d=round(passed / len(first), 3) if first else None,
+        feedback_missing=sum(1 for a in finished if not a.evaluation.teacher_feedback),
+        sessions=sessions,
+        recent_works=[
+            DashboardWorkOut(
+                attempt_id=a.id,
+                student_name=a.student.full_name,
+                scenario_title=a.scenario.title,
+                session_id=a.session_id,
+                session_title=a.session.title,
+                score=a.evaluation.score,
+                critical=report_service.critical_violations(a.evaluation.violations),
+                finished_at=a.finished_at,
+                has_feedback=bool(a.evaluation.teacher_feedback),
+            )
+            for a in recent
+        ],
     )

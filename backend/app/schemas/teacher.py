@@ -282,3 +282,49 @@ class MonitorOut(BaseModel):
     issued: int
     finished: int
     students: list[ProgressOut]
+
+
+class DashboardSessionOut(BaseModel):
+    """Идущее занятие одной строкой: сколько вызовов поступило и обработано."""
+
+    id: int
+    title: str
+    mode: str
+    students: int
+    issued: int
+    finished: int
+
+
+class DashboardWorkOut(BaseModel):
+    """Недавно завершённая работа — строка ленты на главной преподавателя."""
+
+    attempt_id: int
+    student_name: str
+    scenario_title: str
+    session_id: int
+    session_title: str
+    score: float
+    critical: int
+    finished_at: datetime
+    has_feedback: bool
+
+
+class DashboardOut(BaseModel):
+    """Сводка на главной преподавателя: что идёт сейчас и что ждёт его внимания.
+
+    Показатели за семь суток считаются по первым попыткам, как и в отчёте
+    занятия: повторная выдача отвечает на другой вопрос — исправился ли
+    обучающийся, — и в средний балл первого прохода не входит.
+    """
+
+    active_sessions: int
+    students_total: int
+    scenarios_pending: int
+    groups_total: int
+    works_7d: int
+    # None — завершённых работ за период нет, среднего не по чему считать.
+    average_score_7d: float | None
+    passed_share_7d: float | None
+    feedback_missing: int
+    sessions: list[DashboardSessionOut]
+    recent_works: list[DashboardWorkOut]

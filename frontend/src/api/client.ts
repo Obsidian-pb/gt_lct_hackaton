@@ -311,6 +311,7 @@ export const materialsApi = {
 // собраны отдельным объектом, а не добавлены в api выше, а типы для них
 // импортированы отдельной строкой, а не в общий список в начале файла.
 import type { GrammarCheck, SessionWork } from './types';
+import type { TeacherDashboard } from './types';
 
 export const teacherApi = {
   /** Принудительная проверка грамматики текста сценария. Ничего не меняет. */
@@ -349,6 +350,8 @@ export const teacherApi = {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
+  /** Сводка для главной страницы: идущие занятия, работы за неделю, что ждёт внимания. */
+  dashboard: () => request<TeacherDashboard>('/api/teacher/dashboard'),
 };
 
 // --- Учебные группы ---------------------------------------------------------
@@ -379,12 +382,15 @@ export const groupsApi = {
 // отдельным объектом, а его типы импортированы отдельной строкой.
 
 import type { ErrorReport, SystemHealth } from './types';
+import type { AdminDashboard } from './types';
 
 export const monitoringApi = {
   /** Состояние компонентов и нагрузка на сервер на текущий момент. */
   health: () => request<SystemHealth>('/api/admin/health'),
   /** Отчёт об ошибках и сбоях за последние `hours` часов. */
   errors: (hours: number) => request<ErrorReport>(`/api/admin/errors?hours=${hours}`),
+  /** Сводка для главной администратора: счётчики, состояние, аудит и сбои одним запросом. */
+  dashboard: () => request<AdminDashboard>('/api/admin/dashboard'),
 };
 
 // --- Конфигурация комплекса -------------------------------------------------

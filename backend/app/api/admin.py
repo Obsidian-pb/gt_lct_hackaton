@@ -537,6 +537,59 @@ def error_report(
     )
 
 
+# --- Главная страница администратора ----------------------------------------
+
+
+class DashboardOut(BaseModel):
+    """Сводка для главной страницы администратора.
+
+    Ничего нового не считает: собирает в один ответ счётчики `/system`,
+    состояние компонентов `/health`, хвост журнала аудита и сбои за сутки.
+    Один запрос вместо четырёх — стартовая страница открывается при каждом
+    входе, и четыре обращения ради одного экрана нагружали бы сервер
+    впустую; к тому же все части сводки относятся к одному моменту.
+    """
+
+    system: SystemOut
+    health: HealthOut
+    audit: list[AuditOut]
+    # Сбои за сутки, сведённые по типу и сообщению, — как в отчёте об ошибках.
+    errors: list[ErrorGroupOut]
+
+
+DASHBOARD_AUDIT = 5
+DASHBOARD_ERRORS = 5
+
+
+@router.get("/dashboard", response_model=DashboardOut)
+def dashboard(
+    db: Session = Depends(get_session), admin: User = Depends(require_admin)
+) -> DashboardOut:
+    # Результатов обучения здесь нет и быть не может: ограничение ТЗ
+    # на доступ администратора к успеваемости распространяется и на сводку.
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    occurrences = func.count().label("occurrences")
+    last_at = func.max(ErrorEvent.at).label("last_at")
+    groups = db.execute(
+        select(ErrorEvent.kind, ErrorEvent.message, occurrences, last_at)
+        .where(ErrorEvent.at >= since)
+        .group_by(ErrorEvent.kind, ErrorEvent.message)
+        .order_by(last_at.desc(), occurrences.desc())
+        .limit(DASHBOARD_ERRORS)
+    ).all()
+    return DashboardOut(
+        system=system(db=db, admin=admin),
+        health=health_state(db=db, admin=admin),
+        audit=audit_log(limit=DASHBOARD_AUDIT, db=db, admin=admin),
+        errors=[
+            ErrorGroupOut(
+                kind=row.kind, message=row.message, count=row.occurrences, last_at=row.last_at
+            )
+            for row in groups
+        ],
+    )
+
+
 # --- Конфигурация комплекса --------------------------------------------------
 #
 # Раздел закрывает требование ТЗ «конфигурировать параметры журналирования»

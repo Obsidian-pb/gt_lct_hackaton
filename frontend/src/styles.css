@@ -1759,3 +1759,90 @@ button {
   margin-left: 10px;
   white-space: nowrap;
 }
+
+/* --- Стартовые сводки: главная преподавателя и администратора --------------- */
+
+/* Плитка-ссылка выглядит как обычная плитка: цвет текста и подчёркивание
+   у ссылки сняты, чтобы ряд не пестрил, а переход подсказывает подъём тени. */
+.home-stat--link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: box-shadow 0.15s;
+}
+
+.home-stat--link:hover {
+  box-shadow: 0 2px 8px rgb(23 34 46 / 20%);
+}
+
+.home-attention {
+  margin: -8px 0 8px;
+  padding: 10px 14px 10px 30px;
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+}
+
+.home-attention li {
+  margin: 2px 0;
+}
+
+.home-attention a {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-attention a:hover {
+  text-decoration: underline;
+}
+
+.home-chip-gap {
+  margin-left: 6px;
+}
+
+.home-components {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-component {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.home-component__title {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.home-components__more {
+  font-size: 12px;
+  margin-left: auto;
+}
+
+/* Две колонки на широком экране; на узком складываются друг под друга. */
+.home-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 0 22px;
+}
+
+.home-columns .section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-columns .section-heading a {
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: auto;
+}

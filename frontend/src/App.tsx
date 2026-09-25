@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-do
 import { useAuth } from './auth';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminClassifierPage } from './pages/AdminClassifierPage';
+import { AdminHomePage } from './pages/AdminHomePage';
 import { AdminSystemPage } from './pages/AdminSystemPage';
 import { AdminSettingsPage } from './pages/AdminSettingsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
@@ -15,6 +16,7 @@ import { OperatorCallPage } from './pages/OperatorCallPage';
 import { OperatorCallsPage } from './pages/OperatorCallsPage';
 import { StudentProgressPage } from './pages/StudentProgressPage';
 import { TeacherGroupsPage } from './pages/TeacherGroupsPage';
+import { TeacherHomePage } from './pages/TeacherHomePage';
 import { TeacherReportPage } from './pages/TeacherReportPage';
 import { TeacherSessionPage } from './pages/TeacherSessionPage';
 import { TeacherSessionsPage } from './pages/TeacherSessionsPage';
@@ -32,6 +34,9 @@ function Header({ role }: { role: string }) {
       <nav className="app-nav">
         {role === 'admin' ? (
           <>
+            <NavLink to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Главная
+            </NavLink>
             <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
               Учётные записи
             </NavLink>
@@ -50,6 +55,9 @@ function Header({ role }: { role: string }) {
           </>
         ) : role === 'teacher' ? (
           <>
+            <NavLink to="/teacher" className={({ isActive }) => (isActive ? 'active' : '')}>
+              Главная
+            </NavLink>
             <NavLink to="/scenarios" className={({ isActive }) => (isActive ? 'active' : '')}>
               Сценарии
             </NavLink>
@@ -116,22 +124,24 @@ export default function App() {
         <Routes>
           {user.role === 'admin' ? (
             <>
+              <Route path="/admin" element={<AdminHomePage />} />
               <Route path="/users" element={<AdminUsersPage />} />
               <Route path="/audit" element={<AdminAuditPage />} />
               <Route path="/system" element={<AdminSystemPage />} />
               <Route path="/settings" element={<AdminSettingsPage />} />
               <Route path="/classifier" element={<AdminClassifierPage />} />
-              <Route path="*" element={<Navigate to="/users" replace />} />
+              <Route path="*" element={<Navigate to="/admin" replace />} />
             </>
           ) : user.role === 'teacher' ? (
             <>
+              <Route path="/teacher" element={<TeacherHomePage />} />
               <Route path="/scenarios" element={<TeacherScenariosPage />} />
               <Route path="/groups" element={<TeacherGroupsPage />} />
               <Route path="/sessions" element={<TeacherSessionsPage />} />
               <Route path="/sessions/:id" element={<TeacherSessionPage />} />
               <Route path="/report" element={<TeacherReportPage />} />
               <Route path="/materials" element={<MaterialsManagePage />} />
-              <Route path="*" element={<Navigate to="/scenarios" replace />} />
+              <Route path="*" element={<Navigate to="/teacher" replace />} />
             </>
           ) : (
             <>
