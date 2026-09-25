@@ -41,6 +41,8 @@ export interface Violation {
   severity: 'критическое' | 'существенное' | 'замечание';
   detail: string;
   evidence: string | null;
+  /** Дословный фрагмент речи заявителя, из которого следует эталон. */
+  quote?: string | null;
   example: string | null;
 }
 

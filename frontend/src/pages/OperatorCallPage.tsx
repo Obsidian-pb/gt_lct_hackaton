@@ -943,6 +943,9 @@ function OperatorReport({
               <span className="chip chip--neutral">{violation.severity}</span>
             </div>
             <div>{violation.detail}</div>
+            {violation.quote && (
+              <div className="violation__quote">Со слов заявителя: «{violation.quote}»</div>
+            )}
             {violation.example && (
               <div className="violation__example">
                 <b>Почему это важно:</b> {violation.example}

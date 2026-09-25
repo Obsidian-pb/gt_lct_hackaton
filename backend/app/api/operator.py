@@ -445,6 +445,8 @@ def classify_call(
             contact_phone=scenario.contact_phone,
             address_parts=dict(scenario.address_parts or {}),
             flags=frozenset(scenario.flags or []),
+            speech=scenario.description or "",
+            address_text=scenario.address or "",
         ),
         deadline,
         ekp,
@@ -462,6 +464,7 @@ def classify_call(
                 "severity": str(v.kind.severity),
                 "detail": v.detail,
                 "evidence": v.evidence,
+                "quote": v.quote,
                 "example": v.kind.example,
             }
             for v in assessment.violations

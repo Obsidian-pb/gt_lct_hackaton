@@ -1707,3 +1707,13 @@ button {
 .briefing__line {
   margin-top: -6px;
 }
+
+/* Цитата из речи заявителя под замечанием: то, из чего следует эталон. */
+.violation__quote {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  font-style: italic;
+  font-size: 13px;
+}

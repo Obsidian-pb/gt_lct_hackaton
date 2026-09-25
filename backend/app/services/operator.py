@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from app.models.training import CallOutcome
 from app.services import address as address_service
+from app.services import quotes, survey_flags
 from app.services.ekp import EKP
 from app.services.survey import ClassificationResult, classify
 from app.services.violations import Severity, Violation
@@ -66,6 +67,11 @@ class Expected:
     # газификация, угроза людям. Они заданы сценарием — это то, что
     # заявитель сообщил, — и список оповещения считается с ними.
     flags: frozenset[str] = frozenset()
+    # Речь заявителя и адрес, как он назван, — источники цитат к замечаниям:
+    # разбор не утверждает «следовало записать дом 21», а показывает, где
+    # заявитель это сказал. Пусто — цитат не будет, замечания останутся.
+    speech: str = ""
+    address_text: str = ""
 
 
 @dataclass
@@ -244,6 +250,7 @@ def _check_outcome(card: FilledCard, expected: Expected, result: OperatorAssessm
                     f"адрес относится к «{where}» — вызов следовало передать "
                     f"по принадлежности",
                     evidence=card.address.strip() or None,
+                    quote=_subject_quote(expected),
                 )
             )
         else:
@@ -299,6 +306,7 @@ def _check_address(card: FilledCard, expected: Expected, result: OperatorAssessm
                 "O12",
                 "Не уточнено: " + ", ".join(address_service.AddressCheck.titles(critical)),
                 evidence=", ".join(f"{k}={v}" for k, v in card.address_parts.items()) or None,
+                quote=_parts_quote(expected, critical),
             )
         )
 
@@ -309,6 +317,7 @@ def _check_address(card: FilledCard, expected: Expected, result: OperatorAssessm
                 "O13",
                 "Не записано: "
                 + ", ".join(address_service.AddressCheck.titles(tuple(minor))),
+                quote=_parts_quote(expected, tuple(minor)),
             )
         )
 
@@ -319,7 +328,13 @@ def _check_address(card: FilledCard, expected: Expected, result: OperatorAssessm
             part.split(":")[0] in {"субъект", "населённый пункт", "улица", "дом"}
             for part in check.wrong
         ) else "O13"
-        result.violations.append(Violation(code, "; ".join(check.wrong)))
+        result.violations.append(
+            Violation(
+                code,
+                "; ".join(check.wrong),
+                quote=_parts_quote(expected, tuple(w.split(":")[0] for w in check.wrong), by_title=True),
+            )
+        )
 
 
 def _digits(value: str) -> str:
@@ -359,6 +374,7 @@ def _check_phone(card: FilledCard, expected: Expected, result: OperatorAssessmen
                 f"Записан телефон {card.caller_phone.strip()}, "
                 f"заявитель назвал другой",
                 evidence=card.caller_phone.strip(),
+                quote=quotes.find_digits(expected.speech, expected.contact_phone or ""),
             )
         )
 
@@ -447,6 +463,7 @@ def _check_flags(
                 f"Не отмечен признак «{flag.replace('_', ' ')}»: без него не были бы "
                 f"оповещены {_services_list(lost)}",
                 evidence=f"{len(lost)} служб",
+                quote=_flag_quote(expected, flag),
             )
         )
 
@@ -462,3 +479,36 @@ def _check_flags(
                 evidence=flag,
             )
         )
+
+
+# --- Цитаты к замечаниям ------------------------------------------------------
+#
+# Каждая цитата — дословный кусок речи заявителя или названного им адреса.
+# Не нашлась — замечание остаётся без неё; сочинять цитату нельзя.
+
+
+def _subject_quote(expected: Expected) -> str | None:
+    """Где заявитель назвал регион: «Тульская обл., дорога от Киреевска…»."""
+    if not expected.referral_target:
+        return None
+    for word in expected.referral_target.split():
+        if len(word) > 4 and (found := quotes.find(expected.address_text, word[:-2])):
+            return found
+    return None
+
+
+def _parts_quote(expected: Expected, parts: tuple[str, ...], by_title: bool = False) -> str | None:
+    """Место в адресе, где названа первая из пропущенных или неверных частей."""
+    titles = {title: key for key, title in address_service.PARTS}
+    for part in parts:
+        key = titles.get(part.strip(), part) if by_title else part
+        value = (expected.address_parts.get(key) or "").strip()
+        if value and (found := quotes.find(expected.address_text, value)):
+            return found
+    return None
+
+
+def _flag_quote(expected: Expected, flag: str) -> str | None:
+    """Место в речи, где заявитель назвал признак: «…5 пострадавших…»."""
+    pattern = survey_flags.pattern_for(flag)
+    return quotes.find_any(expected.speech, pattern) if pattern else None

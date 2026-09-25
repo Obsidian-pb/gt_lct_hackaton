@@ -54,3 +54,8 @@ def detect(text: str) -> list[str]:
     if _NO_ACCESS.search(text) and not _NO_ACCESS_NEGATED.search(text):
         found.append(NO_ACCESS)
     return found
+
+
+def pattern_for(flag: str) -> re.Pattern[str] | None:
+    """Выражение, по которому признак найден в речи, — для цитаты в разборе."""
+    return {VICTIMS: _VICTIMS, NO_ACCESS: _NO_ACCESS}.get(flag)

@@ -67,6 +67,9 @@ export function EvaluationReport({ evaluation }: { evaluation: Evaluation }) {
                 <span className="chip chip--neutral">{violation.severity}</span>
               </div>
               <div>{violation.detail}</div>
+            {violation.quote && (
+              <div className="violation__quote">Со слов заявителя: «{violation.quote}»</div>
+            )}
               {violation.example && (
                 <div className="violation__example">
                   <b>Пример из памятки:</b> {violation.example}

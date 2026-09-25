@@ -545,3 +545,49 @@ def test_без_размеченных_признаков_выбор_опера�
     assert result.classification is not None
     assert result.classification.extra_services == ()
     assert result.classification.score == 1.0
+
+
+# --- Цитаты к замечаниям ---------------------------------------------------------
+
+
+def test_пропущенный_дом_цитируется_из_адреса_вызова():
+    expected = Expected(
+        outcome=CallOutcome.CLASSIFY,
+        rule_number=FIRE_TRASH,
+        address_parts=MOSCOW_ADDRESS,
+        address_text="Москва, ул. Берзарина, дом 21, корп. 1, под. 3, код 68",
+    )
+    answer = {k: v for k, v in MOSCOW_ADDRESS.items() if k != "house"}
+    result = evaluate(card(address_parts=answer), expected, DEFAULT_CALL_DEADLINE_SECONDS)
+    critical = next(v for v in result.violations if v.code == "O12")
+    assert critical.quote is not None and "дом 21" in critical.quote
+
+
+def test_телефон_цитируется_из_речи():
+    expected = Expected(
+        outcome=CallOutcome.CLASSIFY,
+        rule_number=FIRE_TRASH,
+        contact_phone="916-126-34-71",
+        speech="Горит контейнер во дворе. Иванов Иван, 916 126 34 71, стою рядом",
+    )
+    result = evaluate(card(caller_phone="916-000-00-00"), expected, DEFAULT_CALL_DEADLINE_SECONDS)
+    phone = next(v for v in result.violations if v.code == "O11")
+    assert phone.quote is not None and "916 126 34 71" in phone.quote
+
+
+def test_пропущенный_признак_цитируется_из_речи():
+    expected = Expected(
+        outcome=CallOutcome.CLASSIFY,
+        rule_number=FIRE_TRASH,
+        flags=frozenset({"пострадавшие"}),
+        speech="Горит машина, пострадал водитель, 54 года, лежит на асфальте",
+    )
+    result = evaluate(card(), expected, DEFAULT_CALL_DEADLINE_SECONDS)
+    missed = next(v for v in result.violations if v.code == "O14")
+    assert missed.quote is not None and "пострадал водитель" in missed.quote
+
+
+def test_без_источника_цитаты_замечание_остаётся():
+    result = evaluate(card(), with_flags("пострадавшие"), DEFAULT_CALL_DEADLINE_SECONDS)
+    missed = next(v for v in result.violations if v.code == "O14")
+    assert missed.quote is None
