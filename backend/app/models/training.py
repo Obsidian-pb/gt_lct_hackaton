@@ -391,6 +391,11 @@ class Attempt(Base, TimestampMixin):
         SAEnum(CallOutcome, native_enum=False, length=32)
     )
     chosen_referral_target: Mapped[str | None] = mapped_column(String(255))
+    # Признаки опросной карты, которые оператор отметил сам: пострадавшие,
+    # нет доступа, угроза людям. В настоящем АРМ-112 это кнопки на карточке,
+    # и от них зависит список оповещения — значит, услышать признак в вызове
+    # и отметить его входит в то, чему учим. Эталон — `Scenario.flags`.
+    chosen_flags: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     events: Mapped[list["StatusEvent"]] = relationship(
         back_populates="attempt",
