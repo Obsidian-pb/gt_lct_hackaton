@@ -388,9 +388,10 @@ export function OperatorCallPage() {
       .call(attemptId)
       .then((loaded) => {
         setCall(loaded);
-        // Сданную карточку показываем такой, какой её сохранил оператор: поля
-        // заблокированы, и пустая форма над разбором вводила бы в заблуждение.
-        if (!loaded.finished) return;
+        // Поля восстанавливаются всегда: у сданной карточки — чтобы над
+        // разбором была она, а не пустая форма; у незаконченной — из
+        // черновика, который автосохранение пишет по ходу заполнения.
+        // Обновление страницы или обрыв связи не должны стоить норматива.
         setGroup(loaded.chosen_group);
         setPath(loaded.chosen_path ?? []);
         setAddress(loaded.entered_address ?? '');
@@ -537,6 +538,43 @@ export function OperatorCallPage() {
     for (const f of [...flagOptions.global, ...flagOptions.rule]) titles[f.key] = f.title;
     return titles;
   }, [flagOptions]);
+
+  // Автосохранение черновика: через полторы секунды после последнего
+  // изменения, пока карточка не сдана. Сбой сохранения не мешает работе —
+  // при сдаче всё уйдёт целиком; о нём говорит только строка состояния.
+  const [draftState, setDraftState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [draftAt, setDraftAt] = useState<string | null>(null);
+  const draftReady = useRef(false);
+  useEffect(() => {
+    if (!call || call.finished || evaluation !== null) return;
+    // Первый прогон эффекта — это гидратация полей, а не правка оператора.
+    if (!draftReady.current) {
+      draftReady.current = true;
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setDraftState('saving');
+      try {
+        await operatorApi.saveDraft(attemptId, {
+          outcome,
+          referral_target: referral,
+          group: group ?? '',
+          path,
+          address,
+          description,
+          caller_phone: phone,
+          address_parts: addressParts,
+          flags,
+        });
+        setDraftState('saved');
+        setDraftAt(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      } catch {
+        setDraftState('failed');
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome, referral, group, path, address, description, phone, addressParts, flags]);
 
   if (error && !call) return <div className="alert">{error}</div>;
   if (!call) return <div className="empty">Загрузка вызова…</div>;
@@ -827,9 +865,18 @@ export function OperatorCallPage() {
             )}
           </div>
           {!locked && (
-            <button type="button" className="arm-save" onClick={submit} disabled={!canSave}>
-              {busy ? 'Сохранение…' : 'Сохранить карточку'}
-            </button>
+            <>
+              {draftState !== 'idle' && (
+                <span className="card__meta arm-draft">
+                  {draftState === 'saving' && 'черновик сохраняется…'}
+                  {draftState === 'saved' && `черновик сохранён ${draftAt ?? ''}`}
+                  {draftState === 'failed' && 'черновик не сохранился — при сдаче карточка уйдёт целиком'}
+                </span>
+              )}
+              <button type="button" className="arm-save" onClick={submit} disabled={!canSave}>
+                {busy ? 'Сохранение…' : 'Сохранить карточку'}
+              </button>
+            </>
           )}
         </div>
       </div>

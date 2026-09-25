@@ -412,6 +412,56 @@ async def ask_caller(
     )
 
 
+def _apply_card(attempt: Attempt, payload: ClassifyIn, chosen_flags: list[str]) -> None:
+    """Переносит поля карточки из запроса в попытку — и для черновика, и для сдачи."""
+    attempt.chosen_group = payload.group or None
+    attempt.chosen_path = list(payload.path)
+    attempt.chosen_flags = chosen_flags
+    attempt.entered_address = payload.address.strip() or None
+    attempt.entered_description = payload.description.strip() or None
+    attempt.entered_caller_phone = payload.caller_phone.strip() or None
+    attempt.entered_address_parts = {
+        k: v.strip() for k, v in payload.address_parts.items() if v and v.strip()
+    }
+    attempt.chosen_outcome = payload.outcome
+    attempt.chosen_referral_target = payload.referral_target.strip() or None
+
+
+def _valid_flags(payload: ClassifyIn, ekp: EKP) -> list[str]:
+    """Ключи признаков — только из редакции занятия; чужой ключ — 422."""
+    chosen_flags = list(dict.fromkeys(payload.flags))
+    allowed = flag_titles.known_keys(ekp)
+    unknown = sorted(set(chosen_flags) - allowed)
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Неизвестные признаки: " + ", ".join(unknown) + ". Допустимые: " + ", ".join(sorted(allowed)),
+        )
+    return chosen_flags
+
+
+@router.put("/calls/{attempt_id}/draft", response_model=CallOut)
+def save_draft(
+    attempt_id: int,
+    payload: ClassifyIn,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CallOut:
+    """Черновик карточки: то же, что сдача, но без оценки и без остановки таймера.
+
+    Вызов длится три минуты, и потерять заполненное из-за обновления страницы
+    или обрыва связи — значит потерять норматив. Черновик пишется в те же поля
+    попытки, откуда карточка и восстанавливается при открытии; оценивается
+    только сдача.
+    """
+    attempt = _load(attempt_id, db, user)
+    if attempt.finished_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Карточка уже сдана")
+    _apply_card(attempt, payload, _valid_flags(payload, ekp_for_session(attempt.session)))
+    db.commit()
+    return _call(attempt)
+
+
 @router.post("/calls/{attempt_id}/classify", response_model=OperatorEvaluationOut)
 def classify_call(
     attempt_id: int,
@@ -459,30 +509,10 @@ def classify_call(
     # Ключи признаков — только те, что есть в редакции занятия: чужой ключ
     # список оповещения не изменит, и оператор решил бы, что нажал кнопку,
     # которой не было.
-    chosen_flags = list(dict.fromkeys(payload.flags))
-    allowed = flag_titles.known_keys(ekp)
-    unknown = sorted(set(chosen_flags) - allowed)
-    if unknown:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Неизвестные признаки: "
-            + ", ".join(unknown)
-            + ". Допустимые: "
-            + ", ".join(sorted(allowed)),
-        )
+    chosen_flags = _valid_flags(payload, ekp)
 
     now = utcnow()
-    attempt.chosen_group = payload.group or None
-    attempt.chosen_path = list(payload.path)
-    attempt.chosen_flags = chosen_flags
-    attempt.entered_address = payload.address.strip() or None
-    attempt.entered_description = payload.description.strip() or None
-    attempt.entered_caller_phone = payload.caller_phone.strip() or None
-    attempt.entered_address_parts = {
-        k: v.strip() for k, v in payload.address_parts.items() if v and v.strip()
-    }
-    attempt.chosen_outcome = payload.outcome
-    attempt.chosen_referral_target = payload.referral_target.strip() or None
+    _apply_card(attempt, payload, chosen_flags)
     attempt.finished_at = now
 
     deadline = scenario.deadline_seconds or DEFAULT_CALL_DEADLINE_SECONDS

@@ -27,7 +27,22 @@ import type {
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 const TOKEN_KEY = 'arm112.token';
 
-export class ApiError extends Error {}
+/**
+ * Ошибка API с кодом ответа. network=true — ответа не было вовсе: обрыв связи,
+ * сервер перезапускается. Это не отказ в доступе, и на неё нельзя реагировать
+ * так же, как на 401: разлогинивать человека за секундный обрыв сети значит
+ * терять ему занятие.
+ */
+export class ApiError extends Error {
+  status: number;
+  network: boolean;
+
+  constructor(message: string, status = 0, network = false) {
+    super(message);
+    this.status = status;
+    this.network = network;
+  }
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -40,14 +55,19 @@ export function setToken(token: string | null): void {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const response = await fetch(`${BASE}${path}`, {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
-  });
+    });
+  } catch {
+    throw new ApiError('Нет связи с сервером. Проверьте сеть и повторите.', 0, true);
+  }
 
   if (!response.ok) {
     let detail = `Ошибка ${response.status}`;
@@ -57,7 +77,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // Тело может быть пустым — оставляем текст по умолчанию.
     }
-    throw new ApiError(detail);
+    throw new ApiError(detail, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -462,6 +482,12 @@ export const classifierApi = {
  * api.surveyOptions) остаются для справочного просмотра по действующей.
  */
 export const operatorApi = {
+  // Черновик карточки: те же поля, что при сдаче, но без оценки.
+  saveDraft: (attemptId: number, body: Parameters<typeof api.classifyCall>[1]) =>
+    request<Call>(`/api/operator/calls/${attemptId}/draft`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   // Уточняющий вопрос заявителю: отвечает модель по обстоятельствам вызова.
   ask: (attemptId: number, question: string) =>
     request<AskResult>(`/api/operator/calls/${attemptId}/ask`, {

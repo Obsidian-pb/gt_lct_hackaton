@@ -1754,3 +1754,8 @@ button {
 .dialogue__ask input {
   flex: 1;
 }
+
+.arm-draft {
+  margin-left: 10px;
+  white-space: nowrap;
+}

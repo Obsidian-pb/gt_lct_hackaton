@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { api, getToken, setToken } from './api/client';
+import { ApiError, api, getToken, setToken } from './api/client';
 import type { User } from './api/types';
 
 interface AuthState {
@@ -23,11 +23,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     // Токен мог истечь между сеансами — проверяем его до показа интерфейса.
-    api
-      .me()
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setLoading(false));
+    // Разлогинивает только отказ сервера (401/403). Обрыв сети — не отказ:
+    // ТЗ требует переживать сбои связи до 30 секунд, поэтому при сетевой
+    // ошибке токен остаётся, а проверка повторяется, пока связь не вернётся.
+    let cancelled = false;
+    let attempts = 0;
+    const check = () => {
+      api
+        .me()
+        .then((me) => {
+          if (cancelled) return;
+          setUser(me);
+          setLoading(false);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          const network = e instanceof ApiError && e.network;
+          if (network && attempts < 20) {
+            attempts += 1;
+            setTimeout(check, 3000);
+            return;
+          }
+          if (!network) setToken(null);
+          setLoading(false);
+        });
+    };
+    check();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signOut = useCallback(() => {
