@@ -1654,3 +1654,56 @@ button {
   height: 8px;
   margin-top: 6px;
 }
+
+/* --- Инструктаж и итог занятия у обучающегося ------------------------------- */
+
+.briefing {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 16px;
+}
+
+.briefing--result {
+  border-left-color: var(--ok);
+}
+
+.briefing--failed {
+  border-left-color: var(--danger);
+}
+
+.briefing__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.briefing__head > div:first-child {
+  flex: 1;
+}
+
+.briefing__title {
+  margin: 2px 0 4px;
+  font-size: 18px;
+}
+
+.briefing__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 18px;
+  margin: 10px 0 4px;
+  font-size: 14px;
+}
+
+.briefing__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 8px 0;
+}
+
+.briefing__line {
+  margin-top: -6px;
+}

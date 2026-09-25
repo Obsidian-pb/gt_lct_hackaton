@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Call } from '../api/types';
+import { SessionBriefing } from '../components/SessionBriefing';
 
 export function OperatorCallsPage() {
   const navigate = useNavigate();
@@ -19,7 +20,12 @@ export function OperatorCallsPage() {
   if (error) return <div className="alert">{error}</div>;
   if (!calls) return <div className="empty">Загрузка…</div>;
   if (calls.length === 0) {
-    return <div className="empty">Учебных вызовов пока нет.</div>;
+    return (
+      <>
+        <SessionBriefing mode="operator" />
+        <div className="empty">Учебных вызовов пока нет.</div>
+      </>
+    );
   }
 
   const pending = calls.filter((c) => !c.finished).length;
@@ -28,6 +34,7 @@ export function OperatorCallsPage() {
   return (
     <>
       <h1 className="page-title">Приём вызовов</h1>
+      <SessionBriefing mode="operator" />
       <p className="page-hint">
         Выслушайте заявителя, классифицируйте происшествие по опросной карте и зарегистрируйте
         карточку. От выбранных признаков зависит итоговый тип происшествия, а значит — какие

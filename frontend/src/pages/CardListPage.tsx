@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Card } from '../api/types';
+import { SessionBriefing } from '../components/SessionBriefing';
 import { Timer, cardDeadline } from '../components/Timer';
 
 /** Красная индикация у статусов, которые попадают в отдел контроля. */
@@ -29,7 +30,12 @@ export function CardListPage() {
   if (error) return <div className="alert">{error}</div>;
   if (!cards) return <div className="empty">Загрузка…</div>;
   if (cards.length === 0) {
-    return <div className="empty">В вашу службу пока не направлено ни одной карточки.</div>;
+    return (
+      <>
+        <SessionBriefing mode="dispatcher" />
+        <div className="empty">В вашу службу пока не направлено ни одной карточки.</div>
+      </>
+    );
   }
 
   const pending = cards.filter((c) => !c.finished).length;
@@ -38,6 +44,7 @@ export function CardListPage() {
   return (
     <>
       <h1 className="page-title">Происшествия</h1>
+      <SessionBriefing mode="dispatcher" />
       <p className="page-hint">
         Карточки, направленные в вашу службу. Подтвердите приём информации в течение норматива —
         иначе карточка перейдёт в статус «Не оповещено». В работе: {pending} из {cards.length}.

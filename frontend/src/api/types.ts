@@ -714,3 +714,26 @@ export interface Scenario {
   /** Признаки вызова: то, что заявитель назвал и что оператор обязан отметить. */
   flags: string[];
 }
+
+// --- Занятие глазами обучающегося: инструктаж и итог ------------------------
+export interface StudentSessionBrief {
+  id: number;
+  title: string;
+  mode: 'dispatcher' | 'operator';
+  state: 'active' | 'finished';
+  teacher_name: string;
+  pickup_deadline_seconds: number;
+  handling_deadline_seconds: number;
+  call_interval_seconds: number;
+  pass_score: number;
+  max_critical_violations: number;
+  repeat_failed: boolean;
+  started_at: string | null;
+  cards_total: number;
+  cards_issued: number;
+  cards_done: number;
+  next_issue_in_seconds: number | null;
+  average_score: number;
+  critical: number;
+  passed: boolean | null;
+}

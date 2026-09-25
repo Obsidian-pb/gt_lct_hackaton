@@ -20,6 +20,7 @@ import type {
   SystemState,
   TrainingSession,
   User,
+  StudentSessionBrief,
 } from './types';
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
@@ -135,6 +136,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   myCalls: () => request<Call[]>('/api/operator/calls/my'),
+  mySessions: () => request<StudentSessionBrief[]>('/api/student/sessions'),
   call: (id: number) => request<Call>(`/api/operator/calls/${id}`),
   surveyGroups: () => request<string[]>('/api/operator/groups'),
   surveyOptions: (group: string, path: string[]) =>

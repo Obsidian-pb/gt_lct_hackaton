@@ -2,14 +2,16 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.db import get_session
-from app.models.training import Attempt
+from app.models.base import as_utc, utcnow
+from app.models.training import Attempt, SessionState, TrainingSession, session_student
 from app.models.user import Role, User
 from app.services import progress as service
+from app.services import report
 
 router = APIRouter(prefix="/api/student", tags=["Личный кабинет обучающегося"])
 
@@ -141,3 +143,96 @@ def my_progress(
         repeats_finished=result.repeats_finished,
         repeats_fixed=result.repeats_fixed,
     )
+
+
+class SessionBriefOut(BaseModel):
+    """Занятие глазами обучающегося: до первого вызова — инструктаж, после
+    последнего — итог. Всё, что здесь есть, обучающийся вправе знать о себе."""
+
+    id: int
+    title: str
+    mode: str
+    state: str
+    teacher_name: str
+    pickup_deadline_seconds: int
+    handling_deadline_seconds: int
+    call_interval_seconds: int
+    pass_score: float
+    max_critical_violations: int
+    repeat_failed: bool
+    started_at: str | None
+    # Карточки этого обучающегося в занятии: всего запланировано, уже
+    # поступило, завершено. Повторные выдачи входят в счёт.
+    cards_total: int
+    cards_issued: int
+    cards_done: int
+    # Через сколько секунд поступит следующая карточка; None — все уже поступили.
+    next_issue_in_seconds: float | None
+    # Итог по первым попыткам: средний балл, критические нарушения, зачёт.
+    # passed = None, пока завершённых работ нет.
+    average_score: float
+    critical: int
+    passed: bool | None
+
+
+@router.get("/sessions", response_model=list[SessionBriefOut])
+def my_sessions(
+    db: Session = Depends(get_session), user: User = Depends(get_current_user)
+) -> list[SessionBriefOut]:
+    """Занятия обучающегося: идущие первыми, затем завершённые, недавние выше.
+
+    Только своё: обучающийся входит в состав занятия и получает в нём карточки —
+    ни чужих занятий, ни чужих результатов здесь нет по построению запроса.
+    """
+    if user.role is not Role.STUDENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Раздел для обучающихся")
+    # Занятие «своё», если обучающийся в его составе или уже получил в нём
+    # карточку: состав правится преподавателем и после запуска, а карточки —
+    # факт, который не оспоришь.
+    mine = or_(
+        TrainingSession.id.in_(
+            select(session_student.c.session_id).where(session_student.c.student_id == user.id)
+        ),
+        TrainingSession.id.in_(select(Attempt.session_id).where(Attempt.student_id == user.id)),
+    )
+    sessions = db.scalars(
+        select(TrainingSession)
+        .where(mine, TrainingSession.state != SessionState.DRAFT)
+        .order_by(TrainingSession.started_at.desc().nullslast(), TrainingSession.id.desc())
+    ).all()
+    now = utcnow()
+    out: list[SessionBriefOut] = []
+    for session in sessions:
+        attempts = [a for a in session.attempts if a.student_id == user.id]
+        issued = [a for a in attempts if as_utc(a.issued_at) <= now]
+        upcoming = sorted(
+            (as_utc(a.issued_at) - now).total_seconds() for a in attempts if as_utc(a.issued_at) > now
+        )
+        summary = report.build(session, attempts)
+        me = next((r for r in summary.students if r.student_id == user.id), None)
+        out.append(
+            SessionBriefOut(
+                id=session.id,
+                title=session.title,
+                mode=str(session.mode),
+                state=str(session.state),
+                teacher_name=session.teacher.full_name,
+                pickup_deadline_seconds=session.pickup_deadline_seconds,
+                handling_deadline_seconds=session.handling_deadline_seconds,
+                call_interval_seconds=session.call_interval_seconds,
+                pass_score=session.pass_score,
+                max_critical_violations=session.max_critical_violations,
+                repeat_failed=session.repeat_failed,
+                started_at=as_utc(session.started_at).isoformat() if session.started_at else None,
+                cards_total=len(attempts),
+                cards_issued=len(issued),
+                cards_done=sum(1 for a in attempts if a.finished_at is not None),
+                next_issue_in_seconds=round(upcoming[0], 1) if upcoming else None,
+                average_score=me.average_score if me else 0.0,
+                critical=me.critical if me else 0,
+                passed=me.passed(session.pass_score, session.max_critical_violations) if me else None,
+            )
+        )
+    active = [o for o in out if o.state == str(SessionState.ACTIVE)]
+    finished = [o for o in out if o.state != str(SessionState.ACTIVE)]
+    return active + finished
