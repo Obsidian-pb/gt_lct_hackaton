@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {recommendServices,syncServices,chooseService} from '../frontend/src/service-routing.js';
+import {recommendServices,syncServices,chooseService,syncLearnerServices} from '../frontend/src/service-routing.js';
 const source=JSON.parse(fs.readFileSync(new URL('../catalog/classifier.json',import.meta.url),'utf8'));
 const meta={catalog:source.entries,services:source.services};
 const card=()=>({status:'draft',content:{class_ids:['1010101'],services:['101'],main_service:'101',flags:{}}});
@@ -32,4 +32,16 @@ const multi=card();multi.content.class_ids.push('17070500');multi.content.flags=
 // A prohibition for one incident must not suppress an independent positive rule.
 meta.catalog.push({id:'test-positive',services:['103'],rules:[]});multi.content.class_ids.push('test-positive');
 syncServices(meta,multi);assert.ok(multi.content.services.includes('103'));
-console.log('PASS: real classifier, conditional routing, unknowns, no-response, manual overrides, type changes, migration and frozen approval.');
+
+// Student card: classifier/flags recalculate the recommended services, while
+// explicit learner changes survive the next automatic recalculation.
+const learnerBase={fields:{},report:'',class_ids:[],services:[],main_service:'',flags:{}};
+const learnerAuto=syncLearnerServices(meta,learnerBase,{...learnerBase,class_ids:['1010101'],services:[],flags:{}});
+assert.ok(learnerAuto.services.includes('101'),'Learner receives automatic service composition');
+const learnerManual={...learnerAuto,services:[...learnerAuto.services.filter(x=>x!=='ZODD'),'VETERINARY']};
+const learnerRecalc=syncLearnerServices(meta,learnerManual,{...learnerManual,flags:{injured:'yes'}});
+assert.ok(!learnerRecalc.services.includes('ZODD'),'Learner manual exclusion survives recalculation');
+assert.ok(learnerRecalc.services.includes('VETERINARY'),'Learner manual addition survives recalculation');
+assert.ok(learnerRecalc.services.includes('103'),'New classifier condition can still add an automatic service');
+
+console.log('PASS: real classifier, conditional routing, teacher and learner overrides, type changes, migration and frozen approval.');

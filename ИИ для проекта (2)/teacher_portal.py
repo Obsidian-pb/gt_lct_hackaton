@@ -1,7 +1,7 @@
 """Local teacher workspace. No database or production role authorization."""
 import re
 from datetime import datetime, timezone
-from ai_core import FIELDS, VERDICTS, require_text, now
+from ai_core import FIELDS, VERDICTS, LEVELS, require_text, now
 from dds import ACTION_LABELS
 from incident_training import LABELS as INCIDENT_LABELS
 
@@ -17,11 +17,12 @@ def overview(engine):
     rows = []
     for s in engine.list_items('s'):
         end = datetime.fromisoformat(s['submitted_at']) if s.get('submitted_at') else datetime.now(timezone.utc)
-        seconds = max(0, int((end - datetime.fromisoformat(s['created_at'])).total_seconds()))
+        start = datetime.fromisoformat(s.get('activated_at') or s['created_at'])
+        seconds = 0 if s.get('status') == 'queued' else max(0, int((end - start).total_seconds()))
         assessment = s.get('assessment')
         rows.append({
             'id': s['id'], 'student': s['student'], 'title': s['task']['title'],
-            'task_id': s['task']['id'], 'status': s['status'], 'level': s['task']['level'],
+            'task_id': s['task']['id'], 'status': s['status'], 'level': s.get('effective_level', s['task']['level']),
             'workflow': s['task'].get('workflow', 'caller'), 'created_at': s['created_at'],
             'updated_at': s.get('updated_at'), 'duration_seconds': seconds,
             'filled': sum(bool(v.strip()) for v in s['card'].values()), 'total_fields': len(s['card']),
@@ -82,31 +83,45 @@ def dispatch(engine, action, p):
             raise ValueError('Ориентир времени: от 0 до 86400 секунд.')
         ids, students = p.get('task_ids'), p.get('students')
         if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(not isinstance(i, str) for i in ids):
-            raise ValueError('Выберите от 1 до 100 сценариев.')
+            raise ValueError('Выберите от 1 до 100 карточек.')
         if len(set(ids)) != len(ids):
-            raise ValueError('Сценарии не должны повторяться.')
+            raise ValueError('Карточки не должны повторяться.')
         if not isinstance(students, list) or not 1 <= len(students) <= 100:
             raise ValueError('Укажите от 1 до 100 обучающихся.')
         students = list(dict.fromkeys(require_text(x, 'Обучающийся', 160) for x in students))
-        if len(ids) * len(students) > 500:
-            raise ValueError('За один запуск можно создать не более 500 работ.')
+        if len(ids) * len(students) > 5000:
+            raise ValueError('За одно назначение можно создать не более 5000 работ.')
         tasks = [engine.load(i) for i in ids]
         if any(not t['id'].startswith('t-') or t['status'] != 'approved' for t in tasks):
-            raise ValueError('Сначала утвердите каждый сценарий и его эталон.')
+            raise ValueError('Сначала утвердите каждую карточку и её эталон.')
+        scenario_id = p.get('scenario_id', key)
+        if not isinstance(scenario_id, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', scenario_id):
+            raise ValueError('Неверный номер сценария.')
+        # Learner difficulty settings were removed. Training now has only two modes:
+        # training (automatic inactivity nudges) and testing (no hints).
         # Validate the complete request before starting any session. Retrying a launch
         # reuses its sessions, even if the first response was lost.
         existing = {(s['task']['id'], s['student']): s['id'] for s in engine.list_items('s')
                     if (s.get('training') or {}).get('plan_id') == key}
         result = []
-        for task in tasks:
+        for index, task in enumerate(tasks, 1):
             for student in students:
                 pair = (task['id'], student)
                 if pair in existing:
                     result.append(existing[pair])
                     continue
                 s = engine.start(task['id'], student, training={
-                    'plan_id': key, 'title': title, 'group': group,
-                    'seconds': limit, 'teacher': teacher, 'mode': mode})
+                    'plan_id': key, 'scenario_id': scenario_id, 'title': title, 'group': group,
+                    'seconds': limit, 'teacher': teacher, 'mode': mode,
+                    'coaching_delay_seconds': 10 if mode == 'training' else 0,
+                    'card_index': index, 'card_total': len(tasks)})
+                s['effective_level'] = 'medium'
+                s['training_reveals'] = []
+                if index > 1:
+                    s['status'] = 'queued'
+                else:
+                    s['activated_at'] = now()
+                engine.save(s)
                 result.append(s['id'])
-        return {'session_ids': result}
+        return {'session_ids': result, 'scenario_id': scenario_id, 'card_total': len(tasks), 'mode': mode}
     raise ValueError('Неизвестное действие преподавателя.')

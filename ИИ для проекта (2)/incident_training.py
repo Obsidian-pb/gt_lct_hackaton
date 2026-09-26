@@ -25,9 +25,9 @@ def is_full(task):
 def publish(engine, request):
     approved = cards.approve(request)
     scenario = card_caller.validate_scenario(request.get('caller_scenario'))
-    level = request.get('level', 'medium')
-    if level not in ('easy', 'medium', 'hard'):
-        raise ValueError('Выберите сложность.')
+    # The legacy dialogue engine still expects a profile token, but difficulty is
+    # no longer a teacher/learner setting. Keep one neutral internal profile.
+    level = 'medium'
     content, ref = approved['content'], approved['reference']
     opening = request.get('opening') or re.split(r'(?<=[.!?…])\s+', content['report'].strip())[0][:500]
     opening = require_text(opening, 'Первая реплика заявителя', 2000)
@@ -67,7 +67,7 @@ def ask(engine, session, question, source):
     turns = [{'role': row['role'], 'text': row['text']} for row in session['history'][1:]]
     task = session['task']
     result = card_caller.ask(engine.provider, {'content': task['incident_source'],
-        'caller_scenario': task['caller_scenario'], 'turns': turns, 'question': question, 'level': task['level']})
+        'caller_scenario': task['caller_scenario'], 'turns': turns, 'question': question, 'level': session.get('effective_level', task['level'])})
     session['history'].extend([{'id': len(session['history'])+1, 'role': 'dispatcher', 'text': question, 'source': source},
                                {'id': len(session['history'])+2, 'role': 'caller', 'text': result['reply']}])
     session['callback_disclosed'] = session['callback_disclosed'] or result['callback_disclosed']
@@ -81,7 +81,8 @@ def save_card(engine, session, value, submit=False):
     for key in ('phone_aon', 'external_number', 'registered_by'):
         if value[key] != session['card'][key]:
             raise ValueError('Автоматические регистрационные поля изменять нельзя.')
-    if value['phone_callback'] and not session['callback_disclosed']:
+    revealed = {row.get('field') for row in session.get('training_reveals', []) if isinstance(row, dict)}
+    if value['phone_callback'] and not session['callback_disclosed'] and 'phone_callback' not in revealed:
         raise ValueError('Сначала спросите у заявителя номер для обратного звонка.')
     try:
         content = {'title': session['task']['title'], 'report': value['_report'],

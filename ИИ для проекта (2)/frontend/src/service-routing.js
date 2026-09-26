@@ -28,6 +28,32 @@ export function recommendServices(meta,content){
  return {services:[...services],reasons,pending};
 }
 
+// Recalculate the student's automatic routing while preserving the choices the
+// student made manually. Overrides can be reconstructed from the card itself,
+// so they also survive a draft round-trip through localStorage/server storage.
+export function syncLearnerServices(meta,previous,next){
+ const before=recommendServices(meta,previous).services;
+ const after=recommendServices(meta,next).services;
+ const beforeSet=new Set(before),selected=new Set(previous.services||[]);
+ const manualAdded=[...selected].filter(code=>!beforeSet.has(code));
+ const manualRemoved=before.filter(code=>!selected.has(code));
+ const removed=new Set(manualRemoved);
+ next.services=[...new Set([...after,...manualAdded])].filter(code=>!removed.has(code));
+ if(next.main_service&&!next.services.includes(next.main_service))next.main_service='';
+ if(!next.main_service){
+  const catalog=[...meta.catalog,...(meta.legacy_catalog||[])];
+  const primary=[...new Set(catalog.filter(x=>next.class_ids.includes(x.id)).flatMap(x=>x.services||[]))].filter(code=>next.services.includes(code));
+  if(primary.length===1)next.main_service=primary[0];
+  else if(next.services.length===1)next.main_service=next.services[0];
+ }
+ return next;
+}
+
+export function learnerServiceOrigin(meta,content,code){
+ const automatic=new Set(recommendServices(meta,content).services);
+ return automatic.has(code)?'По классификатору':'Добавлено обучающимся';
+}
+
 // Kept outside content: the server's card contract stays unchanged. Approved
 // versions are never recalculated. Old draft extras become teacher additions.
 export function syncServices(meta,card){

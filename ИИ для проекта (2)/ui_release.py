@@ -4,8 +4,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 REQUIRED_UI = ('react.html', 'react/app.js', 'student.css', 'teacher.css', 'workspace.css',
-               'theme.css', 'making.css', 'cards.css', 'welcome.css', 'hero-logo.svg',
-               'hero-background.svg', 'address.css', 'geo/addresses.json', 'geo/map.json')
+               'theme.css', 'making.css', 'cards.css', 'welcome.css', 'admin.css', 'hero-logo.svg',
+               'hero-background.svg', 'address.css', 'geo/addresses.json', 'geo/map.json',
+               'scenarios.html', 'scenarios.css', 'scenarios.js', 'enhancements.js',
+               'banners/gas-leak.png', 'banners/person-danger.png', 'banners/road-injured.png',
+               'banners/mass-event.png', 'banners/industrial-fire.png', 'banners/residential-fire.png')
 
 
 def release_id(root=ROOT):

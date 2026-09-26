@@ -140,7 +140,7 @@ def ask(engine, s, question, source):
 Подтверждай только реально полученные сведения, при подтверждении повтори адрес и суть сообщения.
 После перезвона помни ранее услышанное. Не восстанавливай обрыв фантазией.
 Соблюдай persona и уровень. Не подсказывай ученику ошибки карточки, которой ты не видел.''',
-        {'service': s['task']['service'], 'persona': s['task']['persona'], 'level': s['task']['level'],
+        {'service': s['task']['service'], 'persona': s['task']['persona'], 'level': s.get('effective_level', s['task']['level']),
          'history': heard_history, 'delivered_message': delivered, 'channel': mode, 'attempt': s['call_attempts']}, schema=obj(reply=TEXT))
     reply = require_text(result.get('reply'), 'Ответ службы')
     s['history'].extend([{'id': len(s['history']) + 1, 'role': 'dispatcher', 'text': question, 'delivered': delivered,

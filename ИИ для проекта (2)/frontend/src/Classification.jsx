@@ -6,6 +6,12 @@ export function Cascade({meta,category,selection,onChange}){
  const first=base.filter(x=>!selection.sign1||x.sign1===selection.sign1);
  const second=first.filter(x=>!selection.sign2||x.sign2===selection.sign2);
  const last=second.filter(x=>!selection.sign3||x.sign3===selection.sign3);
+ const complete=!!selection.sign1&&(!unique(first,'sign2').length||!!selection.sign2)&&(!unique(second,'sign3').length||!!selection.sign3);
+ useEffect(()=>{
+  if(category==='mixed'||!complete)return;
+  if(last.length===1&&selection.id!==last[0].id){onChange({...selection,id:last[0].id});return;}
+  if(selection.id&&!last.some(x=>x.id===selection.id)){const next={...selection};delete next.id;onChange(next);}
+ },[category,complete,selection.sign1,selection.sign2,selection.sign3,selection.id,last.map(x=>x.id).join('|')]);
  const set=(key,value)=>{const order=['sign1','sign2','sign3','id'],next={...selection};for(const k of order.slice(order.indexOf(key)))delete next[k];if(value)next[key]=value;onChange(next);};
  return <div className="classification-cascade">{category==='mixed'?<p className="source-note">Выберите группу, чтобы уточнить признаки. В режиме «Разные происшествия» карточки создаются по разным группам.</p>:<>{[['sign1','Где / тип происшествия',base,true],['sign2','Объект / обстоятельства',first,!!selection.sign1],['sign3','Признак происшествия',second,!!selection.sign2]].map(([key,label,rows,enabled])=>{const values=unique(rows,key);return values.length>0&&<div className="cascade-row" key={key}><span>{label}</span><div className="cascade-choices"><button type="button" disabled={!enabled} className={!selection[key]?'selected':''} onClick={()=>set(key,'')}>Любой</button>{enabled&&values.map(v=><button type="button" key={v} className={selection[key]===v?'selected':''} onClick={()=>set(key,v)}>{v}</button>)}</div></div>;})}
  {selection.sign1&&<label className="leaf-select">Итоговый тип<select value={selection.id||''} onChange={e=>set('id',e.target.value)}><option value="">Все подходящие ({last.length})</option>{last.map(x=><option key={x.id} value={x.id}>{x.title||x.sign1} · {x.id}</option>)}</select></label>}
@@ -24,8 +30,9 @@ export function ClassificationEditor({meta,content,store}){
  const [group,setGroup]=useState(()=>selected[0]&&meta.categories[selected[0].category]?selected[0].category:'1');
  const [selection,setSelection]=useState({});
  const candidate=meta.catalog.find(x=>x.id===selection.id);
+ useEffect(()=>{if(candidate&&!content.class_ids.includes(candidate.id))store.edit('class_ids',candidate.id,true);},[candidate?.id]);
  return <section className="card-section classification-editor"><h3>Классификация происшествия</h3><div className="selected-types">{selected.map(x=><div key={x.id} className="selected-type"><strong>{x.title}</strong><span>{x.group} · {[x.sign1,x.sign2,x.sign3].filter(Boolean).join(' → ')}</span><small>{x.id.startsWith('demo-')?'Ранее созданный пример':`Код ${x.id} · строка ${x.source_row} классификатора`}</small><button type="button" aria-label={'Убрать тип '+x.title} onClick={()=>store.edit('class_ids',x.id,false)}>×</button></div>)}</div>
- <details><summary>Добавить или изменить тип происшествия</summary><label>Группа происшествий<select id="editor-category" value={group} onChange={e=>{setGroup(e.target.value);setSelection({});}}>{Object.entries(meta.categories).filter(([k])=>k!=='mixed').map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><Cascade meta={meta} category={group} selection={selection} onChange={setSelection}/><button type="button" disabled={!candidate} onClick={()=>store.edit('class_ids',candidate.id,true)}>Добавить выбранный тип</button></details>
+ <details><summary>Добавить или изменить тип происшествия</summary><label>Группа происшествий<select id="editor-category" value={group} onChange={e=>{setGroup(e.target.value);setSelection({});}}>{Object.entries(meta.categories).filter(([k])=>k!=='mixed').map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><Cascade meta={meta} category={group} selection={selection} onChange={setSelection}/>{candidate&&content.class_ids.includes(candidate.id)?<p className="source-note">Классификатор определён однозначно и добавлен автоматически: {candidate.title} · {candidate.id}</p>:<button type="button" disabled={!candidate} onClick={()=>store.edit('class_ids',candidate.id,true)}>Добавить выбранный тип</button>}</details>
  <h3>Дополнительные признаки</h3><Flags meta={meta} value={content.flags} onChange={(k,v)=>store.edit('flag',k,v)} allowAll={false} entries={selected}/>
  {selected.filter(x=>x.extra_signs).map(x=><p className="source-note" key={x.id}>Дополнительно по классификатору: {x.extra_signs}</p>)}
  </section>;

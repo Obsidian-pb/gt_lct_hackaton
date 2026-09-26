@@ -62,13 +62,11 @@ class FlowTests(unittest.TestCase):
         for key in ('task', 'assessment', 'reference_hash'):
             self.assertNotIn(key, view)
 
-    def test_difficulty_and_hint_payload(self):
+    def test_legacy_manual_hint_payload_has_no_reference_data(self):
+        # Difficulty no longer controls learner hints. The old low-level hint
+        # helper remains for compatibility but never receives the reference.
         sid = self.start('hard')
-        with self.assertRaises(ValueError):
-            self.e.hint(sid)
-        self.assertEqual(self.p.calls, [])
-        t = self.e.sample('easy'); self.e.approve(t['id'], 'Учитель')
-        sid = self.e.start(t['id'], 'Ученик')['id']; self.e.hint(sid)
+        self.e.hint(sid)
         self.assertNotIn('reference', self.p.calls[-1]); self.assertNotIn('known', self.p.calls[-1])
         self.assertEqual(len(self.e.load(sid)['hints']), 1)
 

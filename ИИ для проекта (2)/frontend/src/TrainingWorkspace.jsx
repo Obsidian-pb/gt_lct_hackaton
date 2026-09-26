@@ -1,8 +1,7 @@
 import {useEffect} from 'react';
 import TeacherBoard from './TeacherBoard.jsx';
 import TrainingBuilder from './TrainingBuilder.jsx';
-export const statusNames={active:'В процессе',submitted:'Ожидает проверки',pending_teacher:'Проверка преподавателя',reviewed:'Проверена'};
-export const levelNames={easy:'Лёгкий',medium:'Средний',hard:'Сложный'};
+export const statusNames={queued:'Ожидает предыдущую',active:'В процессе',submitted:'Ожидает проверки',pending_teacher:'Проверка преподавателя',reviewed:'Проверена'};
 export const duration=n=>n==null?'—':`${Math.floor(n/3600).toString().padStart(2,'0')}:${Math.floor(n%3600/60).toString().padStart(2,'0')}:${Math.floor(n%60).toString().padStart(2,'0')}`;
 export function download(name,data,type='application/json'){const url=URL.createObjectURL(new Blob([typeof data==='string'?data:JSON.stringify(data,null,2)],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 export function Panel({title,children,actions,className=''}){return <section className={'tw-panel '+className}><header><h2>{title}</h2>{actions}</header><div className="tw-panel-body">{children}</div></section>;}

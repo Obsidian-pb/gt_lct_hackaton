@@ -20,23 +20,91 @@ import card_reference
 import card_caller
 import teacher_portal
 import incident_training
+import piper_tts
+import training_progress
 from ui_release import release_id, validate_ui, compatible_server
 
 ROOT = Path(__file__).resolve().parent
 # Capture once: changing files must not make an old process claim to run new code.
 UI_REVISION = release_id()
 
+BANNER_FILES = {
+    'gas-leak': 'gas-leak.png',
+    'person-danger': 'person-danger.png',
+    'road-injured': 'road-injured.png',
+    'mass-event': 'mass-event.png',
+    'industrial-fire': 'industrial-fire.png',
+    'residential-fire': 'residential-fire.png',
+}
+_CLASS_BY_ID = {row['id']: row for row in card_factory.CATALOG}
+
+
+def _task_class_ids(task):
+    source = task.get('incident_source') or {}
+    ids = source.get('class_ids') if isinstance(source, dict) else None
+    if isinstance(ids, list) and ids:
+        return [str(value) for value in ids if str(value) in _CLASS_BY_ID]
+    row = (task.get('fields') or {}).get('_class_ids') or {}
+    raw = row.get('expected') or row.get('truth') if isinstance(row, dict) else ''
+    if isinstance(raw, str) and raw:
+        try:
+            values = json.loads(raw)
+            if isinstance(values, list):
+                return [str(value) for value in values if str(value) in _CLASS_BY_ID]
+        except (ValueError, TypeError):
+            pass
+    return []
+
+
+def briefing_banner(task):
+    """Choose the briefing illustration from the approved incident classifier."""
+    for class_id in _task_class_ids(task):
+        row = _CLASS_BY_ID.get(class_id, {})
+        category = str(row.get('category', ''))
+        text = ' '.join(str(row.get(key, '')) for key in
+                        ('group', 'statistical_group', 'sign1', 'sign2', 'sign3', 'extra_signs', 'title', 'ekp_type')).lower()
+        if category == '2' and 'пострадав' in text:
+            return 'road-injured'
+        if category == '13':
+            return 'gas-leak'
+        if category == '17':
+            return 'person-danger'
+        if category == '1' and any(word in text for word in ('производств', 'цех', 'завод', 'промышлен', 'производственно-склад')):
+            return 'industrial-fire'
+        if category == '1' and any(word in text for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'мусоропровод', 'подвал')):
+            return 'residential-fire'
+        if category == '15' and any(word in text for word in ('массов', 'скопление людей', 'толпа', 'давка', 'митинг', 'шествие', 'пикет')):
+            return 'mass-event'
+
+    # Old exercises may not carry classifier ids. Keep a conservative title fallback.
+    title = str(task.get('title', '')).lower()
+    if 'дтп' in title and 'пострадав' in title:
+        return 'road-injured'
+    if any(word in title for word in ('запах газа', 'утечка газа', 'газопровод')):
+        return 'gas-leak'
+    if any(word in title for word in ('человек в опасности', 'крики о помощи', 'человека зажало', 'падение с высоты')):
+        return 'person-danger'
+    if any(word in title for word in ('массовое мероприят', 'массовые беспоряд', 'скопление людей', 'толпа', 'давка', 'митинг', 'концерт')):
+        return 'mass-event'
+    if 'пожар' in title and any(word in title for word in ('производств', 'цех', 'завод', 'промышлен', 'склад')):
+        return 'industrial-fire'
+    if 'пожар' in title and any(word in title for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'подвал')):
+        return 'residential-fire'
+    return None
+
 
 def student_portal_view(engine, identifier, full_form=False):
     view = engine.student_view(identifier)
     session = engine.load(identifier)
     view['training'] = session.get('training')
+    view['training_reveals'] = session.get('training_reveals', [])
+    view['banner_key'] = briefing_banner(session['task'])
     if incident_training.is_full(session['task']):
         view.update(incident_training.public_metadata(session))
     view['reference'] = ({key: row['expected'] for key, row in session['task']['fields'].items()}
                          if session['status'] == 'reviewed' else None)
     view['duration_seconds'] = (max(0, int((datetime.fromisoformat(session['submitted_at']) -
-                                           datetime.fromisoformat(session['created_at'])).total_seconds()))
+                                           datetime.fromisoformat(session.get('activated_at') or session['created_at'])).total_seconds()))
                                 if session.get('submitted_at') else None)
     if full_form and not incident_training.is_full(session['task']):
         return incident_training.legacy_projection(session, view)
@@ -49,14 +117,16 @@ def dispatch(engine, action, p):
     if action == 'student_overview':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
         sessions = [s for s in engine.list_items('s') if s['student'] == student]
-        return {'fields': FIELDS, 'levels': LEVELS,
-                'tasks': [{'id': t['id'], 'title': t['title'], 'level': t['level'],
+        return {'fields': FIELDS,
+                'tasks': [{'id': t['id'], 'title': t['title'],
                            'workflow': t.get('workflow', 'caller'), 'teacher': t.get('approved_by', ''),
-                           'created_at': t.get('approved_at', t['created_at'])} for t in engine.approved_tasks()],
+                           'created_at': t.get('approved_at', t['created_at']),
+                           'banner_key': briefing_banner(t)} for t in engine.approved_tasks()],
                 'sessions': [{'id': s['id'], 'task_id': s['task']['id'], 'title': s['task']['title'],
-                              'level': s['task']['level'], 'workflow': s['task'].get('workflow', 'caller'),
-                              'status': s['status'], 'created_at': s['created_at'],
-                              'teacher': s['task'].get('approved_by', ''),
+                              'workflow': s['task'].get('workflow', 'caller'),
+                              'status': s['status'], 'created_at': s['created_at'], 'activated_at': s.get('activated_at'),
+                              'teacher': (s.get('training') or {}).get('teacher') or s['task'].get('approved_by', ''),
+                              'training': s.get('training'), 'banner_key': briefing_banner(s['task']),
                               'grade': s['teacher_decision']['grade'] if s['status'] == 'reviewed' else None}
                              for s in sessions]}
     if action == 'student_start':
@@ -68,12 +138,30 @@ def dispatch(engine, action, p):
         return student_portal_view(engine, engine.start(task_id, student)['id'], p.get('full_form', False))
     if action == 'student_action':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
-        if engine.load(p.get('id'))['student'] != student:
+        current = engine.load(p.get('id'))
+        if current['student'] != student:
             raise ValueError('Эта тренировка относится к другому обучающемуся.')
         operation = p.get('operation')
-        if operation not in ('student', 'ask', 'hint', 'save_card', 'submit', 'connect', 'channel'):
+        if operation not in ('student', 'ask', 'nudge', 'save_card', 'submit', 'connect', 'channel'):
             raise ValueError('Действие недоступно в панели обучающегося.')
+        if current.get('status') == 'queued':
+            raise ValueError('Сначала завершите предыдущую карточку этого сценария.')
+        if operation == 'nudge':
+            training_progress.coaching_nudge(engine, p['id'], p.get('card'))
+            return student_portal_view(engine, p['id'], p.get('full_form', False))
         dispatch(engine, operation, p)
+        if operation == 'submit':
+            progression = training_progress.advance(engine, p['id'])
+            if progression['next_id']:
+                view = student_portal_view(engine, progression['next_id'], p.get('full_form', False))
+                view.update(auto_advanced=True, previous_session_id=p['id'],
+                            scenario_complete=False, adaptation=progression['adaptation'])
+                return view
+            view = student_portal_view(engine, p['id'], p.get('full_form', False))
+            view.update(auto_advanced=False,
+                        scenario_complete=bool((engine.load(p['id']).get('training') or {}).get('plan_id')),
+                        adaptation=progression['adaptation'])
+            return view
         return student_portal_view(engine, p['id'], p.get('full_form', False))
     if action == 'teacher_overview':
         return {
@@ -89,6 +177,10 @@ def dispatch(engine, action, p):
         return incident_training.publish(engine, p)
     if action == 'card_meta':
         return card_factory.metadata()
+    if action == 'tts_status':
+        return piper_tts.status()
+    if action == 'tts_synthesize':
+        return piper_tts.synthesize(p.get('text'), p.get('voice'))
     if action == 'card_generate':
         return card_factory.generate(engine.provider, p)
     if action == 'card_reference':
@@ -210,20 +302,33 @@ def make_server(engine, port=8878):
             if path == '/health':
                 self.respond(200, {'app': 'ai-project-ui', 'root': str(ROOT),
                                    'revision': UI_REVISION, 'pid': os.getpid(),
-                                   'pages': ['/', '/teacher', '/student', '/cards', '/training']}); return
-            if path in ('/student/', '/teacher/', '/cards/', '/training/'):
+                                   'pages': ['/', '/teacher', '/student', '/admin-login', '/admin', '/cards', '/training', '/scenarios']}); return
+            if path.startswith('/banners/'):
+                filename = path.removeprefix('/banners/')
+                if filename not in BANNER_FILES.values():
+                    self.respond(404, {'error': 'Не найдено'}); return
+                file_path = ROOT / 'ui' / 'banners' / filename
+                if not file_path.is_file():
+                    self.respond(404, {'error': 'Не найдено'}); return
+                self.respond(200, file_path.read_bytes(), 'image/png'); return
+            if path in ('/student/', '/teacher/', '/admin-login/', '/admin/', '/cards/', '/training/', '/scenarios/'):
                 self.send_response(302)
                 self.send_header('Location', path.rstrip('/'))
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
                 return
             names = {'/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
+                     '/admin-login': ('react.html', 'text/html'), '/admin': ('react.html', 'text/html'), '/admin.css': ('admin.css', 'text/css'),
                      '/student': ('react.html', 'text/html'), '/student.css': ('student.css', 'text/css'),
                      '/theme.css': ('theme.css', 'text/css'),
                      '/address.css': ('address.css', 'text/css'),
                      '/geo/addresses.json': ('geo/addresses.json', 'application/json'),
                      '/geo/map.json': ('geo/map.json', 'application/json'),
                      '/workspace.css': ('workspace.css', 'text/css'),
+                     '/scenarios': ('scenarios.html', 'text/html'),
+                     '/scenarios.css': ('scenarios.css', 'text/css'),
+                     '/scenarios.js': ('scenarios.js', 'text/javascript'),
+                     '/enhancements.js': ('enhancements.js', 'text/javascript'),
                      '/react/app.js': ('react/app.js', 'text/javascript'),
                      '/welcome.css': ('welcome.css', 'text/css'),
                      '/hero-background.svg': ('hero-background.svg', 'image/svg+xml'),
@@ -239,9 +344,9 @@ def make_server(engine, port=8878):
             name, mime = names[path]
             body = (ROOT / 'ui' / name).read_text(encoding='utf-8').replace('__TOKEN__', token)
             if name == 'react.html':
-                styles = ['/welcome.css'] if path == '/' else (['/student.css'] if path == '/student' else (['/cards.css', '/teacher.css', '/making.css'] if path == '/cards' else ['/teacher.css']))
+                styles = ['/welcome.css'] if path == '/' else (['/admin.css'] if path in ('/admin','/admin-login') else (['/making.css', '/student.css'] if path == '/student' else (['/cards.css', '/teacher.css', '/making.css'] if path == '/cards' else ['/teacher.css'])))
                 body = body.replace('__STYLES__', ''.join(f'<link rel="stylesheet" href="{href}">' for href in ['/theme.css', '/address.css', *styles, *(['/workspace.css'] if path == '/teacher' else [])]))
-                body = body.replace('__BODY_CLASS__', '' if path == '/' else ('student-app' if path == '/student' else ('teacher-app cards-page' if path == '/cards' else 'teacher-app')))
+                body = body.replace('__BODY_CLASS__', '' if path == '/' else ('admin-app' if path in ('/admin','/admin-login') else ('student-app' if path == '/student' else ('teacher-app cards-page' if path == '/cards' else 'teacher-app'))))
             self.respond(200, body.encode(), mime + '; charset=utf-8')
 
         def do_POST(self):

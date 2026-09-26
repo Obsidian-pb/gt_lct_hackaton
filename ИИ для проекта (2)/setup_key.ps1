@@ -1,4 +1,4 @@
-﻿# Invoked by ВСТАВИТЬ_КЛЮЧ.cmd. Windows PowerShell 5.1 compatible.
+﻿# Key writer used by FIRST_RUN_KEY.ps1 and manual setup. Windows PowerShell 5.1 compatible.
 $ErrorActionPreference = 'Stop'
 
 function Save-GigaChatKey {
