@@ -228,7 +228,7 @@ def main():
                 return
             if choice in ('1', '2'):
                 workflow = choose_workflow()
-                level = {'1':'easy', '2':'medium', '3':'hard'}.get(input('Сложность: 1 — лёгкая; 2 — средняя; 3 — сложная: ').strip(), 'medium')
+                level = 'medium'  # internal legacy dialogue profile; no user-selectable difficulty
                 if choice == '1':
                     topic = input('Тема задания: '); print('GigaChat создаёт задание и черновик эталона…')
                     task = engine.draft(topic, level, workflow)

@@ -49,4 +49,4 @@ run('Выполняю…',async()=>{
  if(cmd==='finalize'){const decisions={};for(const k of Object.keys(reviewLabels()))decisions[k]={decision:$('#decision-'+k).value,comment:$('#comment-'+k).value.trim()};const teacher=$('#teacher-name').value.trim();await api('finalize',{id:review.id,teacher,grade:Number($('#grade').value),conclusion:$('#conclusion').value.trim(),decisions});remember('teacher',teacher);review=await api('review',{id:review.id});renderReview();notice('Итог преподавателя опубликован для обучающегося.');}
 });});
 window.addEventListener('beforeunload',e=>{stopMic();if(editorDirty||busy){e.preventDefault();e.returnValue='';}});
-run('Загружаю сохранённые карточки…',async()=>{meta=await api('home');await learnHome();});
+run('Загружаю сохранённые карточки…',async()=>{meta=await api('home');await navigate(['learn','tasks','works'].includes(location.hash.slice(1))?location.hash.slice(1):'learn');});

@@ -44,7 +44,6 @@ Thumbs.db
 postgres_data/
 pgdata/
 docker-compose.override.yml
-*.yml
 
 # Temporary files
 tmp/
@@ -54,3 +53,6 @@ temp/
 
 # Generated from the versioned Excel classifier; regenerate when needed
 database/classifier_import.sql
+
+# Frontend dependencies
+/frontend/node_modules

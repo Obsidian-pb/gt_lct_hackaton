@@ -13,17 +13,8 @@ import uuid
 class GigaChat:
     def __init__(self):
         local = Path(__file__).with_name('config.local.json')
-        team = Path(__file__).with_name('config.team.json')
         shared = Path(os.environ.get('APPDATA', str(Path.home()))) / 'FireSimulation/gigachat_config.json'
-        explicit = os.environ.get('AI_PROJECT_CONFIG') or os.environ.get('FIRE_SIM_GIGACHAT_CONFIG')
-        if explicit:
-            path = Path(explicit)
-        elif local.exists():
-            path = local
-        elif team.exists():
-            path = team
-        else:
-            path = shared
+        path = Path(os.environ.get('AI_PROJECT_CONFIG') or os.environ.get('FIRE_SIM_GIGACHAT_CONFIG') or (local if local.exists() else shared))
         self.config = json.loads(path.read_text(encoding='utf-8-sig')) if path.is_file() else {}
         self.key = os.environ.get('GIGACHAT_CREDENTIALS') or os.environ.get('FIRE_SIM_GIGACHAT_AUTHORIZATION_KEY') or self.config.get('authorization_key') or self.config.get('credentials')
         self.model = os.environ.get('AI_PROJECT_MODEL') or self.config.get('model', 'pro')

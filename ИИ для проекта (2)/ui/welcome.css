@@ -1,0 +1,18 @@
+:root{font-family:Arial,Helvetica,sans-serif;color:#080808;background:#f4f6f8}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100svh;background:url('/hero-background.svg') center center/cover no-repeat}
+.welcome{width:22.84vw;max-width:480px;min-width:340px;margin-left:auto;margin-right:6.58vw;padding-top:19.1vh;padding-bottom:60px}
+.welcome-logo{display:block;width:185px;height:106px;margin:0 auto}
+.welcome-intro{margin-top:110px}
+h1{font-size:28px;font-weight:400;line-height:1.25;margin:0 0 20px}
+p{font-size:17px;line-height:1.65;color:#60666d;margin:0}
+.welcome-enter{display:flex;align-items:center;justify-content:center;position:relative;background:#494d52;color:white;text-decoration:none;width:100%;height:70px;margin-top:114px;font-size:18px;transition:background .15s}
+.welcome-enter span{position:absolute;right:25px;font-size:28px;font-weight:400}
+.welcome-enter:hover{background:#303438}
+.welcome-enter:focus-visible{outline:3px solid #17191b;outline-offset:5px}
+@media(max-width:1200px){.welcome{margin-right:5vw;padding-top:16vh}.welcome-intro{margin-top:80px}.welcome-enter{margin-top:85px}body{background-position:58% center}}
+@media(max-width:760px){body{background-position:35% center}.welcome{width:calc(100% - 40px);min-width:0;max-width:430px;margin:0 auto;padding:48px 28px 38px;position:relative;top:7vh;background:rgba(247,249,251,.93);border:1px solid #e0e4e8}.welcome-logo{width:145px;height:83px}.welcome-intro{margin-top:46px}h1{font-size:25px}p{font-size:16px}.welcome-enter{height:62px;margin-top:44px}}
+@media(prefers-reduced-motion:reduce){.welcome-enter{transition:none}}
+.welcome-roles{display:flex;gap:0;margin-top:34px;border:1px solid #c5ced6}.welcome-roles button{flex:1;min-width:0;border:0;background:#f8fafbcc;color:#65717b;font:13px Arial,sans-serif;padding:16px 8px;cursor:pointer}.welcome-roles button[aria-pressed=true]{background:#354b5b;color:#fff}.welcome .welcome-enter{margin-top:24px}.welcome-roles button:focus-visible{outline:2px solid #188bdd;outline-offset:2px}
+.welcome-roles:has(#role-admin){display:grid;grid-template-columns:1fr 1fr 1fr}.welcome-roles:has(#role-admin) button{font-size:12px;padding-left:4px;padding-right:4px}
+@media(max-width:760px){.welcome-roles:has(#role-admin){grid-template-columns:1fr}.welcome-roles:has(#role-admin) button{padding:12px 8px}}

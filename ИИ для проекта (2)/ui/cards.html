@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="ui-token" content="__TOKEN__"><title>Карточки происшествий · ИИ для проекта</title>
+<link rel="stylesheet" href="/cards.css"><link rel="stylesheet" href="/teacher.css"></head><body class="teacher-app"><div id="teacher-shell"></div>
+<header class="top"><div class="brand"><span class="logo">112</span><div><strong>Мастерская карточек</strong><small>ИИ для проекта</small></div></div>
+<div class="top-actions"><span class="provider"><i></i> GigaChat</span><a href="/training">Учебный прототип ↗</a></div></header>
+<main id="workshop" class="teacher-main">
+<section class="intro"><div><p class="eyebrow">ПОДГОТОВКА МАТЕРИАЛОВ</p><h1>От идеи до готовой карточки</h1><p>Задайте тему. Проверьте сведения. Утвердите результат.</p></div><div id="stats" class="stats"></div></section>
+<div id="notice" role="status" hidden></div><div id="storage-warning" role="alert" hidden></div>
+<section class="generator"><form id="generate-form"><div class="generator-title"><span class="step">01</span><div><h2>Создать с помощью ИИ</h2><p>От одной карточки до целой подборки</p></div></div>
+<div class="generate-fields"><label class="topic">Тема и пожелания<textarea id="topic" maxlength="3000" rows="2" placeholder="Например: пожары в жилых домах, разные адреса и сведения о людях"></textarea></label>
+<label>Категория<select id="category"></select></label><label class="count">Количество<input id="count" type="number" min="1" max="100" value="1" required></label>
+<button id="generate" class="primary" type="submit">Сгенерировать</button></div></form>
+<div id="progress-panel" hidden><div class="progress-line"><span id="progress-text" role="status"></span><button id="stop" class="quiet">Остановить после текущей</button><button id="resume" class="quiet" hidden>Продолжить оставшиеся</button></div><progress id="progress" max="100" value="0"></progress></div>
+<p class="catalog-note">Демонстрационный справочник · Коды и состав служб требуют согласования с командой. Адреса вымышлены.</p></section>
+<section class="workspace"><aside class="library"><div class="library-title"><h2>Мои карточки</h2><button id="new-card" class="quiet">+ Вручную</button></div>
+<label class="sr-only" for="search">Поиск карточек</label><input id="search" type="search" placeholder="Найти по названию или адресу">
+<div class="filters" role="group" aria-label="Статус карточек"><button data-filter="all" class="active">Все</button><button data-filter="draft">Черновики</button><button data-filter="approved">Утверждены</button></div>
+<div id="card-list"></div><button id="export-all" class="export">↓ Скачать все карточки</button>
+<p class="storage-note">Без базы данных. Карточки сохраняются в этом браузере. Для переноса или резервной копии скачайте JSON.</p></aside>
+<article id="editor" class="editor"><div class="empty"><span class="empty-icon">▤</span><h2>Здесь появится ваша карточка</h2><p>Сгенерируйте подборку или создайте карточку вручную.<br>Каждую можно проверить и утвердить отдельно.</p></div></article></section>
+</main><script src="/teacher-shell.js" defer></script><script src="/cards.js" defer></script></body></html>
