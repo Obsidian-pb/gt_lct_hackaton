@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -260,6 +261,9 @@ class ExerciseRevision(UUIDPrimaryKeyMixin, Base):
         single_parent=True,
         uselist=False,
     )
+    additional_values: Mapped[list[ExerciseAdditionalValue]] = relationship(
+        back_populates="exercise_revision", cascade="all, delete-orphan"
+    )
 
 
 class IncidentCardDetails(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -273,6 +277,10 @@ class IncidentCardDetails(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "longitude IS NULL OR longitude BETWEEN -180 AND 180",
             name="longitude_range",
+        ),
+        CheckConstraint(
+            "(controlled_at IS NULL) = (controlled_by_name IS NULL)",
+            name="control_fields_together",
         ),
         {"schema": "content"},
     )
@@ -314,7 +322,52 @@ class IncidentCardDetails(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     incident_description: Mapped[str | None] = mapped_column(Text)
     vis_information: Mapped[str | None] = mapped_column(Text)
     control_notes: Mapped[str | None] = mapped_column(Text)
+    has_victims_or_deceased: Mapped[bool | None] = mapped_column(Boolean)
+    ambulance_refused_or_not_on_scene: Mapped[bool | None] = mapped_column(Boolean)
+    no_access_or_blocked: Mapped[bool | None] = mapped_column(Boolean)
 
     exercise_revision: Mapped[ExerciseRevision] = relationship(
         back_populates="card_details"
+    )
+
+
+class ExerciseAdditionalValue(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "exercise_additional_values"
+    __table_args__ = (
+        UniqueConstraint("exercise_revision_id", "field_key"),
+        CheckConstraint(
+            "data_type IN ('text', 'integer', 'number', 'boolean', 'date', 'datetime', 'select')",
+            name="data_type_values",
+        ),
+        CheckConstraint("jsonb_typeof(options) = 'array'", name="options_array"),
+        CheckConstraint(
+            "value IS NULL OR value = 'null'::jsonb OR "
+            "(data_type = 'boolean' AND jsonb_typeof(value) = 'boolean') OR "
+            "(data_type IN ('text', 'date', 'datetime', 'select') "
+            "AND jsonb_typeof(value) = 'string') OR "
+            "(data_type IN ('integer', 'number') AND jsonb_typeof(value) = 'number' "
+            "AND (data_type = 'number' OR value::text ~ '^-?[0-9]+$'))",
+            name="value_matches_type",
+        ),
+        {"schema": "content"},
+    )
+
+    exercise_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("content.exercise_revisions.id", ondelete="CASCADE"), nullable=False
+    )
+    source_field_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_additional_fields.id", ondelete="SET NULL")
+    )
+    field_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    options: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    value: Mapped[Any | None] = mapped_column(JSONB)
+
+    exercise_revision: Mapped[ExerciseRevision] = relationship(
+        back_populates="additional_values"
     )

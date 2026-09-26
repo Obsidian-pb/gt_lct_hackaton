@@ -13,6 +13,7 @@
 - `roles` — роли пользователей;
 - `permissions` — разрешения;
 - `user_roles` — назначение нескольких ролей пользователю;
+- `user_services` — профильные службы пользователя;
 - `role_permissions` — разрешения, входящие в роль.
 
 ### `catalog` — классификатор и службы
@@ -24,6 +25,8 @@
 - `event_classes` — допустимые комбинации признаков и номера событий;
 - `services` — справочник экстренных и городских служб;
 - `event_class_services` — службы, привлекаемые к событию;
+- `event_service_routes` — условия вызова служб из классификатора;
+- `event_additional_fields` — дополнительные поля конкретного события;
 - `classifier_versions` — опубликованные версии классификатора;
 - `classifier_version_events` — состав каждой версии классификатора.
 
@@ -33,6 +36,12 @@
 Г × 1 000 000 + признак 1 × 10 000 + признак 2 × 100 + признак 3
 ```
 
+В `event_types.name` хранится расшифровка группы происшествия `Г`. Поля
+`event_classes.feature_1_label`, `feature_2_label` и `feature_3_label`
+сохраняют точные расшифровки признаков конкретного события. Они могут
+отличаться у разных комбинаций кодов, поэтому не вычисляются по одному коду
+признака. Отсутствующая расшифровка хранится как `NULL`.
+
 ### `content` — шаблоны и карточки
 
 - `event_templates` — темы и инструкции для генерации карточек;
@@ -41,20 +50,33 @@
 - `exercise_services` — службы конкретной карточки;
 - `exercise_revisions` — редакции, эталон, предложение GigaChat и проверка;
 - `incident_card_details` — заявитель, три телефона, адрес, координаты,
-  описание происшествия, сведения ВИС и контроль.
+  описание происшествия, сведения ВИС, контроль и три логических признака;
+- `exercise_additional_values` — дополнительные поля и значения редакции карточки.
 
 Одна редакция имеет не более одного набора `incident_card_details`. Номер
 карточки получается через `exercise_revisions.event_class_id` и
 `event_classes.event_number`.
+Определения дополнительных полей копируются из события в редакцию.
+При утверждении карточки база проверяет ключевые поля, наличие
+классификации и значения обязательных дополнительных полей.
 
 ### `training` — прохождение и оценка
 
 - `scoring_profiles` — наборы правил оценки;
 - `scoring_rules` — правила для каждого уровня сложности;
 - `sessions` — учебные сессии;
+- `assignments` — индивидуальные задания от преподавателя;
+- `assignment_services` — разрешённые в задании службы;
+- `assignment_exercises` — явно назначенные карточки;
 - `session_cards` — карточки, выданные в сессии;
 - `answers` — ответы обучающихся;
 - `evaluations` — правильность, время, применённые правила и итоговый балл.
+
+Задание может ограничить выборку по службам и/или указать конкретные карточки.
+В сессии сохраняется норматив времени (по умолчанию 30 секунд), но он не
+останавливает работу обучающегося. У сессии и выданной карточки сохраняются
+снимки идентификаторов, настроек и содержимого на момент прохождения.
+Ответы и оценки не удаляются; сессии с ответами исключены из очистки.
 
 ### `audit` — журнал действий
 
@@ -73,6 +95,8 @@ erDiagram
     roles ||--o{ user_roles : "назначается пользователям"
     roles ||--o{ role_permissions : "содержит права"
     permissions ||--o{ role_permissions : "входит в роли"
+    users ||--o{ user_services : "имеет профильные службы"
+    services ||--o{ user_services : "доступна пользователям"
 
     users {
         uuid id PK
@@ -98,6 +122,13 @@ erDiagram
         uuid role_id PK, FK
         uuid permission_id PK, FK
     }
+    user_services {
+        uuid user_id PK, FK
+        uuid service_id PK, FK
+    }
+    services {
+        uuid id PK
+    }
 ```
 
 ## Связи классификатора и карточек
@@ -119,6 +150,9 @@ erDiagram
     event_classes ||--o{ event_class_services : "привлекает"
     services ||--o{ event_class_services : "назначается"
     services o|--o{ event_classes : "главная служба"
+    event_classes ||--o{ event_service_routes : "условия вызова"
+    services ||--o{ event_service_routes : "вызывается"
+    event_classes ||--o{ event_additional_fields : "задаёт поля"
 
     event_types o|--o{ event_templates : "ограничивает тему"
     event_classes o|--o{ event_templates : "задаёт событие"
@@ -131,6 +165,8 @@ erDiagram
     exercises ||--o{ exercise_revisions : "имеет редакции"
     event_classes o|--o{ exercise_revisions : "классифицирует"
     exercise_revisions ||--o| incident_card_details : "имеет содержимое"
+    exercise_revisions ||--o{ exercise_additional_values : "содержит значения"
+    event_additional_fields o|--o{ exercise_additional_values : "источник поля"
 
     event_types {
         uuid id PK
@@ -159,6 +195,9 @@ erDiagram
         uuid event_feature_1_id FK
         uuid event_feature_2_id FK
         uuid event_feature_3_id FK
+        string feature_1_label
+        string feature_2_label
+        string feature_3_label
         uuid main_service_id FK
     }
     classifier_versions {
@@ -178,6 +217,21 @@ erDiagram
     event_class_services {
         uuid event_class_id PK, FK
         uuid service_id PK, FK
+    }
+    event_service_routes {
+        uuid id PK
+        uuid event_class_id FK
+        uuid service_id FK
+        string source_column
+        string condition_code
+        string response_label
+    }
+    event_additional_fields {
+        uuid id PK
+        uuid event_class_id FK
+        string field_key
+        string data_type
+        boolean is_required
     }
     event_templates {
         uuid id PK
@@ -215,6 +269,16 @@ erDiagram
         string aon_phone
         decimal latitude
         decimal longitude
+        boolean has_victims_or_deceased
+        boolean ambulance_refused_or_not_on_scene
+        boolean no_access_or_blocked
+    }
+    exercise_additional_values {
+        uuid id PK
+        uuid exercise_revision_id FK
+        uuid source_field_id FK
+        string field_key
+        jsonb value
     }
 ```
 
@@ -232,6 +296,12 @@ erDiagram
     scoring_profiles o|--o{ sessions : "оценивает"
     classifier_versions o|--o{ sessions : "фиксируется в"
     users ||--o{ sessions : "проходит или контролирует"
+    users ||--o{ assignments : "получает задание"
+    assignments o|--o{ sessions : "начинает прохождение"
+    assignments ||--o{ assignment_services : "ограничивает службы"
+    services ||--o{ assignment_services : "выбрана для задания"
+    assignments ||--o{ assignment_exercises : "назначает карточки"
+    exercises ||--o{ assignment_exercises : "входит в задание"
 
     sessions ||--o{ session_cards : "содержит"
     exercise_revisions ||--o{ session_cards : "выдаётся в сессии"
@@ -254,7 +324,11 @@ erDiagram
     sessions {
         uuid id PK
         uuid trainee_id FK
+        uuid trainee_id_snapshot
         uuid teacher_id FK
+        uuid assignment_id FK
+        jsonb assignment_snapshot
+        int normative_seconds
         uuid scoring_profile_id FK
         uuid classifier_version_id FK
         string status
@@ -263,8 +337,25 @@ erDiagram
         uuid id PK
         uuid session_id FK
         uuid exercise_revision_id FK
+        uuid exercise_revision_id_snapshot
+        jsonb exercise_snapshot
         int sequence_number
         string status
+    }
+    assignments {
+        uuid id PK
+        uuid trainee_id FK
+        uuid teacher_id FK
+        int requested_card_count
+        int normative_seconds
+    }
+    assignment_services {
+        uuid assignment_id PK, FK
+        uuid service_id PK, FK
+    }
+    assignment_exercises {
+        uuid assignment_id PK, FK
+        uuid exercise_id PK, FK
     }
     answers {
         uuid id PK
@@ -300,12 +391,19 @@ erDiagram
     exercise_revisions {
         uuid id PK
     }
+    services {
+        uuid id PK
+    }
+    exercises {
+        uuid id PK
+    }
 }
 ```
 
 ## Удаление и история
 
-Пользователи, события, службы, шаблоны, карточки, профили оценки и учебные
-сессии сначала помечаются удалёнными. Поле `purge_after` назначает физическое
-удаление через шесть месяцев. Зависимые записи удаляются каскадно только после
-окончательного удаления родительского объекта.
+Пользователи, события, службы, шаблоны, карточки, профили оценки и пустые
+учебные сессии сначала помечаются удалёнными. Поле `purge_after` назначает
+физическое удаление через шесть месяцев. Сессии с ответами, сами ответы и
+оценки хранятся бессрочно. Удаление исходного пользователя или карточки не
+удаляет результат: необходимые данные остаются в снимках сессии и карточки.

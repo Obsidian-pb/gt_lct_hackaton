@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Table, Text, Column
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Table, Text, Column, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from trainer_db.models.base import (
@@ -49,6 +49,18 @@ role_permissions = Table(
         ForeignKey("auth.permissions.id", ondelete="CASCADE"),
         primary_key=True,
     ),
+    schema="auth",
+)
+
+
+user_services = Table(
+    "user_services",
+    Base.metadata,
+    Column("user_id", ForeignKey("auth.users.id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", ForeignKey("catalog.services.id", ondelete="CASCADE"), primary_key=True),
+    Column("assigned_by", ForeignKey("auth.users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Index("ix_user_services_service_id", "service_id"),
     schema="auth",
 )
 
