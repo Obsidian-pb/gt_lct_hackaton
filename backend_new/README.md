@@ -69,7 +69,37 @@ alembic revision --autogenerate -m "описание изменения"
 alembic upgrade head
 ```
 
+## Карта API v1 (62 маршрута)
+
+| Группа | Маршруты |
+|---|---|
+| auth | `POST /api/v1/auth/login`, `POST /auth/refresh`, `GET /auth/me` |
+| users | `GET/POST /api/v1/users`, `GET/PATCH/DELETE /users/{id}`, `PUT /users/{id}/roles`, `GET /users/roles` |
+| reference | `/scenario-statuses`, `/applicant-statuses`, `/training-roles` (CRUD) |
+| catalog | `/services`, `/classifier/event-types`, `/classifier/features-1..3`, `/classifier/versions`, `/event-groups` |
+| study-tasks | `GET/POST /study-tasks`, `GET/PATCH/DELETE /study-tasks/{id}`, `POST /study-tasks/{id}/approve`, `POST /study-tasks/{id}/generate` (ИИ-заглушка 501) |
+| scenarios | `GET/POST /scenarios`, `GET/PATCH/DELETE /scenarios/{id}`, `POST /scenarios/{id}/approve`, `POST/DELETE /scenarios/{id}/tasks...` |
+| trainings | `GET/POST /trainings`, `GET/PATCH/DELETE /trainings/{id}`, `POST /trainings/{id}/activate|finish`, `POST/DELETE /trainings/{id}/participants...`, `GET /trainings/{id}/progress` |
+| runtime | `POST /sessions/start`, `POST /sessions/{id}/finish`, `GET /sessions/{id}/next-task`, `POST /sessions/{id}/accept-call`, `PATCH /cards/{id}/content`, `POST /cards/{id}/submit` |
+| dispatcher (окно 36) | `GET /dispatcher/cards`, `POST /cards/{id}/accept|route|process` |
+| cards | `GET /cards`, `GET /cards/{id}`, `POST /cards/{id}/grade` |
+| reports | `GET /reports/summary`, `GET /reports/training/{id}`, `GET /reports/export.csv` |
+| materials | `GET/POST /materials`, `GET /materials/{id}/download`, `DELETE /materials/{id}` |
+| system | `GET /system/health`, `GET /system/settings`, `PUT /system/settings/{key}`, `GET /audit` |
+
+Все маршруты, кроме `POST /auth/login`, требуют JWT (HTTP Bearer). Доступ по ролям:
+`system_admin` — системные настройки и аудит; `admin`/`teacher` — учебный контент;
+`student` — чтение и прохождение назначенных тренировок.
+
 ## Тесты
 
 ```bash
-pytest
+pytest                              # контрактные тесты OpenAPI + целостность моделей
+.venv\Scripts\python.exe scripts\smoke_auth.py       # авторизация и пользователи
+.venv\Scripts\python.exe scripts\smoke_reference.py  # справочники и классификатор
+.venv\Scripts\python.exe scripts\smoke_content.py    # задачи и сценарии
+.venv\Scripts\python.exe scripts\smoke_training.py   # полный учебный цикл (сценар. 3-4 ТЗ)
+.venv\Scripts\python.exe scripts\smoke_system.py     # отчёты, материалы, настройки, аудит
+```
+
+Администратор по умолчанию: `admin` / `admin123` (создаётся при старте в dev-режиме).

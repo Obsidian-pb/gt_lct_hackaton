@@ -21,7 +21,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
     Base,
@@ -212,6 +212,12 @@ class EventClass(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Bas
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    extra_fields: Mapped[list[EventClassExtraField]] = relationship(
+        back_populates="event_class",
+        cascade="all, delete-orphan",
+        order_by="EventClassExtraField.sort_order",
+    )
+
 
 class Service(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Base):
     """Справочник служб (окно 34 ТЗ): id, название, описание."""
@@ -260,3 +266,5 @@ class EventClassExtraField(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+
+    event_class: Mapped[EventClass] = relationship(back_populates="extra_fields")
