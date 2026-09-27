@@ -4,10 +4,8 @@ let overview={sessions:[],tasks:[]},loadError='',routeTicket=0;
 const statuses={active:'В процессе',submitted:'На проверке',pending_teacher:'На проверке',reviewed:'Проверена'};
 const workflowLabel=k=>k==='dds'?'Диспетчер ДДС':'Оператор 112';
 const dateShort=s=>s?new Date(s).toLocaleDateString('ru-RU'):'—';
-async function fetchOverview(){
- const response=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json','X-UI-Token':document.querySelector('meta[name=ui-token]').content},body:JSON.stringify({action:'teacher_overview'})});
- const data=await response.json();if(!response.ok)throw Error(data.error||'Не удалось загрузить тренировки.');return data.result;
-}
+async function fetchOverview(){return globalThis.TrainingAPI.api('teacher_overview');}
+
 function table(rows,emptyText,blank=true){return `<div class="teacher-table-wrap"><table class="teacher-table"><thead><tr><th scope="col">Дата</th><th scope="col">Название</th><th scope="col">Сценарий</th><th scope="col">Обучающийся</th><th scope="col">Результат</th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(dateShort(s.created_at))}</td><td><a href="/training#${s.status==='active'?'learn':'works'}">${esc(s.title)}</a></td><td>${workflowLabel(s.workflow)}</td><td>${esc(s.student)}</td><td>${s.grade!=null?esc(s.grade)+' / 5':esc(statuses[s.status]||'—')}</td></tr>`).join('')||`<tr class="empty-row"><td colspan="5">${esc(emptyText)}</td></tr>`}${blank?Array.from({length:Math.max(0,4-Math.max(1,rows.length))},()=>'<tr class="blank-row" aria-hidden="true"><td colspan="5"></td></tr>').join(''):''}</tbody></table></div>`;}
 function home(){return `<section class="teacher-hero"><p class="teacher-eyebrow">Панель преподавателя</p><h1>УПРАВЛЯЙТЕ<br>ОБУЧЕНИЕМ</h1></section><section class="teacher-actions" aria-label="Быстрые действия">${[
  ['plus','Создать<br>тренировку','/training#learn','primary'],['file','Выбрать<br>сценарий','/teacher#scenarios',''],['users','Назначить<br>обучающихся','/teacher#students',''],['chart','Посмотреть<br>результаты','/teacher#results','']

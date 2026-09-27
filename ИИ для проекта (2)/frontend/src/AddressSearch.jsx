@@ -1,8 +1,9 @@
+import {api} from './api.js';
 import {useEffect,useId,useMemo,useState} from 'react';
 import {coordinates,searchAddresses} from './address-search.js';
 import AddressMap from './AddressMap.jsx';
 let cached;
-function load(){if(!cached)cached=Promise.all(['/geo/addresses.json','/geo/map.json'].map(async url=>{const r=await fetch(url);if(!r.ok)throw Error('Не удалось загрузить карту и адреса.');return r.json();})).then(([index,map])=>({index,map})).catch(e=>{cached=null;throw e;});return cached;}
+function load(){if(!cached)cached=Promise.all([api('geo_addresses'),api('geo_map')]).then(([index,map])=>({index,map})).catch(e=>{cached=null;throw e;});return cached;}
 export default function AddressSearch({fields,geocoding,readonly,onSelect,onClear}){
  const [data,setData]=useState(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0),[query,setQuery]=useState(''),[open,setOpen]=useState(false),[active,setActive]=useState(-1);
  const id=useId(),label=[fields.city,fields.street,fields.house].filter(Boolean).join(', ');
