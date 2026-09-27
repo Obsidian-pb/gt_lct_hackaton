@@ -83,7 +83,7 @@ class Engine:
         if workflow == 'dds':
             result = dds.create_draft(self.provider, topic, level, FIELDS)
             task = {key: result.get(key) for key in ('title', 'opening', 'persona', 'fields', 'incoming_card', 'verification_notes', 'service', 'faults', 'actions')}
-            task.update(id='t-' + uuid.uuid4().hex[:12], workflow='dds', level=level, status='draft', created_at=now(), source='gigachat')
+            task.update(id='t-' + uuid.uuid4().hex[:12], workflow='dds', level=level, status='draft', created_at=now(), source='ai')
             validate_task(task)
             return self.save(task)
         result = self.provider.generate('''Ты автор задания для обучения диспетчера. Создай вымышленный сценарий.
@@ -97,7 +97,7 @@ JSON: {"title":"название", "opening":"первая короткая ре
 medium: неполное сообщение. hard: растерянность, неполные сведения; конкретные вопросы всё же дают полезные ответы.
 Сценарий и эталон согласованы. Не включай в первую реплику все ответы.''', {'topic': topic, 'level': level, 'field_labels': FIELDS}, .6, schema=task_schema(FIELDS))
         task = {key: result.get(key) for key in ('title', 'opening', 'persona', 'fields')}
-        task.update(id='t-' + uuid.uuid4().hex[:12], workflow='caller', level=level, status='draft', created_at=now(), source='gigachat')
+        task.update(id='t-' + uuid.uuid4().hex[:12], workflow='caller', level=level, status='draft', created_at=now(), source='ai')
         validate_task(task)
         return self.save(task)
 

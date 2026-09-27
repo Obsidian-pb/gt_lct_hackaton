@@ -184,7 +184,7 @@ caller_role: «Участник», «Очевидец», «Родственни�
          'batch_position': index, 'batch_size': total, 'variation_seed': uuid.uuid4().hex,
          'recent_titles': recent}, temperature=.65, schema=schema)
     if not isinstance(result, dict) or set(result) != {'title', 'report', 'fields'} or not isinstance(result['fields'], dict) or set(result['fields']) != set(GENERATED):
-        raise ValueError('ГигаЧат вернул неполную карточку. Повторите генерацию этой позиции.')
+        raise ValueError('ИИ вернул неполную карточку. Повторите генерацию этой позиции.')
     fields = {k: '' for k in LABELS}
     fields.update(result['fields'])
     fields.update(phone_aon='Не определён: вымышленная карточка', vis_info='Не предоставлена')

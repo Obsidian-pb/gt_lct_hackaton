@@ -5,6 +5,6 @@ export async function api(action,payload={}) {
   let data;try{data=await response.json();}catch{throw Error('Сервер вернул некорректный ответ. Сохранённые карточки остаются в браузере.');}
   if(!response.ok||data.error)throw Error(data.error||'Не удалось выполнить запрос.');
   return data.result;
- }catch(e){if(e.name==='AbortError')throw Error('Время ожидания ГигаЧата истекло. Можно продолжить с этой позиции.');throw e;}
+ }catch(e){if(e.name==='AbortError')throw Error('Время ожидания ИИ истекло. Можно продолжить с этой позиции.');throw e;}
  finally{clearTimeout(timer);}
 }

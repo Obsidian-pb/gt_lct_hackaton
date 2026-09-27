@@ -1,4 +1,4 @@
-"""Stateless GigaChat caller preview for the teacher's local card workshop."""
+"""Stateless AI caller preview for the teacher's local card workshop."""
 import copy
 import re
 from card_factory import validate_content

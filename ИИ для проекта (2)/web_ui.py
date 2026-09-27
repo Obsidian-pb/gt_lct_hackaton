@@ -4,6 +4,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
 import secrets
 import socket
 import threading
@@ -13,7 +14,7 @@ import webbrowser
 from datetime import datetime
 
 from ai_core import Engine, FIELDS, LEVELS, VERDICTS, validate_task, require_text
-from provider import GigaChat
+from provider import AIProvider
 from dds import WORKFLOWS, ACTION_LABELS
 import card_factory
 import card_reference
@@ -28,15 +29,10 @@ ROOT = Path(__file__).resolve().parent
 # Capture once: changing files must not make an old process claim to run new code.
 UI_REVISION = release_id()
 
-BANNER_FILES = {
-    'gas-leak': 'gas-leak.png',
-    'person-danger': 'person-danger.png',
-    'road-injured': 'road-injured.png',
-    'mass-event': 'mass-event.png',
-    'industrial-fire': 'industrial-fire.png',
-    'residential-fire': 'residential-fire.png',
-}
+BANNER_DIR = ROOT / 'ui' / 'banners'
+BANNER_FILES = {path.stem: path.name for path in BANNER_DIR.glob('*.png')}
 _CLASS_BY_ID = {row['id']: row for row in card_factory.CATALOG}
+_BANNER_MAP_PATH = ROOT / 'ui' / 'banners' / 'banner-map.json'
 
 
 def _task_class_ids(task):
@@ -56,41 +52,124 @@ def _task_class_ids(task):
     return []
 
 
-def briefing_banner(task):
-    """Choose the briefing illustration from the approved incident classifier."""
-    for class_id in _task_class_ids(task):
-        row = _CLASS_BY_ID.get(class_id, {})
-        category = str(row.get('category', ''))
-        text = ' '.join(str(row.get(key, '')) for key in
-                        ('group', 'statistical_group', 'sign1', 'sign2', 'sign3', 'extra_signs', 'title', 'ekp_type')).lower()
-        if category == '2' and 'пострадав' in text:
-            return 'road-injured'
-        if category == '13':
-            return 'gas-leak'
-        if category == '17':
-            return 'person-danger'
-        if category == '1' and any(word in text for word in ('производств', 'цех', 'завод', 'промышлен', 'производственно-склад')):
-            return 'industrial-fire'
-        if category == '1' and any(word in text for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'мусоропровод', 'подвал')):
-            return 'residential-fire'
-        if category == '15' and any(word in text for word in ('массов', 'скопление людей', 'толпа', 'давка', 'митинг', 'шествие', 'пикет')):
-            return 'mass-event'
+def _banner_map():
+    """Load editable classifier-to-banner bindings without hard-coding every photo in React."""
+    try:
+        data = json.loads(_BANNER_MAP_PATH.read_text(encoding='utf-8'))
+        if isinstance(data, dict):
+            return data
+    except (OSError, ValueError, TypeError):
+        pass
+    return {}
 
-    # Old exercises may not carry classifier ids. Keep a conservative title fallback.
-    title = str(task.get('title', '')).lower()
-    if 'дтп' in title and 'пострадав' in title:
-        return 'road-injured'
-    if any(word in title for word in ('запах газа', 'утечка газа', 'газопровод')):
-        return 'gas-leak'
-    if any(word in title for word in ('человек в опасности', 'крики о помощи', 'человека зажало', 'падение с высоты')):
-        return 'person-danger'
-    if any(word in title for word in ('массовое мероприят', 'массовые беспоряд', 'скопление людей', 'толпа', 'давка', 'митинг', 'концерт')):
-        return 'mass-event'
-    if 'пожар' in title and any(word in title for word in ('производств', 'цех', 'завод', 'промышлен', 'склад')):
-        return 'industrial-fire'
-    if 'пожар' in title and any(word in title for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'подвал')):
-        return 'residential-fire'
+
+def _norm_text(value):
+    value = str(value or '').lower().replace('ё', 'е')
+    return re.sub(r'\s+', ' ', value).strip()
+
+
+def _mapped_banner(row, mapping):
+    title = _norm_text(row.get('title') or row.get('ekp_type') or '')
+    group = _norm_text(row.get('group') or '')
+    exact = mapping.get('class_ids') if isinstance(mapping.get('class_ids'), dict) else {}
+    title_keywords = mapping.get('title_keywords') if isinstance(mapping.get('title_keywords'), dict) else {}
+    group_keywords = mapping.get('group_keywords') if isinstance(mapping.get('group_keywords'), dict) else {}
+    categories = mapping.get('categories') if isinstance(mapping.get('categories'), dict) else {}
+
+    class_id = str(row.get('id') or '')
+    if class_id in exact:
+        return exact[class_id]
+    for needle, banner in sorted(title_keywords.items(), key=lambda item: len(_norm_text(item[0])), reverse=True):
+        if _norm_text(needle) and _norm_text(needle) in title:
+            return banner
+    for needle, banner in sorted(group_keywords.items(), key=lambda item: len(_norm_text(item[0])), reverse=True):
+        if _norm_text(needle) and _norm_text(needle) in group:
+            return banner
+    category_banner = categories.get(str(row.get('category', '')))
+    if category_banner:
+        return category_banner
     return None
+
+
+def _legacy_banner_for_row(row):
+    category = str(row.get('category', ''))
+    text = ' '.join(str(row.get(key, '')) for key in
+                    ('group', 'statistical_group', 'sign1', 'sign2', 'sign3', 'extra_signs', 'title', 'ekp_type')).lower()
+    if category == '2' and 'пострадав' in text:
+        return 'road-injured'
+    if category == '13':
+        return 'gas-leak'
+    if category == '17':
+        return 'person-danger'
+    if category == '1' and any(word in text for word in ('производств', 'цех', 'завод', 'промышлен', 'производственно-склад')):
+        return 'industrial-fire'
+    if category == '1' and any(word in text for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'мусоропровод', 'подвал')):
+        return 'residential-fire'
+    if category == '15' and any(word in text for word in ('массов', 'скопление людей', 'толпа', 'давка', 'митинг', 'шествие', 'пикет')):
+        return 'mass-event'
+    return None
+
+
+def briefing_meta(task):
+    """Return classifier-derived preparation text and the configured illustration key."""
+    class_ids = _task_class_ids(task)
+    rows = [_CLASS_BY_ID[class_id] for class_id in class_ids if class_id in _CLASS_BY_ID]
+    mapping = _banner_map()
+    exact = mapping.get('class_ids') if isinstance(mapping.get('class_ids'), dict) else {}
+    categories = mapping.get('categories') if isinstance(mapping.get('categories'), dict) else {}
+
+    banner = None
+    for class_id, row in zip(class_ids, rows):
+        banner = exact.get(class_id)
+        if banner:
+            break
+        banner = _mapped_banner(row, mapping)
+        if banner:
+            break
+        banner = _legacy_banner_for_row(row)
+        if banner:
+            break
+    if not banner:
+        for row in rows:
+            banner = categories.get(str(row.get('category', ''))) or mapping.get('default')
+            if banner:
+                break
+
+    if rows:
+        # The selected classifier is authoritative for what is shown before the card opens.
+        titles = []
+        for row in rows:
+            title = str(row.get('title') or row.get('ekp_type') or row.get('group') or '').strip()
+            if title and title not in titles:
+                titles.append(title)
+        incident_label = '; '.join(titles) if titles else str(task.get('title', '')).strip()
+        group_label = '; '.join(dict.fromkeys(str(row.get('group', '')).strip() for row in rows if str(row.get('group', '')).strip()))
+        return {'banner_key': banner, 'incident_label': incident_label,
+                'incident_group': group_label, 'classifier_ids': class_ids}
+
+    # Compatibility for old exercises that do not contain classifier ids.
+    title = str(task.get('title', '')).strip()
+    low = title.lower()
+    if not banner:
+        if 'дтп' in low and 'пострадав' in low:
+            banner = 'road-injured'
+        elif any(word in low for word in ('запах газа', 'утечка газа', 'газопровод')):
+            banner = 'gas-leak'
+        elif any(word in low for word in ('человек в опасности', 'крики о помощи', 'человека зажало', 'падение с высоты')):
+            banner = 'person-danger'
+        elif any(word in low for word in ('массовое мероприят', 'массовые беспоряд', 'скопление людей', 'толпа', 'давка', 'митинг', 'концерт')):
+            banner = 'mass-event'
+        elif 'пожар' in low and any(word in low for word in ('производств', 'цех', 'завод', 'промышлен', 'склад')):
+            banner = 'industrial-fire'
+        elif 'пожар' in low and any(word in low for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'подвал')):
+            banner = 'residential-fire'
+    return {'banner_key': banner or _banner_map().get('default'), 'incident_label': title or 'Учебное происшествие',
+            'incident_group': '', 'classifier_ids': []}
+
+
+def briefing_banner(task):
+    """Backward-compatible banner-only helper."""
+    return briefing_meta(task)['banner_key']
 
 
 def student_portal_view(engine, identifier, full_form=False):
@@ -98,7 +177,7 @@ def student_portal_view(engine, identifier, full_form=False):
     session = engine.load(identifier)
     view['training'] = session.get('training')
     view['training_reveals'] = session.get('training_reveals', [])
-    view['banner_key'] = briefing_banner(session['task'])
+    view.update(briefing_meta(session['task']))
     if incident_training.is_full(session['task']):
         view.update(incident_training.public_metadata(session))
     view['reference'] = ({key: row['expected'] for key, row in session['task']['fields'].items()}
@@ -121,12 +200,12 @@ def dispatch(engine, action, p):
                 'tasks': [{'id': t['id'], 'title': t['title'],
                            'workflow': t.get('workflow', 'caller'), 'teacher': t.get('approved_by', ''),
                            'created_at': t.get('approved_at', t['created_at']),
-                           'banner_key': briefing_banner(t)} for t in engine.approved_tasks()],
+                           **briefing_meta(t)} for t in engine.approved_tasks()],
                 'sessions': [{'id': s['id'], 'task_id': s['task']['id'], 'title': s['task']['title'],
                               'workflow': s['task'].get('workflow', 'caller'),
                               'status': s['status'], 'created_at': s['created_at'], 'activated_at': s.get('activated_at'),
                               'teacher': (s.get('training') or {}).get('teacher') or s['task'].get('approved_by', ''),
-                              'training': s.get('training'), 'banner_key': briefing_banner(s['task']),
+                              'training': s.get('training'), **briefing_meta(s['task']),
                               'grade': s['teacher_decision']['grade'] if s['status'] == 'reviewed' else None}
                              for s in sessions]}
     if action == 'student_start':
@@ -177,6 +256,8 @@ def dispatch(engine, action, p):
         return incident_training.publish(engine, p)
     if action == 'card_meta':
         return card_factory.metadata()
+    if action == 'ai_status':
+        return engine.provider.status()
     if action == 'tts_status':
         return piper_tts.status()
     if action == 'tts_synthesize':
@@ -382,7 +463,7 @@ def main():
     parser.add_argument('--data-dir')
     args = parser.parse_args()
     validate_ui()
-    engine = Engine(GigaChat(), args.data_dir)
+    engine = Engine(AIProvider(), args.data_dir)
     try:
         server = make_server(engine, args.port)
     except OSError:

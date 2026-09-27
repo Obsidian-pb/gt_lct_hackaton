@@ -2,12 +2,12 @@
 import json
 from pathlib import Path
 from card_factory import generate, approve
-from provider import GigaChat
+from provider import AIProvider
 from card_reference import generate as generate_reference
 
 
 def main():
-    provider = GigaChat()
+    provider = AIProvider()
     out = Path(__file__).with_name('test-output') / 'cards-live'
     out.mkdir(parents=True, exist_ok=True)
     cases = [('fire', 'Задымление, сведения о людях неполные', 2, 2),

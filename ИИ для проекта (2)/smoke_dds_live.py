@@ -1,12 +1,12 @@
-"""Opt-in real GigaChat smoke test. Uses isolated technical-test records."""
+"""Opt-in real AI smoke test. Uses isolated technical-test records."""
 from pathlib import Path
 from ai_core import Engine
-from provider import GigaChat
+from provider import AIProvider
 
 
 def main():
-    e=Engine(GigaChat(), Path(__file__).with_name('test-output'))
-    print('1/4 GigaChat создаёт вариант ДДС…',flush=True)
+    e=Engine(AIProvider(), Path(__file__).with_name('test-output'))
+    print('1/4 ИИ создаёт вариант ДДС…',flush=True)
     t=e.draft('Повреждение водопроводной трубы во дворе вымышленного Учебного города. Ошибка в номере дома обнаруживается по приложенному уточнению 112.', 'hard', 'dds')
     e.approve(t['id'],'Технический тест — не учебное утверждение')
     sid=e.start(t['id'],'Тест ДДС')['id']; e.connect_service(sid)
@@ -20,7 +20,7 @@ def main():
     reply=e.ask(sid,f"Передаю сообщение: адрес {t['fields']['address']['expected']}. {t['fields']['incident']['expected']}. Подтвердите, что приняли.")
     print('Служба:',reply,flush=True)
     e.submit(sid)
-    print('4/4 Предварительный разбор GigaChat…',flush=True)
+    print('4/4 Предварительный разбор ИИ…',flush=True)
     result=e.assess(sid)
     assert len(result['fields'])==11
     assert e.student_view(sid)['result'] is None
