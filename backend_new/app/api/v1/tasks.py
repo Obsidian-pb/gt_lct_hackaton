@@ -99,13 +99,4 @@ async def decide_task(
     return task_to_out(task)
 
 
-@router.post("/{task_id}/generate", status_code=501, summary="Генерация задачи ИИ (заглушка)")
-async def generate_task(
-    task_id: UUID,
-    _: CurrentUser,
-    __: Annotated[object, Depends(editor_access)],
-) -> None:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Генерация учебных задач ИИ будет реализована после интеграции ИИ-модуля",
-    )
+# Генерация задачи ИИ перенесена в app/api/v1/ai.py: POST /study-tasks/{task_id}/generate
