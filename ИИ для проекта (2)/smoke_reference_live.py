@@ -3,11 +3,11 @@ import json
 from pathlib import Path
 from card_factory import LABELS, CATALOG
 from card_reference import generate
-from provider import GigaChat
+from provider import AIProvider
 
 
 def main():
-    provider = GigaChat()
+    provider = AIProvider()
     entry = next(x for x in CATALOG if x['category']=='1' and x['sign2']=='балкон' and x['sign3']=='открытое пламя')
     reports = [
         ('correction', 'Я очевидец. Горит балкон. Учебный город, улица Лесная, дом 12, нет, 14. Про людей не знаю.'),

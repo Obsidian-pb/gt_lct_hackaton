@@ -54,5 +54,5 @@ try{
  for(const el of await page.locator('[data-decision]').all())await el.selectOption('agree');
  for(const el of await page.locator('[data-decision-note]').all())await el.fill('Проверено преподавателем');
  await page.locator('#teacher-conclusion').fill('Работа проверена.');await page.locator('#teacher-finalize').click();await page.getByText('Итог: 4 / 5',{exact:true}).waitFor();
- assert.deepEqual(errors,[]);console.log('PASS: OSM typo/house/street/clear coordinates; approved card → full student worksheet → GigaChat caller contract → phone disclosure → persistence → submission → full-field AI review → teacher decision; mobile.');
+ assert.deepEqual(errors,[]);console.log('PASS: OSM typo/house/street/clear coordinates; approved card → full student worksheet → AI caller contract → phone disclosure → persistence → submission → full-field AI review → teacher decision; mobile.');
 }finally{server.kill();await browser.close();}

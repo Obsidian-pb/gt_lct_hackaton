@@ -85,7 +85,7 @@ def validate_reference(reference, content, scenario=None):
 def parse_answer(raw, content, snippets):
     answer = copy.deepcopy(raw)
     if not isinstance(answer, dict) or not isinstance(answer.get('expected_fields'), dict):
-        raise ValueError('ГигаЧат вернул неполный эталон.')
+        raise ValueError('ИИ вернул неполный эталон.')
     for key, row in answer['expected_fields'].items():
         if not isinstance(row, dict) or set(row) != {'value', 'source_id'}:
             raise ValueError('Неверная ссылка на исходное сообщение: ' + key)

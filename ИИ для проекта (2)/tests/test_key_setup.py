@@ -16,25 +16,27 @@ class KeySetupTests(unittest.TestCase):
         self.config = self.root / 'config.local.json'
         self.script = Path(__file__).resolve().parents[1] / 'setup_key.ps1'
 
-    def run_writer(self, key):
+    def run_writer(self, key, **settings):
         def quote(value):
             return "'" + str(value).replace("'", "''") + "'"
         entry = self.root / 'test.ps1'
         entry.write_text(
             '. ' + quote(self.script) + '\ntry {\n'
-            + 'Save-GigaChatKey -Directory ' + quote(self.root) + ' -Key ' + quote(key)
+            + 'Save-AIKey -Directory ' + quote(self.root) + ' -Key ' + quote(key)
+            + ''.join(' -' + name + ' ' + quote(value) for name, value in settings.items())
             + ' | Out-Null\nexit 0\n} catch { exit 1 }\n', encoding='utf-8-sig')
         result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                                  '-File', str(entry)], capture_output=True, timeout=20)
         self.assertNotIn(key.encode(), result.stdout + result.stderr)
-        self.assertEqual(list(self.root.glob('.gigachat-config-*.tmp')), [])
+        self.assertEqual(list(self.root.glob('.ai-config-*.tmp')), [])
         return result.returncode
 
-    def test_first_key_is_saved_with_personal_defaults(self):
+    def test_first_key_is_saved_with_portable_defaults(self):
         self.assertEqual(self.run_writer('Basic ZHVtbXk6ZmFrZQ=='), 0)
         data = json.loads(self.config.read_text(encoding='utf-8'))
         self.assertEqual(data['authorization_key'], 'ZHVtbXk6ZmFrZQ==')
-        self.assertEqual(data['scope'], 'GIGACHAT_API_PERS')
+        self.assertEqual(data['scope'], 'auto')
+        self.assertEqual(data['model'], 'auto')
         self.assertTrue(data['verify_ssl'])
 
     def test_replacement_preserves_connection_settings(self):
@@ -58,6 +60,30 @@ class KeySetupTests(unittest.TestCase):
         self.config.write_text('{broken-json', encoding='utf-8')
         self.assertNotEqual(self.run_writer('new-test-key'), 0)
         self.assertEqual(self.config.read_text(encoding='utf-8'), '{broken-json')
+
+    def test_switch_from_gigachat_to_openai_clears_stale_connection(self):
+        self.config.write_text(json.dumps({'provider': 'gigachat', 'model': 'GigaChat',
+            'authorization_key': 'old', 'base_url': 'https://api.giga.chat/v1',
+            'oauth_url': 'https://old.invalid/oauth', 'ca_bundle': 'old.pem', 'custom': 42}))
+        self.assertEqual(self.run_writer('Bearer sk-proj-fake', Provider='openai', Model='auto'), 0)
+        actual = json.loads(self.config.read_text())
+        self.assertEqual(actual['provider'], 'openai')
+        self.assertEqual(actual['authorization_key'], 'sk-proj-fake')
+        self.assertEqual(actual['model'], 'auto')
+        self.assertEqual(actual['custom'], 42)
+        for field in ('base_url', 'oauth_url', 'ca_bundle'):
+            self.assertNotIn(field, actual)
+
+    def test_custom_api_requires_model_and_https_without_touching_file(self):
+        self.config.write_text('{"authorization_key":"keep"}')
+        before = self.config.read_bytes()
+        for base, model in [('http://api.invalid/v1', 'chat'), ('https://api.invalid/v1', 'auto'), ('https://api.invalid/v1?key=secret', 'chat')]:
+            self.assertNotEqual(self.run_writer('fake-key', Provider='openai_compatible', Model=model, BaseUrl=base), 0)
+            self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(self.run_writer('opaque:key', Provider='openai_compatible', Model='vendor/chat', BaseUrl='https://api.invalid/v1/'), 0)
+        actual = json.loads(self.config.read_text())
+        self.assertEqual(actual['base_url'], 'https://api.invalid/v1')
+        self.assertEqual(actual['model'], 'vendor/chat')
 
     def test_interactive_entry_saves_key_and_calls_restart_without_leaking(self):
         helper = self.root / 'setup_key.ps1'

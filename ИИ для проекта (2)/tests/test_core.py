@@ -119,11 +119,11 @@ class FlowTests(unittest.TestCase):
     def test_console_full_teacher_student_cycle(self):
         import console
         self.p.response = self.report() | {'reply': 'Муж заходил, но я не видела, чтобы он вышел.'}
-        inputs = ['2', '1', '2', '2', 'Учитель', 'да', '5', '1', 'Ученик', 'Кто внутри?',
+        inputs = ['2', '1', '2', 'Учитель', 'да', '5', '1', 'Ученик', 'Кто внутри?',
                   '/set people Возможно, муж внутри', '/finish', 'да', '4', '1', 'да',
                   *(['1'] * 7), 'Учитель', '4', 'Проверено мной', 'да', '6', 'Ученик', '1', '0']
         output = io.StringIO()
-        with patch.object(console, 'GigaChat', return_value=self.p), patch('builtins.input', side_effect=inputs), \
+        with patch.object(console, 'AIProvider', return_value=self.p), patch('builtins.input', side_effect=inputs), \
              patch('sys.argv', ['console.py', '--data-dir', self.temp.name]), redirect_stdout(output):
             console.main()
         self.assertIn('Передано на проверку преподавателю.', output.getvalue())

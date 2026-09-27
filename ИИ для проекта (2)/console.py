@@ -2,7 +2,7 @@
 import argparse
 import sys
 from ai_core import Engine, FIELDS, LEVELS, VERDICTS
-from provider import GigaChat
+from provider import AIProvider
 from voice import capture
 from dds import WORKFLOWS, ACTION_LABELS
 
@@ -66,7 +66,7 @@ def edit_task(engine, t):
 
 def review(engine, session):
     if session['status'] == 'submitted':
-        print('GigaChat готовит предварительное заключение…'); engine.assess(session['id'])
+        print('ИИ готовит предварительное заключение…'); engine.assess(session['id'])
     s = engine.load(session['id'])
     labels = FIELDS | (ACTION_LABELS if s['task'].get('workflow') == 'dds' else {})
     print('\nРАБОТА НА СТОЛЕ ПРЕПОДАВАТЕЛЯ:', s['student'], '|', s['task']['title'])
@@ -214,8 +214,8 @@ def main():
     parser = argparse.ArgumentParser(description='ИИ для проекта — консольный прототип')
     parser.add_argument('--data-dir', help='Отдельное хранилище упражнений')
     args = parser.parse_args()
-    engine = Engine(GigaChat(), args.data_dir)
-    print('ИИ ДЛЯ ПРОЕКТА · ПРОБНАЯ ВЕРСИЯ · GigaChat')
+    engine = Engine(AIProvider(), args.data_dir)
+    print('ИИ ДЛЯ ПРОЕКТА · ПРОБНАЯ ВЕРСИЯ · ИИ')
     print('Учебная карточка временная. Роли переключаются без пароля только для тестирования.')
     print('Все изменения сохраняются автоматически. Ctrl+C в главном меню — выход.')
     while True:
@@ -230,7 +230,7 @@ def main():
                 workflow = choose_workflow()
                 level = 'medium'  # internal legacy dialogue profile; no user-selectable difficulty
                 if choice == '1':
-                    topic = input('Тема задания: '); print('GigaChat создаёт задание и черновик эталона…')
+                    topic = input('Тема задания: '); print('ИИ создаёт задание и черновик эталона…')
                     task = engine.draft(topic, level, workflow)
                 else:
                     task = engine.sample(level, workflow)

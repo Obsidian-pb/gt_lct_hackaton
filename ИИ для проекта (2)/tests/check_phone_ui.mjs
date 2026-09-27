@@ -64,5 +64,5 @@ try{
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:'test-output/phone-mobile.png'});
- assert.deepEqual(errors,[]);console.log('PASS: simulated AON, hidden callback, GigaChat dialogue, failure retry, manual entry, reference isolation, approval lock, draft migration, persistence and mobile.');
+ assert.deepEqual(errors,[]);console.log('PASS: simulated AON, hidden callback, AI dialogue, failure retry, manual entry, reference isolation, approval lock, draft migration, persistence and mobile.');
 }finally{server.kill();await browser.close();}

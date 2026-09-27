@@ -9,6 +9,9 @@ if not exist "%~dp0config.local.json" (
     if errorlevel 1 goto key_cancelled
 )
 
+rem Prepare the local certificate used by the external AI connection.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0PREPARE_AI_CONNECTION.ps1"
+
 call "%~dp0BUILD_UI.cmd"
 if errorlevel 1 goto build_failed
 

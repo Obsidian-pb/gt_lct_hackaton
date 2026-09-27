@@ -19,13 +19,13 @@ async function api(action,payload={}){
   let data;try{data=await r.json();}catch{throw Error('Сервер вернул некорректный ответ. Готовые карточки остаются в браузере.');}
   if(!r.ok||data.error)throw Error(data.error||'Не удалось выполнить запрос.');
   return data.result;
- }catch(e){if(e.name==='AbortError')throw Error('Время ожидания ГигаЧата истекло. Можно продолжить с этой позиции.');throw e;}
+ }catch(e){if(e.name==='AbortError')throw Error('Время ожидания ИИ истекло. Можно продолжить с этой позиции.');throw e;}
  finally{clearTimeout(timer);}
 }
 function emptyContent(){return {title:'Новая карточка',report:'',fields:Object.fromEntries(Object.values(meta.groups).flatMap(([,fields])=>Object.keys(fields).map(k=>[k,'']))),class_ids:[],services:[],main_service:''};}
 function addCard(content,provenance){
  const at=new Date().toISOString(), id=crypto.randomUUID();
- const record={id,number:'К-'+id.slice(0,8).toUpperCase(),status:'draft',created_at:at,updated_at:at,revision:1,content,provenance,review:null,history:[{at,action:'created',text:provenance.source==='gigachat'?'Создано ГигаЧатом':'Создано вручную'}]};
+ const record={id,number:'К-'+id.slice(0,8).toUpperCase(),status:'draft',created_at:at,updated_at:at,revision:1,content,provenance,review:null,history:[{at,action:'created',text:['ai','gigachat'].includes(provenance.source)?'Создано ИИ':'Создано вручную'}]};
  state.cards.unshift(record);if(!state.selected)state.selected=id;return record;
 }
 function touch(card){card.updated_at=new Date().toISOString();card.revision++;persist();renderList();}
@@ -53,7 +53,7 @@ function renderEditor(){
   const body=renderFields(main)+(secondary.length?`<details><summary>${key==='address'?'Полный адрес и координаты':key==='caller'?'АОН и телефон на месте':'Дополнительные сведения'}</summary><div class="details-body">${renderFields(secondary)}</div></details>`:'');
   return key==='registration'?`<section class="card-section"><details><summary>Регистрация и контроль</summary><div class="details-body">${body}</div></details></section>`:`<section class="card-section"><div class="section-head"><span>0${index+2}</span><h3>${escapeHTML(label)}</h3></div>${body}${key==='address'?'<p class="source-note">Проверка по Яндексу и карта пока не подключены. Координаты ИИ не придумывает.</p>':''}</section>`;
  });
- $('#editor').innerHTML=`<div class="editor-head"><div class="headline"><small>${escapeHTML(card.number)} · версия ${card.revision}</small><span class="badge ${card.status}">${locked?'Утверждена преподавателем':'На проверке'}</span></div><label for="card-title" class="sr-only">Название карточки</label><input id="card-title" maxlength="160" value="${escapeHTML(c.title)}" ${locked?'readonly':''}><p class="source-note">Создана ${date(card.created_at)} · ${card.provenance.source==='gigachat'?'GigaChat · вымышленные данные':'Заполнена вручную'} · сохранена ${date(card.updated_at)}</p></div>
+ $('#editor').innerHTML=`<div class="editor-head"><div class="headline"><small>${escapeHTML(card.number)} · версия ${card.revision}</small><span class="badge ${card.status}">${locked?'Утверждена преподавателем':'На проверке'}</span></div><label for="card-title" class="sr-only">Название карточки</label><input id="card-title" maxlength="160" value="${escapeHTML(c.title)}" ${locked?'readonly':''}><p class="source-note">Создана ${date(card.created_at)} · ${['ai','gigachat'].includes(card.provenance.source)?'ИИ · вымышленные данные':'Заполнена вручную'} · сохранена ${date(card.updated_at)}</p></div>
  <div class="editor-body"><fieldset id="content-fields" ${locked?'disabled':''}>
  <section class="card-section"><div class="section-head"><span>01</span><h3>Исходное сообщение заявителя</h3></div><label for="report" class="sr-only">Сообщение заявителя</label><textarea id="report" maxlength="6000" rows="4">${escapeHTML(c.report)}</textarea><p class="source-note">Сверьте поля с этим сообщением. Неизвестные сведения не означают отсутствие людей или пострадавших.</p></section>
  ${sections.slice(0,2).join('')}
@@ -86,7 +86,7 @@ async function generateBatch(){
  try{
   while(batch.done<batch.total&&!stopRequested){
    const result=await api('card_generate',{topic:batch.topic,category:batch.category,index:batch.done+1,total:batch.total,recent_titles:state.cards.slice(0,10).map(c=>c.content.title)});
-   addCard(result.content,{source:'gigachat',model:result.model,prompt_version:result.prompt_version,catalog_version:result.catalog_version,generated_at:result.generated_at});
+   addCard(result.content,{source:'ai',model:result.model,prompt_version:result.prompt_version,catalog_version:result.catalog_version,generated_at:result.generated_at});
    batch.done++;persist();renderList();if(!$('#card-title'))renderEditor();renderProgress();
   }
   batch.status=batch.done===batch.total?'done':'paused';
