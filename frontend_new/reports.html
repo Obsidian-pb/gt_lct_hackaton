@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отчёты и аналитика — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Отчёты и аналитика</h1>
+  <p class="sub">Окно 16 ТЗ: сводная статистика, отчёт по тренировке, экспорт CSV.</p>
+
+  <section id="summarySection"></section>
+  <section id="trainingSection"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+async function init() {
+  await renderHeader("reports.html");
+
+  const sum = document.getElementById("summarySection");
+  sum.innerHTML = "<h2>Общая статистика</h2>";
+  try {
+    const s = await act(() => api("/reports/summary"));
+    const statusRows = Object.entries(s.cards_by_status || {}).map(([k, v]) =>
+      "<span class='tag'>" + esc(statusLabel(k)) + ": " + v + "</span>").join(" ");
+    sum.appendChild(cardEl("Карточки происшествий",
+      (() => {
+        const d = document.createElement("div");
+        d.innerHTML =
+          "<p>Всего: <b>" + s.total_cards + "</b> · отправлено: <b>" + s.submitted_cards + "</b> · оценено преподавателем: <b>" + s.evaluated_cards + "</b></p>" +
+          "<p>Средняя машинная оценка: <b>" + fmtNum(s.avg_machine_score) + " %</b> · средняя итоговая: <b>" + fmtNum(s.avg_final_score) + " %</b> · среднее время: " + fmtNum(s.avg_duration_ms ? s.avg_duration_ms / 1000 : null) + " с</p>" +
+          "<p>По статусам: " + (statusRows || "—") + "</p>";
+        return d;
+      })()
+    ));
+  } catch (e) { showError(sum, e); }
+
+  const tr = document.getElementById("trainingSection");
+  tr.innerHTML = "<h2>Отчёт по тренировке</h2>";
+  try {
+    const trainings = await act(() => api("/trainings"));
+    if (!trainings.length) {
+      tr.innerHTML += "<div class='note'>Тренировок ещё нет.</div>";
+      return;
+    }
+    const sel = selectEl(trainings, "— выберите тренировку —");
+    const btn = document.createElement("button");
+    btn.className = "btn ghost";
+    btn.textContent = "Показать отчёт";
+    const box = document.createElement("div");
+    box.id = "reportBox";
+    tr.appendChild(filterBar([{ label: "Тренировка", el: sel }]));
+    const bar = tr.querySelector(".filter-bar");
+    bar.appendChild(btn);
+    tr.appendChild(box);
+
+    btn.onclick = async () => {
+      if (!sel.value) { toast("Выберите тренировку", "err"); return; }
+      box.innerHTML = "";
+      const r = await act(() => api("/reports/training/" + sel.value));
+      box.appendChild(cardEl(r.title,
+        (() => {
+          const d = document.createElement("div");
+          d.innerHTML =
+            "<p>Всего карточек: <b>" + r.total_cards + "</b> · отправлено: <b>" + r.submitted_cards +
+            "</b> · оценено: <b>" + r.evaluated_cards + "</b></p>" +
+            "<p>Средняя машинная оценка: <b>" + fmtNum(r.avg_machine_score) + " %</b> · средняя итоговая: <b>" + fmtNum(r.avg_final_score) + " %</b></p>";
+          d.appendChild(tableEl([
+            { key: "user_id", label: "Участник" },
+            { key: "total_cards", label: "Всего" },
+            { key: "submitted_cards", label: "Отправлено" },
+            { key: "avg_machine_score", label: "Средняя машинная", fmt: fmtNum },
+          ], r.participants || [], "Нет данных по участникам"));
+          return d;
+        })()
+      ));
+    };
+  } catch (e) { showError(tr, e); }
+
+  /* Экспорт CSV */
+  tr.insertAdjacentHTML("beforeend", "<h2>Экспорт</h2><div class='panel'>" +
+    "<p>Выгрузка всех карточек в CSV (с разделителем «;»).</p>" +
+    "<button class='btn' onclick='exportCsv()'>Скачать cards_export.csv</button></div>");
+}
+
+async function exportCsv() {
+  busy(true);
+  try {
+    const res = await fetch(getApiBase() + "/reports/export.csv", {
+      headers: { Authorization: "Bearer " + getToken() },
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cards_export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("CSV скачан", "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+}
+
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>

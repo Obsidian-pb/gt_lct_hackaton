@@ -1,0 +1,58 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.dbeaver/
+.dbeaver-data-sources*.xml
+.metadata/
+.settings/
+.project
+.DS_Store
+Thumbs.db
+
+# Local database files, dumps and runtime logs
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.log
+.postgres_data/
+postgres_data/
+pgdata/
+docker-compose.override.yml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+~$*.xlsx
+
+# Generated from the versioned Excel classifier; regenerate when needed
+database/classifier_import.sql
+
+# Frontend dependencies
+/frontend/node_modules

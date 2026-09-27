@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Справочники — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Справочники</h1>
+  <p class="sub">Окна 28–35 ТЗ: службы (34), статусы сценариев (31), статусы заявителей (32), роли обучающихся (35), группы происшествий и классификатор (28–29).</p>
+
+  <div class="filter-bar">
+    <button class="btn ghost" onclick="showTab('services')">Службы (34)</button>
+    <button class="btn ghost" onclick="showTab('scenarioStatuses')">Статусы сценариев (31)</button>
+    <button class="btn ghost" onclick="showTab('applicantStatuses')">Статусы заявителей (32)</button>
+    <button class="btn ghost" onclick="showTab('trainingRoles')">Роли обучающихся (35)</button>
+    <button class="btn ghost" onclick="showTab('classifier')">Группы происшествий (28–29)</button>
+  </div>
+
+  <section id="content"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let tab = "services";
+
+async function showTab(name) {
+  tab = name;
+  const sec = document.getElementById("content");
+  try {
+    if (name === "services") await renderServices(sec);
+    else if (name === "scenarioStatuses") await renderSimple(sec, "/scenario-statuses", "Статус сценария");
+    else if (name === "applicantStatuses") await renderSimple(sec, "/applicant-statuses", "Статус заявителя");
+    else if (name === "trainingRoles") await renderTrainingRoles(sec);
+    else if (name === "classifier") await renderClassifier(sec);
+  } catch (e) { showError(sec, e); }
+}
+
+/* ---------- Службы (окно 34) ---------- */
+async function renderServices(sec) {
+  const items = await act(() => api("/services"));
+  sec.innerHTML = "<h2>Службы</h2>";
+  sec.appendChild(tableEl([
+    { key: "code", label: "Код" },
+    { key: "name", label: "Название" },
+    { key: "description", label: "Описание" },
+    { key: "is_active", label: "Активна", fmt: v => v ? "да" : "нет" },
+  ], items));
+
+  sec.insertAdjacentHTML("beforeend",
+    "<h2>Добавить службу</h2><div class='panel'><div class='row'>" +
+    "<label class='field'>Код <input type='text' id='sv_code'></label>" +
+    "<label class='field'>Название <input type='text' id='sv_name'></label>" +
+    "<label class='field'>Описание <input type='text' id='sv_desc'></label>" +
+    "</div><div class='form-actions'><button class='btn ok' onclick='addService()'>Создать</button></div></div>");
+}
+
+async function addService() {
+  const code = document.getElementById("sv_code").value.trim();
+  const name = document.getElementById("sv_name").value.trim();
+  if (!code || !name) { toast("Заполните код и название", "err"); return; }
+  await act(async () => {
+    await api("/services", { method: "POST", json: { code, name, description: document.getElementById("sv_desc").value.trim() || null } });
+  }, "Служба создана");
+  showTab("services");
+}
+
+/* ---------- простые CRUD-справочники (31, 32) ---------- */
+async function renderSimple(sec, path, noun) {
+  const items = await act(() => api(path));
+  sec.innerHTML = "<h2>" + esc(noun + "ы") + "</h2>";
+  sec.appendChild(tableEl([
+    { key: "code", label: "Код" },
+    { key: "name", label: "Наименование" },
+    { key: "sort_order", label: "Порядок" },
+    { key: "is_active", label: "Активен", fmt: v => v ? "да" : "нет" },
+  ], items));
+  sec.insertAdjacentHTML("beforeend",
+    "<h2>Добавить</h2><div class='panel'><div class='row'>" +
+    "<label class='field'>Код <input type='text' id='rf_code'></label>" +
+    "<label class='field'>Наименование <input type='text' id='rf_name'></label>" +
+    "<label class='field'>Порядок <input type='number' id='rf_sort' value='0'></label>" +
+    "</div><div class='form-actions'><button class='btn ok' onclick='addSimple(\"" + path + "\")'>Создать</button></div></div>");
+}
+
+async function addSimple(path) {
+  const code = document.getElementById("rf_code").value.trim();
+  const name = document.getElementById("rf_name").value.trim();
+  if (!code || !name) { toast("Заполните код и наименование", "err"); return; }
+  await act(async () => {
+    await api(path, { method: "POST", json: { code, name, sort_order: Number(document.getElementById("rf_sort").value) || 0 } });
+  }, "Добавлено");
+  showTab(tab);
+}
+
+/* ---------- Роли обучающихся (35) ---------- */
+async function renderTrainingRoles(sec) {
+  const items = await act(() => api("/training-roles"));
+  sec.innerHTML = "<h2>Роли обучающихся</h2>";
+  sec.appendChild(tableEl([
+    { key: "code", label: "Код" },
+    { key: "name", label: "Наименование" },
+    { key: "description", label: "Описание" },
+    { key: "is_active", label: "Активна", fmt: v => v ? "да" : "нет" },
+  ], items));
+  sec.insertAdjacentHTML("beforeend",
+    "<h2>Добавить роль</h2><div class='panel'><div class='row'>" +
+    "<label class='field'>Код <input type='text' id='tr_code'></label>" +
+    "<label class='field'>Наименование <input type='text' id='tr_name'></label>" +
+    "<label class='field'>Описание <input type='text' id='tr_desc'></label>" +
+    "</div><div class='form-actions'><button class='btn ok' onclick='addTrainingRole()'>Создать</button></div></div>");
+}
+
+async function addTrainingRole() {
+  const code = document.getElementById("tr_code").value.trim();
+  const name = document.getElementById("tr_name").value.trim();
+  if (!code || !name) { toast("Заполните код и наименование", "err"); return; }
+  await act(async () => {
+    await api("/training-roles", { method: "POST", json: { code, name, description: document.getElementById("tr_desc").value.trim() || null } });
+  }, "Роль создана");
+  showTab("trainingRoles");
+}
+
+/* ---------- Группы происшествий и классификатор (28–29) ---------- */
+async function renderClassifier(sec) {
+  const [groups, types, versions] = await Promise.all([
+    act(() => api("/event-groups")),
+    act(() => api("/classifier/event-types")).catch(() => []),
+    act(() => api("/classifier/versions")).catch(() => []),
+  ]);
+  sec.innerHTML = "<h2>Группы происшествий</h2>" +
+    "<div class='note'>Классификатор: группы происшествий (код Г) — признаки 1–3 — классы событий. Клик по строке открывает сведения о группе (доп. поля).</div>";
+  sec.appendChild(tableEl([
+    { key: "event_number", label: "№" },
+    { key: "name", label: "Наименование" },
+    { key: "event_type_id", label: "Группа (код Г)", fmt: (v, r) => {
+        const t = types.find(x => x.id === v);
+        return t ? esc(t.code + " · " + t.name) : esc(v);
+      } },
+    { key: "is_active", label: "Активна", fmt: v => v ? "да" : "нет" },
+    { key: "_act", label: "", fmt: (v, r) => "<button class='btn' onclick='openGroup(\"" + r.id + "\")'>Сведения</button>" },
+  ], groups));
+
+  if (versions.length) {
+    sec.insertAdjacentHTML("beforeend", "<h2>Версии классификатора</h2>");
+    sec.appendChild(tableEl([
+      { key: "version_number", label: "Версия" },
+      { key: "name", label: "Название" },
+      { key: "source_name", label: "Источник" },
+      { key: "is_active", label: "Активна", fmt: v => v ? "да" : "нет" },
+      { key: "published_at", label: "Опубликована", fmt: fmtDate },
+    ], versions));
+  }
+}
+
+/* Сведения о группе: признаки + доп. поля (окно 29) */
+async function openGroup(id) {
+  const g = await act(() => api("/event-groups/" + id));
+  const [f1, f2, f3] = await Promise.all([
+    api("/classifier/features-1").catch(() => []),
+    api("/classifier/features-2?feature_1_id=" + g.event_feature_1_id).catch(() => []),
+    api("/classifier/features-3?feature_2_id=" + g.event_feature_2_id).catch(() => []),
+  ]);
+  const find = (arr, id2, nameKey) => (arr.find(x => x.id === id2) || {})[nameKey] || id2;
+
+  const extra = (g.extra_fields || []).map(f =>
+    "<tr><td>" + esc(f.code) + "</td><td>" + esc(f.label) + "</td><td>" + esc(f.field_type) +
+    "</td><td>" + (f.required ? "да" : "нет") + "</td><td>" + esc((f.options || []).join(", ")) + "</td></tr>").join("");
+
+  const sec = document.getElementById("content");
+  sec.insertAdjacentHTML("beforeend",
+    "<h2>Сведения о группе происшествий</h2><div class='panel'>" +
+    "<p><b>№ события:</b> " + esc(g.event_number) + " · <b>Наименование:</b> " + esc(g.name) + "</p>" +
+    "<p><b>Признак 1:</b> " + esc(find(f1, g.event_feature_1_id, "statistics_name")) +
+    " · <b>Признак 2:</b> " + esc(find(f2, g.event_feature_2_id, "name")) +
+    " · <b>Признак 3:</b> " + esc(find(f3, g.event_feature_3_id, "name")) + "</p>" +
+    (g.description ? "<p class='muted'>" + esc(g.description) + "</p>" : "") +
+    "<h3>Дополнительные поля</h3>" +
+    "<table><thead><tr><th>Код</th><th>Подпись</th><th>Тип</th><th>Обязательное</th><th>Варианты</th></tr></thead><tbody>" +
+    (extra || "<tr><td colspan='5' class='empty'>Дополнительных полей нет</td></tr>") + "</tbody></table>" +
+    "</div>");
+  sec.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+async function init() {
+  await renderHeader("reference.html");
+  showTab(tab);
+}
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>

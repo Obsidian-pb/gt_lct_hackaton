@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пользователи — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <div class="page-title">
+    <div>
+      <h1>Пользователи</h1>
+      <p class="sub">Окна 12–13 ТЗ: список пользователей, карточка пользователя (ФИО, контакты, роли).</p>
+    </div>
+    <button class="btn" onclick="openCreate()">+ Новый пользователь</button>
+  </div>
+
+  <section id="listSection"></section>
+  <section id="editSection" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let ROLES = [];
+
+async function loadRoles() {
+  ROLES = await act(() => api("/users/roles"));
+  return ROLES;
+}
+
+async function renderList() {
+  const users = await act(() => api("/users"));
+  const sec = document.getElementById("listSection");
+  sec.innerHTML = "";
+  const cols = [
+    { key: "username", label: "Логин" },
+    { key: "_fio", label: "ФИО", fmt: (v, r) => esc([r.last_name, r.first_name, r.middle_name].filter(Boolean).join(" ")) },
+    { key: "email", label: "Email" },
+    { key: "phone", label: "Телефон" },
+    { key: "is_active", label: "Активен", fmt: v => v ? "да" : "нет" },
+    { key: "roles", label: "Роли", fmt: v => (v || []).map(x => "<span class='tag'>" + esc(x.name) + "</span>").join("") },
+    { key: "created_at", label: "Создан", fmt: fmtDate },
+    { key: "_act", label: "", fmt: (v, r) =>
+        "<button class='btn' onclick='openEdit(\"" + r.id + "\")'>Карточка</button>" },
+  ];
+  sec.appendChild(tableEl(cols, users, "Пользователи не найдены"));
+}
+
+/* ---------- создание ---------- */
+function openCreate() {
+  const sec = document.getElementById("editSection");
+  sec.style.display = "block";
+  sec.innerHTML = "<h2>Новый пользователь</h2>" + formHtml("", {});
+  sec.scrollIntoView({ behavior: "smooth" });
+}
+
+/* ---------- редактирование (карточка пользователя, окно 13) ---------- */
+async function openEdit(id) {
+  const u = await act(() => api("/users/" + id));
+  const sec = document.getElementById("editSection");
+  sec.style.display = "block";
+  sec.innerHTML = "<h2>Карточка пользователя</h2>" + formHtml(id, u);
+  sec.scrollIntoView({ behavior: "smooth" });
+}
+
+function formHtml(id, u) {
+  const roleRows = ROLES.map(r =>
+    "<label class='checkline'><input type='checkbox' value='" + esc(r.code) + "'" +
+    ((u.roles || []).some(x => x.code === r.code) ? " checked" : "") + "> " + esc(r.name) + " <span class='muted'>(" + esc(r.code) + ")</span></label>"
+  ).join("");
+  return "" +
+    "<div class='row'>" +
+      "<div class='panel'>" +
+        "<label class='field'>Логин <input type='text' id='f_username' value='" + esc(u.username || "") + "' " + (id ? "disabled" : "") + "></label>" +
+        "<label class='field'>Пароль <input type='password' id='f_password' placeholder='" + (id ? "оставить без изменений" : "мин. 6 символов") + "'></label>" +
+        "<label class='field'>Фамилия <input type='text' id='f_last' value='" + esc(u.last_name || "") + "'></label>" +
+        "<label class='field'>Имя <input type='text' id='f_first' value='" + esc(u.first_name || "") + "'></label>" +
+        "<label class='field'>Отчество <input type='text' id='f_middle' value='" + esc(u.middle_name || "") + "'></label>" +
+      "</div>" +
+      "<div class='panel'>" +
+        "<label class='field'>Email <input type='email' id='f_email' value='" + esc(u.email || "") + "'></label>" +
+        "<label class='field'>Телефон <input type='text' id='f_phone' value='" + esc(u.phone || "") + "'></label>" +
+        "<label class='field'>Активен <select id='f_active'><option value='true'>да</option><option value='false'" + (u.is_active === false ? " selected" : "") + ">нет</option></select></label>" +
+        "<h3 style='margin-top:12px'>Роли</h3>" + roleRows +
+        "<div class='form-actions'>" +
+          "<button class='btn ok' onclick='saveUser(\"" + (id || "") + "\")'>Сохранить</button>" +
+          (id ? "<button class='btn danger' onclick='delUser(\"" + id + "\")'>Удалить</button>" : "") +
+          "<button class='btn ghost' onclick='document.getElementById(\"editSection\").style.display=\"none\"'>Закрыть</button>" +
+        "</div>" +
+      "</div>" +
+    "</div>";
+}
+
+async function saveUser(id) {
+  const roles = Array.from(document.querySelectorAll("#editSection .checkline input:checked")).map(i => i.value);
+  const base = {
+    last_name: document.getElementById("f_last").value.trim(),
+    first_name: document.getElementById("f_first").value.trim(),
+    middle_name: document.getElementById("f_middle").value.trim() || null,
+    email: document.getElementById("f_email").value.trim() || null,
+    phone: document.getElementById("f_phone").value.trim() || null,
+  };
+  if (!base.last_name || !base.first_name) { toast("Укажите фамилию и имя", "err"); return; }
+
+  if (id) {
+    const patch = { ...base, is_active: document.getElementById("f_active").value === "true" };
+    const pass = document.getElementById("f_password").value;
+    if (pass) patch.password = pass;
+    await act(async () => {
+      await api("/users/" + id, { method: "PATCH", json: patch });
+      await api("/users/" + id + "/roles", { method: "PUT", json: { role_codes: roles } });
+    }, "Сохранено");
+  } else {
+    const username = document.getElementById("f_username").value.trim();
+    const password = document.getElementById("f_password").value;
+    if (username.length < 3) { toast("Логин — минимум 3 символа", "err"); return; }
+    if (password.length < 6) { toast("Пароль — минимум 6 символов", "err"); return; }
+    await act(async () => {
+      await api("/users", { method: "POST", json: { ...base, username, password, role_codes: roles } });
+    }, "Пользователь создан");
+  }
+  document.getElementById("editSection").style.display = "none";
+  await renderList();
+}
+
+async function delUser(id) {
+  if (!confirm("Удалить пользователя (мягкое удаление)?")) return;
+  await act(() => api("/users/" + id, { method: "DELETE" }), "Удалён");
+  document.getElementById("editSection").style.display = "none";
+  await renderList();
+}
+
+async function init() {
+  await renderHeader("users.html");
+  await loadRoles();
+  await renderList();
+}
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>
