@@ -230,7 +230,7 @@ async function loadUsers() {
 }
 /* Список обучающихся (роль student): доступен admin и teacher (окно 9 ТЗ) */
 async function loadStudents() {
-  return api("/students").catch(() => []);
+  return api("/users/students").catch(() => []);
 }
 
 /* Статусы тренировок/карточек на русском */

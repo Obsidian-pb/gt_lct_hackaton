@@ -45,6 +45,8 @@ class ParticipantOut(BaseModel):
     user_id: UUID
     training_role_id: UUID
     service_id: UUID | None
+    # ФИО обучающегося (last_name first_name middle_name) для отображения в списках
+    user_full_name: str | None = None
 
 
 class TrainingOut(BaseModel):
@@ -63,6 +65,8 @@ class TrainingOut(BaseModel):
     created_at: datetime
     scenario_count: int = 0
     participant_count: int = 0
+    # Роль текущего пользователя в этой тренировке (для обучающегося, окно 10 ТЗ)
+    my_training_role_id: UUID | None = None
 
 
 class TrainingDetailOut(TrainingOut):

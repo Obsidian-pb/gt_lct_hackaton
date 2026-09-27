@@ -32,10 +32,16 @@ def _is_staff(user) -> bool:
     return bool({role.code for role in user.roles}.intersection(STAFF_ROLES))
 
 
-def training_to_out(training: Training) -> TrainingOut:
+def training_to_out(training: Training, user=None) -> TrainingOut:
     data = TrainingOut.model_validate(training).model_dump()
     data["scenario_count"] = len(training.scenarios)
     data["participant_count"] = len(training.participants)
+    if user is not None and not _is_staff(user):
+        # Обучающемуся показываем роль, назначенную ему на эту тренировку (окно 10 ТЗ)
+        for p in training.participants:
+            if p.user_id == user.id:
+                data["my_training_role_id"] = p.training_role_id
+                break
     return TrainingOut(**data)
 
 
@@ -58,7 +64,7 @@ async def list_trainings(
     else:
         # Обучающийся видит только назначенные ему тренировки
         trainings = await TrainingRepository(session).list_trainings(current_user.id)
-    return [training_to_out(t) for t in trainings]
+    return [training_to_out(t, current_user) for t in trainings]
 
 
 @router.post("", response_model=TrainingDetailOut, status_code=201, summary="Создание тренировки")

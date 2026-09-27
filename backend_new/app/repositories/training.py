@@ -95,6 +95,7 @@ class TrainingRepository:
         """Все утверждённые учебные задачи сценариев тренировки."""
         result = await self._session.execute(
             select(StudyTask)
+            .options(selectinload(StudyTask.extra_field_schemas))
             .join(scenario_tasks, scenario_tasks.c.study_task_id == StudyTask.id)
             .join(training_scenarios, training_scenarios.c.scenario_id == scenario_tasks.c.scenario_id)
             .where(

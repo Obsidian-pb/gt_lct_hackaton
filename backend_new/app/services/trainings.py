@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import User
@@ -141,6 +142,14 @@ class TrainingService:
         submitted = [c for c in cards if c.status != "draft"]
         evaluated = [c for c in cards if c.final_score is not None]
         durations = [c.duration_ms for c in cards if c.duration_ms is not None]
+        # ФИО участников для отображения в таблице прогресса
+        user_ids = list({s.user_id for s in sessions})
+        users_by_id: dict[UUID, User] = {}
+        if user_ids:
+            result = await self._session.execute(
+                select(User).where(User.id.in_(user_ids))
+            )
+            users_by_id = {u.id: u for u in result.scalars().all()}
         participants: list[dict] = []
         for session in sessions:
             user_cards = [c for c in cards if c.session_id == session.id]
@@ -150,6 +159,9 @@ class TrainingService:
                 {
                     "user_id": str(session.user_id),
                     "session_id": str(session.id),
+                    "user_full_name": self._user_full_name(
+                        users_by_id.get(session.user_id)
+                    ),
                     "total_cards": len(user_cards),
                     "submitted_cards": len(user_submitted),
                     "avg_duration_ms": (
@@ -219,3 +231,10 @@ class TrainingService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Завершённую тренировку нельзя изменять",
             )
+
+    @staticmethod
+    def _user_full_name(user: User | None) -> str | None:
+        """ФИО пользователя одним полем (last_name first_name middle_name)."""
+        if user is None:
+            return None
+        return " ".join(p for p in (user.last_name, user.first_name, user.middle_name) if p)

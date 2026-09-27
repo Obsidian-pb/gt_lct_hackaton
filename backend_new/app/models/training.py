@@ -30,6 +30,7 @@ from app.db.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
+from app.models.auth import User
 from app.models.content import Scenario
 
 # --- Связующие таблицы -------------------------------------------------------
@@ -157,6 +158,17 @@ class TrainingParticipant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     training: Mapped[Training] = relationship(back_populates="participants")
+
+    # Обучающийся (пользователь): нужен для отображения ФИО в списках участников
+    user: Mapped[User | None] = relationship(lazy="selectin")
+
+    @property
+    def user_full_name(self) -> str | None:
+        """ФИО обучающегося одним полем (last_name first_name middle_name)."""
+        u = self.user
+        if u is None:
+            return None
+        return " ".join(p for p in (u.last_name, u.first_name, u.middle_name) if p)
 
 
 class TrainingSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):

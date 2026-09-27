@@ -43,7 +43,8 @@ async function renderList() {
   const trainings = await act(() => api("/trainings"));
   const sec = document.getElementById("listSection");
   sec.innerHTML = "";
-  sec.appendChild(tableEl([
+  const isStaff = hasAny(ME, STAFF);
+  const cols = [
     { key: "title", label: "Название" },
     { key: "status", label: "Состояние", fmt: v => "<span class='status s-" + esc(v) + "'>" + statusLabel(v) + "</span>" },
     { key: "difficulty", label: "Сложность" },
@@ -53,15 +54,24 @@ async function renderList() {
     { key: "starts_at", label: "Начало", fmt: fmtDate },
     { key: "_act", label: "Действие", fmt: (v, r) => {
         let b = "<button class='btn' onclick='openEdit(\"" + r.id + "\")'>Открыть</button>";
-        if (hasAny(ME, STAFF)) {
-          if (r.status === "prepared") b += "<button class='btn' style='margin-left:6px' onclick='activate(\"" + r.id + "\")'>Активировать</button>";
+        if (isStaff) {
+          if (r.status === "prepared") b += "<button class='btn' style='margin-left:6px' onclick='activate(\"" + r.id + "\")'>Запустить</button>";
           if (r.status === "active") b += "<button class='btn ghost' style='margin-left:6px' onclick='finish(\"" + r.id + "\")'>Завершить</button>";
         } else if (r.status === "active") {
           b += "<button class='btn ok' style='margin-left:6px' onclick='location.href=\"simulator.html?training=" + esc(r.id) + "\"'>Пройти</button>";
         }
         return b;
       } },
-  ], trainings, "Тренировок нет"));
+  ];
+  if (!isStaff) {
+    // Обучающемуся показываем роль, назначенную ему на тренировку (окно 10 ТЗ)
+    cols.splice(4, 0, { key: "my_training_role_id", label: "Моя роль", fmt: v => {
+        if (!v) return "—";
+        const r = DICTS.trainingRoles.find(x => x.id === v);
+        return r ? esc(r.name) : esc(v);
+      } });
+  }
+  sec.appendChild(tableEl(cols, trainings, "Тренировок нет"));
 }
 
 /* ---------- создание / редактирование (окно 11) ---------- */
@@ -127,7 +137,9 @@ async function renderParts(id, t) {
   const users = USERS.length ? USERS : (USERS = await loadStudents());
   const roles = DICTS.trainingRoles;
 
-  const nameOf = uid => {
+  const nameOf = (uid, r) => {
+    // ФИО приходит с бэкенда (user_full_name); список студентов — запасной вариант
+    if (r && r.user_full_name) return esc(r.user_full_name);
     const u = users.find(x => x.id === uid);
     return u ? esc(u.last_name + " " + u.first_name + " (" + u.username + ")") : esc(uid);
   };
@@ -201,12 +213,13 @@ async function renderProgress(id) {
       " · среднее время: " + fmtNum(p.avg_duration_ms ? p.avg_duration_ms / 1000 : null) + " с</p>";
     if (p.participants && p.participants.length) {
       box.appendChild(tableEl([
-        { key: "user_id", label: "Участник" },
+        { key: "user_id", label: "Участник", fmt: (v, r) => esc(r.user_full_name || r.username || v || "—") },
         { key: "total", label: "Всего" },
         { key: "submitted", label: "Отправлено" },
         { key: "avg_score", label: "Средняя оценка" },
       ], p.participants.map(x => ({
-        user_id: x.user_id || x.username || "—",
+        user_id: x.user_id || "—",
+        user_full_name: x.user_full_name || null,
         total: (x.total !== undefined ? x.total : x.total_cards) ?? "",
         submitted: (x.submitted !== undefined ? x.submitted : x.submitted_cards) ?? "",
         avg_score: fmtNum(x.avg_score !== undefined ? x.avg_score : x.avg_machine_score),
@@ -242,7 +255,7 @@ async function saveTraining(id) {
 async function activate(id) {
   await act(async () => {
     await api("/trainings/" + id + "/activate", { method: "POST" });
-  }, "Тренировка активирована");
+  }, "Тренировка начата");
   await openEdit(id);
   await renderList();
 }

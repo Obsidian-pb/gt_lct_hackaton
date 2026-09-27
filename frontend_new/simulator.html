@@ -152,49 +152,235 @@ async function acceptCall() {
   await renderCardForm();
 }
 
-/* Окно 14 ТЗ — карточка происшествия */
+/* ============ Окно 14 ТЗ — карточка происшествия ============
+ * Форма карточки повторяет поля учебного задания (tasks.html, окно 8),
+ * кроме сложности и служебных полей: заявитель, адрес, классификация,
+ * службы, доп. поля. Из учебного задания в карточку автоматически
+ * попадает только сообщение заявителя; остальное обучающийся
+ * заполняет сам. Собранный content сравнивается с эталоном. */
+
+const ADDR_FIELDS = [
+  ["country", "Страна"], ["federal_subject", "Субъект"], ["locality", "Населённый пункт"],
+  ["address_object", "Объект"], ["administrative_district", "Округ"], ["district", "Район"],
+  ["street", "Улица"], ["house", "Дом"], ["building", "Корпус"], ["structure", "Строение"],
+  ["apartment", "Квартира"], ["entrance", "Подъезд"], ["floor", "Этаж"],
+  ["intercom_code", "Код"], ["descriptive_address", "Описательный адрес"],
+];
+const CARD_FLAGS = [
+  ["has_victims", "Пострадавшие"],
+  ["no_scene_refusal", "Нет на месте / отказ от скорой"],
+  ["no_access", "Нет доступа / заблаговременно"],
+  ["no_contact", "Нет контакта"],
+  ["call_dropped", "Срыв звонка"],
+];
+
+/* Значение поля карточки: сначала сохранённый черновик (CARD.content),
+ * затем исходные данные вызова (fallback). */
+function cardInitVal(key, fallback) {
+  const c = (CARD && CARD.content) || {};
+  return (c[key] !== undefined && c[key] !== null) ? c[key] : (fallback === undefined ? "" : fallback);
+}
+
+/* HTML одного доп. поля по схеме задачи (text|number|boolean|select|date) */
+function extraFieldHtml(r) {
+  const id = "f_extra_" + r.code;
+  const saved = cardInitVal("extra." + r.code);
+  const req = r.required ? " *" : "";
+  if (r.field_type === "boolean") {
+    return "<label class='checkline'><input type='checkbox' id='" + id + "'" + (saved === true || saved === "true" ? " checked" : "") + "> " + esc(r.label) + req + "</label>";
+  }
+  if (r.field_type === "select") {
+    const opts = (r.options || []).map(o =>
+      "<option value='" + esc(String(o)) + "'" + (String(saved) === String(o) ? " selected" : "") + ">" + esc(String(o)) + "</option>").join("");
+    return "<label class='field'>" + esc(r.label) + req + "<select id='" + id + "'><option value=''>— не выбрано —</option>" + opts + "</select></label>";
+  }
+  const t = r.field_type === "number" ? "number step='any'" : (r.field_type === "date" ? "date" : "text");
+  return "<label class='field'>" + esc(r.label) + req + "<input type='" + t + "' id='" + id + "' value='" + esc(saved ?? "") + "'></label>";
+}
+
+function extraFieldsHtml(schema) {
+  return (schema || []).length
+    ? schema.map(extraFieldHtml).join("")
+    : "<div class='note'>Дополнительные поля у задачи отсутствуют.</div>";
+}
+
 async function renderCardForm() {
   const box = document.getElementById("sessionBox");
+  const t = CURRENT_TASK || {};
+
+  const savedSvcs = (CARD && CARD.content && Array.isArray(CARD.content.services)) ? CARD.content.services : [];
+  const svcOpts = DICTS.services.map(s => "<option value='" + esc(s.id) + "'" + (CARD && CARD.main_service_id === s.id ? " selected" : "") + ">" + esc(s.code + " · " + s.name) + "</option>").join("");
+  const appOpts = DICTS.applicantStatuses.map(s => "<option value='" + esc(s.id) + "'>" + esc(s.name) + "</option>").join("");
+  const svcMulti = DICTS.services.map(s =>
+    "<label class='checkline'><input type='checkbox' class='svc-cb' value='" + esc(s.id) + "'" + (savedSvcs.includes(s.name) ? " checked" : "") + "> " + esc(s.code + " · " + s.name) + "</label>").join("");
+  const flags = CARD_FLAGS.map(([k, label]) =>
+    "<label class='checkline'><input type='checkbox' id='f_" + k + "'" + (cardInitVal(k) === true || cardInitVal(k) === "true" ? " checked" : "") + "> " + label + "</label>").join("");
+  const addrRows = ADDR_FIELDS.map(([k, label]) =>
+    "<label class='field'>" + label + "<input type='text' id='f_" + k + "' value='" + esc(cardInitVal(k)) + "'></label>").join("");
+
   box.insertAdjacentHTML("beforeend",
     "<div class='panel' id='cardPanel'><h3>Карточка происшествия (окно 14)</h3>" +
-    "<div class='row'><div class='panel'>" +
-    "<label class='field'>Содержимое карточки (JSON-объект)</label>" +
-    "<textarea class='code' id='cardContent' style='min-height:220px' placeholder='{\n  \"phone\": \"+7-495-000-00-01\",\n  \"address\": \"ул. Тестовая, 10\",\n  \"category\": \"Пожар\"\n}'>" + esc(JSON.stringify(CARD.content || {}, null, 2)) + "</textarea>" +
-    "<div class='form-actions'>" +
-    "<button class='btn' onclick='saveDraft()'>Сохранить черновик</button>" +
-    "<button class='btn ok' onclick='submitCard()'>Сохранить и отправить (сверить с эталоном)</button>" +
-    "</div></div>" +
-    "<div class='panel'><h3>Подсказка по полям</h3>" +
-    "<p class='muted'>Эталон скрыт до отправки. Заполняйте те поля, которые считаете нужными (телефоны, адрес, описание, тип происшествия, службы). Машинная оценка сравнит заполнение с эталоном.</p>" +
-    "<div class='note'>Телефон по АОН: <b>" + esc(CURRENT_TASK.aon_phone || "—") + "</b>. Предоставленный: <b>" + esc(CURRENT_TASK.provided_phone || "—") + "</b>. На место: <b>" + esc(CURRENT_TASK.scene_phone || "—") + "</b>.</div>" +
-    "</div></div></div>");
+    "<div class='note'>Заполните карточку максимально близко к учебному заданию. Данные входящего вызова уже подставлены; классификацию, службы и доп. поля определите самостоятельно. Эталон скрыт до отправки.</div>" +
+    "<div class='row'>" +
+      "<div class='panel'><h3>Заявитель и вызов</h3>" +
+        "<label class='field'>Сообщение заявителя *<textarea id='f_caller_message'>" + esc(cardInitVal("caller_message", t.caller_message)) + "</textarea></label>" +
+        "<div class='row'>" +
+          "<label class='field'>Телефон (АОН)<input type='text' id='f_aon_phone' value=''></label>" +
+          "<label class='field'>Телефон (предоставленный)<input type='text' id='f_provided_phone' value=''></label>" +
+          "<label class='field'>Телефон (на место)<input type='text' id='f_scene_phone' value=''></label>" +
+        "</div>" +
+        "<label class='field'>ФИО заявителя<input type='text' id='f_caller_full_name' value=''></label>" +
+        "<label class='field'>Статус заявителя<select id='f_applicant_status_id'><option value=''>— не выбран —</option>" + appOpts + "</select></label>" +
+        "<label class='field'>Описание со слов заявителя<textarea id='f_incident_description'></textarea></label>" +
+        "<h3 style='margin-top:12px'>Флаги</h3>" + flags +
+      "</div>" +
+      "<div class='panel'><h3>Адрес</h3>" +
+        "<div class='row'>" + addrRows +
+          "<label class='field'>Широта<input type='number' step='any' id='f_latitude' value=''></label>" +
+          "<label class='field'>Долгота<input type='number' step='any' id='f_longitude' value=''></label>" +
+        "</div>" +
+        "<h3 style='margin-top:12px'>Классификация (код Г + признаки 1–3)</h3>" +
+        "<div class='row'>" +
+          "<label class='field'>Группа происшествий (Г)<select id='f_event_type_id' onchange='onClassChange(\"type\")'><option value=''>— не выбрана —</option></select></label>" +
+          "<label class='field'>Признак 1<select id='f_event_feature_1_id' onchange='onClassChange(\"f1\")'><option value=''>— не выбран —</option></select></label>" +
+          "<label class='field'>Признак 2<select id='f_event_feature_2_id' onchange='onClassChange(\"f2\")'><option value=''>— не выбран —</option></select></label>" +
+          "<label class='field'>Признак 3<select id='f_event_feature_3_id' onchange='onClassChange(\"f3\")'><option value=''>— не выбран —</option></select></label>" +
+        "</div>" +
+        "<div id='clsInfo' class='note'></div>" +
+        "<label class='field'>Тип происшествия (класс события)<select id='f_event_class_id' onchange='updateClsInfo()'><option value=''>— не выбран —</option></select></label>" +
+        "<label class='field'>Основная служба<select id='f_main_service_id'><option value=''>— не выбрана —</option>" + svcOpts + "</select></label>" +
+        "<h3 style='margin-top:12px'>Привлекаемые службы</h3>" + svcMulti +
+      "</div>" +
+      "<div class='panel'><h3>Дополнительные поля</h3>" +
+        "<div id='extraBox'>" + extraFieldsHtml(t.extra_field_schemas) + "</div>" +
+        "<p class='muted'>АОН: <b>" + esc(t.aon_phone || "—") + "</b> · предоставленный: <b>" + esc(t.provided_phone || "—") + "</b> · на место: <b>" + esc(t.scene_phone || "—") + "</b>.</p>" +
+        "<div class='form-actions'>" +
+          "<button class='btn ok' onclick='submitCard()'>Сохранить и отправить (сверить с эталоном)</button>" +
+        "</div>" +
+      "</div>" +
+    "</div></div>");
+  rebuildCascade();
+  updateClsInfo();
   box.lastElementChild.scrollIntoView({ behavior: "smooth" });
 }
 
-function readContent() {
-  try {
-    return JSON.parse(document.getElementById("cardContent").value || "{}");
-  } catch (e) {
-    throw new Error("Содержимое карточки — невалидный JSON");
-  }
+/* ---------- классификация: код Г + признаки 1–3 (каскадные селекты) ---------- */
+function optEl(id, label, selectedId) {
+  return "<option value='" + esc(id) + "'" + (String(id) === String(selectedId) ? " selected" : "") + ">" + esc(label) + "</option>";
+}
+
+function rebuildCascade() {
+  const et = document.getElementById("f_event_type_id");
+  const f1 = document.getElementById("f_event_feature_1_id");
+  const f2 = document.getElementById("f_event_feature_2_id");
+  const f3 = document.getElementById("f_event_feature_3_id");
+  const ec = document.getElementById("f_event_class_id");
+  if (!et || !f1 || !f2 || !f3 || !ec) return;
+
+  const etVal = et.value, f1Val = f1.value, f2Val = f2.value, f3Val = f3.value, ecVal = ec.value;
+
+  et.innerHTML = "<option value=''>— не выбрана —</option>" +
+    (DICTS.eventTypes || []).map(x => optEl(x.id, "Г" + x.code + " · " + x.name, etVal)).join("");
+  const f1s = (DICTS.features1 || []).filter(x => x.event_type_id === etVal);
+  f1.innerHTML = "<option value=''>— не выбран —</option>" +
+    f1s.map(x => optEl(x.id, x.code + " · " + (x.operator_label || x.statistics_name), f1Val)).join("");
+  const f2s = (DICTS.features2 || []).filter(x => x.event_feature_1_id === f1Val);
+  f2.innerHTML = "<option value=''>— не выбран —</option>" +
+    f2s.map(x => optEl(x.id, x.code + " · " + x.name, f2Val)).join("");
+  const f3s = (DICTS.features3 || []).filter(x => x.event_feature_2_id === f2Val);
+  f3.innerHTML = "<option value=''>— не выбран —</option>" +
+    f3s.map(x => optEl(x.id, x.code + " · " + x.name, f3Val)).join("");
+
+  const classes = (DICTS.eventGroups || []).filter(c =>
+    c.event_type_id === etVal && c.event_feature_1_id === f1Val &&
+    c.event_feature_2_id === f2Val && c.event_feature_3_id === f3Val);
+  ec.innerHTML = "<option value=''>— не выбран —</option>" +
+    classes.map(x => optEl(x.id, x.event_number + " · " + x.name, ecVal)).join("");
+  if (!ecVal && classes.length === 1) ec.value = classes[0].id;
+  else ec.value = ecVal;
+}
+
+function onClassChange(level) {
+  const ids = ["f_event_feature_1_id", "f_event_feature_2_id", "f_event_feature_3_id", "f_event_class_id"];
+  const idx = { type: 0, f1: 1, f2: 2, f3: 3 }[level] ?? 0;
+  for (let i = idx; i < ids.length; i++) document.getElementById(ids[i]).value = "";
+  rebuildCascade();
+  updateClsInfo();
+}
+
+function updateClsInfo() {
+  const box = document.getElementById("clsInfo");
+  if (!box) return;
+  const et = (DICTS.eventTypes || []).find(x => x.id === document.getElementById("f_event_type_id").value);
+  const f1 = (DICTS.features1 || []).find(x => x.id === document.getElementById("f_event_feature_1_id").value);
+  const f2 = (DICTS.features2 || []).find(x => x.id === document.getElementById("f_event_feature_2_id").value);
+  const f3 = (DICTS.features3 || []).find(x => x.id === document.getElementById("f_event_feature_3_id").value);
+  const ec = (DICTS.eventGroups || []).find(x => x.id === document.getElementById("f_event_class_id").value);
+  const parts = [];
+  if (et) parts.push("<b>Группа:</b> Г" + et.code + " «" + esc(et.name) + "»");
+  if (f1) parts.push("<b>Признак 1:</b> " + esc(f1.statistics_name || f1.operator_label));
+  if (f2) parts.push("<b>Признак 2:</b> " + esc(f2.name));
+  if (f3) parts.push("<b>Признак 3:</b> " + esc(f3.name));
+  if (ec) parts.push("<b>Класс:</b> №" + ec.event_number + " «" + esc(ec.name) + "»");
+  box.innerHTML = parts.length ? parts.join(" · ") : "Выберите группу и признаки 1–3 — класс определится автоматически.";
+}
+
+/* Сборка content карточки в структуре эталона (как fillEtalonFromTask в tasks.html):
+ * классификация текстом, заявитель, адрес, службы названиями, extra.<code>. */
+function collectCardContent() {
+  const c = {};
+  const pick = id => { const el = document.getElementById(id); return el ? (el.value || "").trim() : ""; };
+
+  const etObj = (DICTS.eventTypes || []).find(x => x.id === document.getElementById("f_event_type_id").value);
+  const f1Obj = (DICTS.features1 || []).find(x => x.id === document.getElementById("f_event_feature_1_id").value);
+  const f2Obj = (DICTS.features2 || []).find(x => x.id === document.getElementById("f_event_feature_2_id").value);
+  const f3Obj = (DICTS.features3 || []).find(x => x.id === document.getElementById("f_event_feature_3_id").value);
+  const ecObj = (DICTS.eventGroups || []).find(x => x.id === document.getElementById("f_event_class_id").value);
+  if (etObj) c.event_type = "Г" + etObj.code + " " + etObj.name;
+  if (f1Obj) c.feature_1 = f1Obj.statistics_name || f1Obj.operator_label;
+  if (f2Obj) c.feature_2 = f2Obj.name;
+  if (f3Obj) c.feature_3 = f3Obj.name;
+  if (ecObj) c.event_class = "№" + ecObj.event_number + " " + ecObj.name;
+
+  c.caller_message = pick("f_caller_message");
+  c.aon_phone = pick("f_aon_phone");
+  c.provided_phone = pick("f_provided_phone");
+  c.scene_phone = pick("f_scene_phone");
+  c.caller_full_name = pick("f_caller_full_name");
+  c.incident_description = pick("f_incident_description");
+  ADDR_FIELDS.forEach(([k]) => { const v = pick("f_" + k); if (v) c[k] = v; });
+  const lat = pick("f_latitude"), lng = pick("f_longitude");
+  if (lat) c.latitude = Number(lat);
+  if (lng) c.longitude = Number(lng);
+
+  const svcIds = Array.from(document.querySelectorAll("#cardPanel input.svc-cb:checked")).map(i => i.value);
+  if (svcIds.length) c.services = svcIds.map(id => { const s = (DICTS.services || []).find(x => x.id === id); return s ? s.name : id; });
+
+  (CURRENT_TASK.extra_field_schemas || []).forEach(r => {
+    const el = document.getElementById("f_extra_" + r.code);
+    if (!el) return;
+    if (r.field_type === "boolean") c["extra." + r.code] = !!el.checked;
+    else if (el.value.trim() !== "") c["extra." + r.code] = r.field_type === "number" ? Number(el.value) : el.value.trim();
+  });
+  return c;
+}
+
+function lockCardForm() {
+  document.querySelectorAll("#cardPanel input, #cardPanel select, #cardPanel textarea, #cardPanel button")
+    .forEach(el => { el.disabled = true; });
 }
 
 async function saveDraft() {
   if (!CARD) return;
-  let content;
-  try { content = readContent(); } catch (e) { toast(e.message, "err"); return; }
-  CARD = await act(() => api("/cards/" + CARD.id + "/content", { method: "PATCH", json: { content } }), "Черновик сохранён");
+  CARD = await act(() => api("/cards/" + CARD.id + "/content", { method: "PATCH", json: { content: collectCardContent() } }), "Черновик сохранён");
 }
 
 async function submitCard() {
   if (!CARD) return;
-  let content;
-  try { content = readContent(); } catch (e) { toast(e.message, "err"); return; }
-  const card = await act(() => api("/cards/" + CARD.id + "/submit", { method: "POST", json: { content } }), "Карточка отправлена");
+  const card = await act(() => api("/cards/" + CARD.id + "/submit", { method: "POST", json: { content: collectCardContent() } }), "Карточка отправлена");
   CARD = card;
+  lockCardForm();
   const panel = document.getElementById("cardPanel");
-  panel.querySelector("textarea").disabled = true;
-  panel.querySelector(".form-actions").innerHTML = "";
   panel.insertAdjacentHTML("beforeend",
     "<h3>Результат машинной оценки</h3>" +
     "<p><b>Статус:</b> " + statusLabel(card.status) + " · <b>Машинная оценка:</b> " + fmtNum(card.machine_score) + " %</p>" +
@@ -209,7 +395,6 @@ async function renderDispatcher(trId, kind) {
     "<div id='dispBox'></div>";
 
   const cards = await act(() => api("/dispatcher/cards?training_id=" + trId));
-  const users = await loadStudents().catch(() => []);
 
   const cols = [
     { key: "sequence_number", label: "№" },

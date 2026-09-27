@@ -15,6 +15,7 @@ from app.models.training import IncidentCard, TrainingSession
 from app.repositories.content import ContentRepository
 from app.repositories.training import TrainingRepository
 from app.schemas.cards import NextTaskOut
+from app.schemas.tasks import ExtraFieldSchemaOut
 
 
 def machine_score_card(etalon: dict[str, Any], content: dict[str, Any]) -> tuple[Decimal, dict]:
@@ -108,6 +109,10 @@ class RuntimeService:
                 "district": task.district,
                 "descriptive_address": task.descriptive_address,
             },
+            extra_field_schemas=[
+                ExtraFieldSchemaOut.model_validate(x)
+                for x in (task.extra_field_schemas or [])
+            ],
         )
 
     # --- Карточки: оператор-112 ---

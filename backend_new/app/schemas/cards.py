@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.tasks import ExtraFieldSchemaOut
+
 
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -27,6 +29,9 @@ class NextTaskOut(BaseModel):
     caller_full_name: str | None
     difficulty: int
     address: dict[str, Any] = Field(default_factory=dict)
+    # Схема доп. полей задачи — нужна обучающемуся для формы карточки,
+    # но без etalon_content (эталон скрыт до отправки).
+    extra_field_schemas: list[ExtraFieldSchemaOut] = Field(default_factory=list)
 
 
 class AcceptCallIn(BaseModel):
