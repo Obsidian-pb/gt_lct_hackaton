@@ -7,13 +7,16 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    Column,
     CheckConstraint,
     DateTime,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
+    Table,
     Text,
     UniqueConstraint,
     text,
@@ -28,6 +31,47 @@ from trainer_db.models.base import (
     UUIDPrimaryKeyMixin,
     retention_check,
 )
+
+
+assignment_services = Table(
+    "assignment_services",
+    Base.metadata,
+    Column("assignment_id", ForeignKey("training.assignments.id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", ForeignKey("catalog.services.id", ondelete="CASCADE"), primary_key=True),
+    Index("ix_assignment_services_service_id", "service_id"),
+    schema="training",
+)
+
+
+assignment_exercises = Table(
+    "assignment_exercises",
+    Base.metadata,
+    Column("assignment_id", ForeignKey("training.assignments.id", ondelete="CASCADE"), primary_key=True),
+    Column("exercise_id", ForeignKey("content.exercises.id", ondelete="CASCADE"), primary_key=True),
+    Index("ix_assignment_exercises_exercise_id", "exercise_id"),
+    schema="training",
+)
+
+
+class TrainingAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "assignments"
+    __table_args__ = (
+        CheckConstraint("requested_card_count > 0", name="card_count_positive"),
+        CheckConstraint("normative_seconds > 0", name="normative_seconds_positive"),
+        CheckConstraint("status IN ('draft', 'active', 'completed', 'cancelled')", name="status_values"),
+        Index("ix_assignments_trainee_status", "trainee_id", "status"),
+        {"schema": "training"},
+    )
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    teacher_id: Mapped[UUID | None] = mapped_column(ForeignKey("auth.users.id", ondelete="SET NULL"))
+    trainee_id: Mapped[UUID] = mapped_column(ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False)
+    requested_card_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    normative_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft", server_default="draft")
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 
 class ScoringProfile(
@@ -86,6 +130,7 @@ class TrainingSession(
     __table_args__ = (
         retention_check(),
         CheckConstraint("requested_card_count > 0", name="card_count_positive"),
+        CheckConstraint("normative_seconds > 0", name="normative_seconds_positive"),
         CheckConstraint(
             "starting_difficulty IN ('easy', 'medium', 'hard')",
             name="starting_difficulty_values",
@@ -102,6 +147,10 @@ class TrainingSession(
             "jsonb_typeof(scoring_snapshot) = 'object'",
             name="scoring_snapshot_object",
         ),
+        CheckConstraint(
+            "jsonb_typeof(assignment_snapshot) = 'object'",
+            name="assignment_snapshot_object",
+        ),
         Index(
             "ix_sessions_trainee_status",
             "trainee_id",
@@ -111,11 +160,19 @@ class TrainingSession(
         {"schema": "training"},
     )
 
-    trainee_id: Mapped[UUID] = mapped_column(
-        ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False
+    trainee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("auth.users.id", ondelete="SET NULL")
     )
+    trainee_id_snapshot: Mapped[UUID] = mapped_column(server_default=FetchedValue(), nullable=False)
     teacher_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("auth.users.id", ondelete="SET NULL")
+    )
+    teacher_id_snapshot: Mapped[UUID | None] = mapped_column()
+    assignment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("training.assignments.id", ondelete="SET NULL")
+    )
+    assignment_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
     scoring_profile_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("training.scoring_profiles.id", ondelete="SET NULL")
@@ -124,6 +181,7 @@ class TrainingSession(
         ForeignKey("catalog.classifier_versions.id", ondelete="RESTRICT")
     )
     requested_card_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    normative_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     starting_difficulty: Mapped[str] = mapped_column(String(16), nullable=False)
     current_difficulty: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(
@@ -149,15 +207,26 @@ class SessionCard(UUIDPrimaryKeyMixin, Base):
             "status IN ('pending', 'shown', 'submitted', 'evaluated')",
             name="status_values",
         ),
+        CheckConstraint(
+            "jsonb_typeof(exercise_snapshot) = 'object'",
+            name="exercise_snapshot_object",
+        ),
         Index("ix_session_cards_session_sequence", "session_id", "sequence_number"),
+        Index("ix_session_cards_exercise_revision_id", "exercise_revision_id"),
         {"schema": "training"},
     )
 
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey("training.sessions.id", ondelete="CASCADE"), nullable=False
     )
-    exercise_revision_id: Mapped[UUID] = mapped_column(
-        ForeignKey("content.exercise_revisions.id", ondelete="CASCADE"), nullable=False
+    exercise_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("content.exercise_revisions.id", ondelete="SET NULL")
+    )
+    exercise_revision_id_snapshot: Mapped[UUID] = mapped_column(
+        server_default=FetchedValue(), nullable=False
+    )
+    exercise_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=FetchedValue(), nullable=False
     )
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
     difficulty_snapshot: Mapped[str] = mapped_column(String(16), nullable=False)

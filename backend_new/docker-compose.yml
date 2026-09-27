@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: system112-postgres
+    environment:
+      POSTGRES_USER: system112
+      POSTGRES_PASSWORD: system112
+      POSTGRES_DB: system112_trainer
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U system112 -d system112_trainer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    container_name: system112-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://system112:system112@db:5432/system112_trainer
+      JWT_SECRET_KEY: dev-secret-change-me
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:

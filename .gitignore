@@ -49,4 +49,10 @@ docker-compose.override.yml
 tmp/
 temp/
 *.tmp
+~$*.xlsx
+
+# Generated from the versioned Excel classifier; regenerate when needed
+database/classifier_import.sql
+
+# Frontend dependencies
 /frontend/node_modules

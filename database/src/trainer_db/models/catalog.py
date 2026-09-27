@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from trainer_db.models.base import (
@@ -99,7 +100,7 @@ class ClassifierVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class EventType(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "event_types"
     __table_args__ = (
-        CheckConstraint("code BETWEEN 1 AND 9", name="code_range"),
+        CheckConstraint("code BETWEEN 1 AND 99", name="code_range"),
         {"schema": "catalog"},
     )
 
@@ -137,7 +138,7 @@ class EventFeature2(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("catalog.event_features_1.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(1024))
     description: Mapped[str | None] = mapped_column(Text)
 
 
@@ -153,7 +154,7 @@ class EventFeature3(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("catalog.event_features_2.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(1024))
     description: Mapped[str | None] = mapped_column(Text)
 
 
@@ -193,6 +194,9 @@ class EventClass(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Bas
     event_feature_3_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("catalog.event_features_3.id", ondelete="RESTRICT")
     )
+    feature_1_label: Mapped[str | None] = mapped_column(String(1024))
+    feature_2_label: Mapped[str | None] = mapped_column(String(1024))
+    feature_3_label: Mapped[str | None] = mapped_column(String(1024))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     ekp35_type: Mapped[str | None] = mapped_column(String(512))
@@ -214,4 +218,54 @@ class Service(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
+    )
+
+
+class EventAdditionalField(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "event_additional_fields"
+    __table_args__ = (
+        UniqueConstraint("event_class_id", "field_key"),
+        CheckConstraint(
+            "data_type IN ('text', 'integer', 'number', 'boolean', 'date', 'datetime', 'select')",
+            name="data_type_values",
+        ),
+        CheckConstraint("jsonb_typeof(options) = 'array'", name="options_array"),
+        {"schema": "catalog"},
+    )
+
+    event_class_id: Mapped[UUID] = mapped_column(
+        ForeignKey("catalog.event_classes.id", ondelete="CASCADE"), nullable=False
+    )
+    field_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    is_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    options: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+class EventServiceRoute(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "event_service_routes"
+    __table_args__ = (
+        UniqueConstraint("event_class_id", "service_id", "source_column"),
+        CheckConstraint("length(trim(source_column)) > 0", name="source_column_nonempty"),
+        {"schema": "catalog"},
+    )
+
+    event_class_id: Mapped[UUID] = mapped_column(
+        ForeignKey("catalog.event_classes.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[UUID] = mapped_column(
+        ForeignKey("catalog.services.id", ondelete="CASCADE"), nullable=False
+    )
+    source_column: Mapped[str] = mapped_column(String(3), nullable=False)
+    condition_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    condition_label: Mapped[str | None] = mapped_column(String(512))
+    response_label: Mapped[str | None] = mapped_column(Text)
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )

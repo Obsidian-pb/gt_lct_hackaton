@@ -1,13 +1,15 @@
 from trainer_db.models.audit import AuditLog
-from trainer_db.models.auth import Permission, Role, User, role_permissions, user_roles
+from trainer_db.models.auth import Permission, Role, User, role_permissions, user_roles, user_services
 from trainer_db.models.base import Base
 from trainer_db.models.catalog import (
     ClassifierVersion,
+    EventAdditionalField,
     EventClass,
     EventFeature1,
     EventFeature2,
     EventFeature3,
     EventType,
+    EventServiceRoute,
     Service,
     classifier_version_events,
     event_class_services,
@@ -15,6 +17,7 @@ from trainer_db.models.catalog import (
 from trainer_db.models.content import (
     EventTemplate,
     Exercise,
+    ExerciseAdditionalValue,
     ExerciseRevision,
     IncidentCardDetails,
     event_template_services,
@@ -27,6 +30,9 @@ from trainer_db.models.training import (
     ScoringRule,
     SessionCard,
     TrainingSession,
+    TrainingAssignment,
+    assignment_services,
+    assignment_exercises,
 )
 
 __all__ = [
@@ -34,14 +40,17 @@ __all__ = [
     "AuditLog",
     "Base",
     "ClassifierVersion",
+    "EventAdditionalField",
     "Evaluation",
     "EventClass",
     "EventFeature1",
     "EventFeature2",
     "EventFeature3",
     "EventTemplate",
+    "EventServiceRoute",
     "EventType",
     "Exercise",
+    "ExerciseAdditionalValue",
     "ExerciseRevision",
     "IncidentCardDetails",
     "Permission",
@@ -51,6 +60,7 @@ __all__ = [
     "Service",
     "SessionCard",
     "TrainingSession",
+    "TrainingAssignment",
     "User",
     "classifier_version_events",
     "event_class_services",
@@ -58,4 +68,7 @@ __all__ = [
     "exercise_services",
     "role_permissions",
     "user_roles",
+    "user_services",
+    "assignment_services",
+    "assignment_exercises",
 ]
