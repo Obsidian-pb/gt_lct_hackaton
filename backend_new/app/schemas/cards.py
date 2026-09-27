@@ -46,6 +46,10 @@ class CardOut(BaseModel):
     sequence_number: int
     status: str
     content: dict[str, Any]
+    event_type_id: UUID | None
+    event_feature_1_id: UUID | None
+    event_feature_2_id: UUID | None
+    event_feature_3_id: UUID | None
     event_class_id: UUID | None
     main_service_id: UUID | None
     machine_score: float | None

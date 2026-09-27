@@ -239,7 +239,20 @@ class IncidentCard(UUIDPrimaryKeyMixin, Base):
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
 
-    # Типизированные метаданные для фильтров и отчётов
+    # Типизированные метаданные для фильтров и отчётов.
+    # Классификация копируется из учебной задачи при приёме вызова.
+    event_type_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_types.id", ondelete="SET NULL")
+    )
+    event_feature_1_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_1.id", ondelete="SET NULL")
+    )
+    event_feature_2_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_2.id", ondelete="SET NULL")
+    )
+    event_feature_3_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_3.id", ondelete="SET NULL")
+    )
     event_class_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("catalog.event_classes.id", ondelete="SET NULL")
     )

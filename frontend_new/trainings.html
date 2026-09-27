@@ -124,7 +124,7 @@ function dtLocal(v) {
 
 async function renderParts(id, t) {
   const box = document.getElementById("partsBox");
-  const users = USERS.length ? USERS : (USERS = await loadUsers());
+  const users = USERS.length ? USERS : (USERS = await loadStudents());
   const roles = DICTS.trainingRoles;
 
   const nameOf = uid => {

@@ -148,7 +148,20 @@ class StudyTask(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Base
         Boolean, nullable=False, default=False, server_default="false"
     )
 
-    # Классификация происшествия
+    # Классификация происшествия: группа (код Г) и признаки 1-3 по компонентам.
+    # Класс события (event_class_id) выводится из этих компонентов.
+    event_type_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_types.id", ondelete="SET NULL")
+    )
+    event_feature_1_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_1.id", ondelete="SET NULL")
+    )
+    event_feature_2_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_2.id", ondelete="SET NULL")
+    )
+    event_feature_3_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("catalog.event_features_3.id", ondelete="SET NULL")
+    )
     event_class_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("catalog.event_classes.id", ondelete="RESTRICT")
     )
@@ -182,6 +195,12 @@ class StudyTask(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, Base
         cascade="all, delete-orphan",
         uselist=False,
         single_parent=True,
+        lazy="selectin",
+    )
+    extra_field_schemas: Mapped[list[TaskExtraFieldSchema]] = relationship(
+        back_populates="study_task",
+        cascade="all, delete-orphan",
+        order_by="TaskExtraFieldSchema.sort_order",
         lazy="selectin",
     )
 
@@ -256,3 +275,50 @@ class StudyMaterial(UUIDPrimaryKeyMixin, TimestampMixin, RetainedDeletionMixin, 
     uploaded_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("auth.users.id", ondelete="SET NULL")
     )
+
+
+class TaskExtraFieldSchema(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Схема дополнительных полей учебной задачи.
+
+    Определяет, какие дополнительные поля существуют у учебной задачи и
+    её эталона/карточки (код, подпись, тип, обязательность, варианты).
+    Значения этих полей хранятся отдельно:
+      - учебная задача — study_tasks.extra_fields (JSONB);
+      - карточка происшествия — incident_cards.content (JSONB).
+    """
+
+    __tablename__ = "task_extra_field_schemas"
+    __table_args__ = (
+        UniqueConstraint(
+            "study_task_id",
+            "code",
+            name="uq_task_extra_field_schemas_study_task_code",
+        ),
+        CheckConstraint(
+            "field_type IN ('text', 'number', 'boolean', 'select', 'date')",
+            name="ck_task_extra_field_schemas_field_type_values",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(options) = 'array'",
+            name="ck_task_extra_field_schemas_options_array",
+        ),
+        {"schema": "content"},
+    )
+
+    study_task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("content.study_tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    field_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    options: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+    study_task: Mapped[StudyTask] = relationship(back_populates="extra_field_schemas")

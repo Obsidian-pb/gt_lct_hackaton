@@ -21,6 +21,17 @@ from app.services.users import UserService
 router = APIRouter()
 
 admin_only = require_roles("system_admin", "admin")
+staff_roster = require_roles("system_admin", "admin", "teacher")
+
+
+@router.get("/students", response_model=list[UserOut], summary="Список обучающихся (окно 9 ТЗ)")
+async def list_students(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[object, Depends(staff_roster)],
+) -> list[UserOut]:
+    """Доступно администратору и преподавателю."""
+    users = await UserRepository(session).list_by_role("student")
+    return [UserOut.model_validate(u) for u in users]
 
 
 @router.get("", response_model=list[UserOut], summary="Список пользователей (окно 12 ТЗ)")

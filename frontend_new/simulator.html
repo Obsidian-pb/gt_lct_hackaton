@@ -209,7 +209,7 @@ async function renderDispatcher(trId, kind) {
     "<div id='dispBox'></div>";
 
   const cards = await act(() => api("/dispatcher/cards?training_id=" + trId));
-  const users = await loadUsers().catch(() => []);
+  const users = await loadStudents().catch(() => []);
 
   const cols = [
     { key: "sequence_number", label: "№" },

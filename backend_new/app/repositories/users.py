@@ -47,6 +47,17 @@ class UserRepository:
         )
         return list(result.scalars().all())
 
+    async def list_by_role(self, role_code: str) -> list[User]:
+        """Пользователи с указанной ролью (окно 9 ТЗ — список обучающихся)."""
+        result = await self._session.execute(
+            select(User)
+            .join(User.roles)
+            .options(selectinload(User.roles))
+            .where(User.deleted_at.is_(None), Role.code == role_code)
+            .order_by(User.last_name, User.first_name)
+        )
+        return list(result.scalars().all())
+
     async def get_roles_by_codes(self, codes: list[str]) -> list[Role]:
         result = await self._session.execute(select(Role).where(Role.code.in_(codes)))
         return list(result.scalars().all())

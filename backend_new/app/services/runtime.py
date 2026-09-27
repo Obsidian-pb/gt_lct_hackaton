@@ -122,6 +122,10 @@ class RuntimeService:
             )
         sequence = await self._repo.count_cards(session.id) + 1
         card = await self._repo.create_card(session.id, task.id, sequence)
+        card.event_type_id = task.event_type_id
+        card.event_feature_1_id = task.event_feature_1_id
+        card.event_feature_2_id = task.event_feature_2_id
+        card.event_feature_3_id = task.event_feature_3_id
         card.event_class_id = task.event_class_id
         card.main_service_id = task.main_service_id
         await self._session.commit()

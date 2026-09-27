@@ -100,11 +100,13 @@ class ClassifierVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class EventType(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Верхний уровень классификатора — код «Г» (1..9)."""
+    """Верхний уровень классификатора — код «Г» (1..99)."""
 
     __tablename__ = "event_types"
     __table_args__ = (
-        CheckConstraint("code BETWEEN 1 AND 9", name="code_range"),
+        CheckConstraint(
+            "code BETWEEN 1 AND 99", name="ck_event_types_code_range"
+        ),
         {"schema": "catalog"},
     )
 

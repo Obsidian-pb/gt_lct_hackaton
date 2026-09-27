@@ -7,9 +7,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.catalog import EventClass
-from app.models.content import StudyTask, TaskEtalon
+from app.models.content import StudyTask, TaskEtalon, TaskExtraFieldSchema
 from app.repositories.content import ContentRepository
-from app.schemas.tasks import StudyTaskApproveRequest, StudyTaskCreate, StudyTaskUpdate
+from app.schemas.tasks import (
+    ExtraFieldSchemaIn,
+    StudyTaskApproveRequest,
+    StudyTaskCreate,
+    StudyTaskUpdate,
+)
 
 
 class StudyTaskService:
@@ -38,13 +43,24 @@ class StudyTaskService:
                 detail="Одна из указанных служб не найдена",
             )
 
-        data = payload.model_dump(exclude={"service_ids", "etalon_content", "field_schema"})
+        data = payload.model_dump(
+            exclude={
+                "service_ids",
+                "etalon_content",
+                "field_schema",
+                "extra_field_schemas",
+            }
+        )
         task = StudyTask(**data, created_by=actor_id, status="draft")
         task.services = services
         if payload.etalon_content:
             task.etalon = TaskEtalon(
                 content=payload.etalon_content, field_schema=payload.field_schema
             )
+        task.extra_field_schemas = [
+            TaskExtraFieldSchema(**schema.model_dump())
+            for schema in payload.extra_field_schemas
+        ]
         self._repo.add(task)
         await self._session.commit()
         return await self._require_task(task.id)
@@ -57,6 +73,7 @@ class StudyTaskService:
         service_ids = changes.pop("service_ids", None)
         etalon_content = changes.pop("etalon_content", None)
         field_schema = changes.pop("field_schema", None)
+        extra_field_schemas = changes.pop("extra_field_schemas", None)
         for field, value in changes.items():
             setattr(task, field, value)
         if service_ids is not None:
@@ -78,6 +95,11 @@ class StudyTaskService:
                     task.etalon.content = etalon_content
                 if field_schema is not None:
                     task.etalon.field_schema = field_schema
+        if extra_field_schemas is not None:
+            task.extra_field_schemas = [
+                TaskExtraFieldSchema(**schema.model_dump())
+                for schema in extra_field_schemas
+            ]
         await self._session.commit()
         return await self._require_task(task_id)
 

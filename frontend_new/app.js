@@ -210,17 +210,27 @@ function selectEl(items, placeholder = "— не выбрано —", selected =
 
 /* Список справочников, которые нужны многим страницам */
 async function loadDicts() {
-  const [services, applicantStatuses, scenarioStatuses, trainingRoles, eventGroups] = await Promise.all([
+  const [services, applicantStatuses, scenarioStatuses, trainingRoles, eventGroups,
+         eventTypes, features1, features2, features3] = await Promise.all([
     api("/services").catch(() => []),
     api("/applicant-statuses").catch(() => []),
     api("/scenario-statuses").catch(() => []),
     api("/training-roles").catch(() => []),
     api("/event-groups").catch(() => []),
+    api("/classifier/event-types").catch(() => []),
+    api("/classifier/features-1").catch(() => []),
+    api("/classifier/features-2").catch(() => []),
+    api("/classifier/features-3").catch(() => []),
   ]);
-  return { services, applicantStatuses, scenarioStatuses, trainingRoles, eventGroups };
+  return { services, applicantStatuses, scenarioStatuses, trainingRoles, eventGroups,
+           eventTypes, features1, features2, features3 };
 }
 async function loadUsers() {
   return api("/users").catch(() => []);
+}
+/* Список обучающихся (роль student): доступен admin и teacher (окно 9 ТЗ) */
+async function loadStudents() {
+  return api("/students").catch(() => []);
 }
 
 /* Статусы тренировок/карточек на русском */
