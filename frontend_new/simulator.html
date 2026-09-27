@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эмулятор АРМ-112 — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Эмулятор АРМ-112</h1>
+  <p class="sub">Окна 14, 17, 36 ТЗ: приём вызова, заполнение карточки происшествия, окно контроля карточек диспетчеров.</p>
+
+  <section id="setupSection" class="panel">
+    <h3>Выбор тренировки</h3>
+    <div class="filter-bar">
+      <span>Тренировка:</span><select id="trSel"></select>
+      <button class="btn" onclick="startWorkspace()">Начать работу</button>
+    </div>
+    <div class="note">Обучающийся запускает тренировку по кнопке «Пройти». Учебная роль определяется из назначения: Оператор-112, Диспетчер ДДС или Диспетчер службы.</div>
+  </section>
+
+  <section id="workspace" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let ME = null;
+let DICTS = null;
+let TRAININGS = [];
+let ROLE = null;          // код учебной роли участника
+let SESSION_ID = null;    // активная сессия оператора
+let CURRENT_TASK = null;  // выданная учебная задача
+let CARD = null;          // текущая карточка
+
+async function init() {
+  await renderHeader("simulator.html");
+  ME = await me();
+  DICTS = await loadDicts();
+  const trainings = await act(() => api("/trainings"));
+  TRAININGS = trainings;
+
+  const sel = document.getElementById("trSel");
+  sel.innerHTML = trainings.map(t =>
+    "<option value='" + esc(t.id) + "'>" + esc(t.title) + " — " + statusLabel(t.status) + "</option>").join("");
+
+  const q = new URLSearchParams(location.search).get("training");
+  if (q) { sel.value = q; startWorkspace(); }
+}
+
+async function findRole(trainingId) {
+  try {
+    const t = await api("/trainings/" + trainingId);
+    const p = (t.participants || []).find(x => x.user_id === ME.id);
+    if (!p) return null;
+    const r = DICTS.trainingRoles.find(x => x.id === p.training_role_id);
+    return r ? { code: r.code, participant: p } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function startWorkspace() {
+  const trId = document.getElementById("trSel").value;
+  if (!trId) { toast("Выберите тренировку", "err"); return; }
+  ROLE = await findRole(trId);
+
+  const ws = document.getElementById("workspace");
+  document.getElementById("setupSection").style.display = "none";
+  ws.style.display = "block";
+
+  if (ROLE && ROLE.code === "operator_112") await renderOperator(trId);
+  else if (ROLE && ROLE.code === "dispatcher_dds") await renderDispatcher(trId, "dds");
+  else if (ROLE && ROLE.code === "service_dispatcher") await renderDispatcher(trId, "service");
+  else await renderChooseRole(trId);
+}
+
+/* ---------- выбор роли вручную (если не определена) ---------- */
+function renderChooseRole(trId) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>Выберите режим (учебная роль не определена для этого пользователя)</h2>" +
+    "<div class='filter-bar'>" +
+    "<button class='btn' onclick='renderOperator(\"" + trId + "\")'>Оператор-112 (заполнение карточки)</button>" +
+    "<button class='btn' onclick='renderDispatcher(\"" + trId + "\",\"dds\")'>Диспетчер ДДС (окно 36)</button>" +
+    "<button class='btn' onclick='renderDispatcher(\"" + trId + "\",\"service\")'>Диспетчер службы (окно 36)</button>" +
+    "</div>";
+}
+
+/* ============ Оператор-112 (Сценарий 3 ТЗ, окно 17) ============ */
+async function renderOperator(trId) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>Эмулятор АРМ-112 — Оператор-112</h2>" +
+    "<div class='panel'><h3>Шаг 1. Старт сессии</h3>" +
+    "<p>После старта начнут выдаваться учебные задачи (сообщения заявителя), которые нужно принимать и оформлять в карточки.</p>" +
+    "<button class='btn ok' onclick='startSession()'>Начать сессию</button></div>" +
+    "<div id='sessionBox'></div>";
+
+  try {
+    const s = await act(() => api("/sessions/start", { method: "POST", json: { training_id: trId } }));
+    SESSION_ID = s.id;
+    await sessionStarted(s);
+  } catch (e) {
+    /* повторный старт — сессия уже есть, пробуем продолжить по выданной задаче */
+    toast(e.message, "err");
+  }
+}
+
+async function startSession() {
+  /* используется только если автозапуск не сработал */
+  const trId = document.getElementById("trSel").value;
+  try {
+    const s = await act(() => api("/sessions/start", { method: "POST", json: { training_id: trId } }));
+    SESSION_ID = s.id;
+    await sessionStarted(s);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+async function sessionStarted(s) {
+  const box = document.getElementById("sessionBox");
+  box.innerHTML = "<div class='panel'>Сессия: <span class='mono'>" + esc(s.id) + "</span> · статус: <b>" + statusLabel(s.status) + "</b></div>";
+  await loadNextTask();
+}
+
+async function loadNextTask() {
+  if (!SESSION_ID) return;
+  const task = await act(() => api("/sessions/" + SESSION_ID + "/next-task"));
+  CURRENT_TASK = task;
+  CARD = null;
+  const box = document.getElementById("sessionBox");
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel'><h3>Входящий вызов</h3>" +
+    "<p><b>АОН:</b> " + esc(task.aon_phone || "не определён") + " · <b>Заявитель:</b> " + esc(task.caller_full_name || "—") + "</p>" +
+    "<p class='muted'><b>Сложность:</b> " + task.difficulty + "</p>" +
+    "<p><b>Сообщение заявителя:</b><br><i>" + esc(task.caller_message) + "</i></p>" +
+    (task.address && Object.keys(task.address).length ? "<details><summary>Адрес (исходные данные)</summary><pre class='json'>" + esc(JSON.stringify(task.address, null, 2)) + "</pre></details>" : "") +
+    "<button class='btn ok' onclick='acceptCall()'>📞 Принять вызов</button></div>");
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+async function acceptCall() {
+  if (!CURRENT_TASK) return;
+  const card = await act(async () => {
+    return api("/sessions/" + SESSION_ID + "/accept-call", { method: "POST", json: { study_task_id: CURRENT_TASK.study_task_id } });
+  }, "Вызов принят, создана карточка");
+  CARD = card;
+  await renderCardForm();
+}
+
+/* Окно 14 ТЗ — карточка происшествия */
+async function renderCardForm() {
+  const box = document.getElementById("sessionBox");
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel' id='cardPanel'><h3>Карточка происшествия (окно 14)</h3>" +
+    "<div class='row'><div class='panel'>" +
+    "<label class='field'>Содержимое карточки (JSON-объект)</label>" +
+    "<textarea class='code' id='cardContent' style='min-height:220px' placeholder='{\n  \"phone\": \"+7-495-000-00-01\",\n  \"address\": \"ул. Тестовая, 10\",\n  \"category\": \"Пожар\"\n}'>" + esc(JSON.stringify(CARD.content || {}, null, 2)) + "</textarea>" +
+    "<div class='form-actions'>" +
+    "<button class='btn' onclick='saveDraft()'>Сохранить черновик</button>" +
+    "<button class='btn ok' onclick='submitCard()'>Сохранить и отправить (сверить с эталоном)</button>" +
+    "</div></div>" +
+    "<div class='panel'><h3>Подсказка по полям</h3>" +
+    "<p class='muted'>Эталон скрыт до отправки. Заполняйте те поля, которые считаете нужными (телефоны, адрес, описание, тип происшествия, службы). Машинная оценка сравнит заполнение с эталоном.</p>" +
+    "<div class='note'>Телефон по АОН: <b>" + esc(CURRENT_TASK.aon_phone || "—") + "</b>. Предоставленный: <b>" + esc(CURRENT_TASK.provided_phone || "—") + "</b>. На место: <b>" + esc(CURRENT_TASK.scene_phone || "—") + "</b>.</div>" +
+    "</div></div></div>");
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+function readContent() {
+  try {
+    return JSON.parse(document.getElementById("cardContent").value || "{}");
+  } catch (e) {
+    throw new Error("Содержимое карточки — невалидный JSON");
+  }
+}
+
+async function saveDraft() {
+  if (!CARD) return;
+  let content;
+  try { content = readContent(); } catch (e) { toast(e.message, "err"); return; }
+  CARD = await act(() => api("/cards/" + CARD.id + "/content", { method: "PATCH", json: { content } }), "Черновик сохранён");
+}
+
+async function submitCard() {
+  if (!CARD) return;
+  let content;
+  try { content = readContent(); } catch (e) { toast(e.message, "err"); return; }
+  const card = await act(() => api("/cards/" + CARD.id + "/submit", { method: "POST", json: { content } }), "Карточка отправлена");
+  CARD = card;
+  const panel = document.getElementById("cardPanel");
+  panel.querySelector("textarea").disabled = true;
+  panel.querySelector(".form-actions").innerHTML = "";
+  panel.insertAdjacentHTML("beforeend",
+    "<h3>Результат машинной оценки</h3>" +
+    "<p><b>Статус:</b> " + statusLabel(card.status) + " · <b>Машинная оценка:</b> " + fmtNum(card.machine_score) + " %</p>" +
+    (card.final_score !== null && card.final_score !== undefined ? "<p><b>Итоговая оценка преподавателя:</b> " + fmtNum(card.final_score) + " %</p>" : "") +
+    "<button class='btn' onclick='loadNextTask()'>Следующая задача (или завершение)</button>");
+}
+
+/* ============ Диспетчеры (Сценарий 4 ТЗ, окно 36) ============ */
+async function renderDispatcher(trId, kind) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>" + (kind === "dds" ? "Окно 36 — Диспетчер ДДС: контроль карточек" : "Окно 36 — Диспетчер службы: отработка карточек") + "</h2>" +
+    "<div id='dispBox'></div>";
+
+  const cards = await act(() => api("/dispatcher/cards?training_id=" + trId));
+  const users = await loadUsers().catch(() => []);
+
+  const cols = [
+    { key: "sequence_number", label: "№" },
+    { key: "status", label: "Статус", fmt: v => "<span class='status s-" + esc(v) + "'>" + statusLabel(v) + "</span>" },
+    { key: "study_task_id", label: "Задача", fmt: trunc },
+    { key: "machine_score", label: "Машинная оценка", fmt: fmtNum },
+    { key: "created_at", label: "Создана", fmt: fmtDate },
+    { key: "submitted_at", label: "Отправлена", fmt: fmtDate },
+    { key: "_act", label: "Действие", fmt: (v, r) => {
+        let b = "<button class='btn ghost' onclick='showCardContent(\"" + r.id + "\")'>Содержимое</button>";
+        if (kind === "dds") {
+          if (r.status === "submitted") b += "<button class='btn' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"accept\")'>Принять</button>";
+          if (r.status === "accepted") b += "<button class='btn' style='margin-left:6px' onclick='routeCard(\"" + r.id + "\")'>Направить в службу</button>";
+        }
+        if (kind === "service" && r.status === "routed") b += "<button class='btn ok' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"process\")'>Отработать</button>";
+        return b;
+      } },
+  ];
+  const box = document.getElementById("dispBox");
+  box.appendChild(tableEl(cols, cards, "Карточек в работе нет. Оператор-112 ещё не заполнил ни одной карточки."));
+}
+
+async function showCardContent(id) {
+  const c = await act(() => api("/cards/" + id));
+  toast("", "info");
+  const box = document.getElementById("dispBox");
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel'><h3>Карточка " + esc(id) + "</h3>" +
+    "<pre class='json'>" + esc(JSON.stringify(c.content, null, 2)) + "</pre>" +
+    "<p class='muted'>Статус: " + statusLabel(c.status) + " · машинная оценка: " + fmtNum(c.machine_score) + " · итоговая: " + fmtNum(c.final_score) + "</p></div>");
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+async function cardAction(id, action) {
+  const label = { accept: "Карточка принята", process: "Карточка отработана" }[action];
+  await act(async () => {
+    await api("/cards/" + id + "/" + action, { method: "POST" });
+  }, label);
+  await renderDispatcher(document.getElementById("trSel").value, ROLE && ROLE.code === "dispatcher_dds" ? "dds" : "service");
+}
+
+async function routeCard(id) {
+  const svc = DICTS.services;
+  if (!svc.length) { toast("Служб нет в справочнике", "err"); return; }
+  const choice = prompt("ID службы для направления:\n" + svc.map(s => s.id + " — " + s.name).join("\n") + "\n\nВведите ID:");
+  if (!choice) return;
+  await act(async () => {
+    await api("/cards/" + id + "/route", { method: "POST", json: { service_id: choice } });
+  }, "Карточка направлена в службу");
+  await renderDispatcher(document.getElementById("trSel").value, "dds");
+}
+
+init().catch(e => {
+  toast(e.message, "err");
+  if (!getToken()) setTimeout(() => location.href = "index.html", 900);
+});
+</script>
+</body>
+</html>

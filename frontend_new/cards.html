@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Учебные карточки — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Учебные карточки</h1>
+  <p class="sub">Окно 15 ТЗ: список всех заполненных обучающимися карточек происшествий, просмотр содержимого, итоговая оценка преподавателя.</p>
+
+  <section id="listSection"></section>
+  <section id="cardSection" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let DICTS = null;
+
+async function init() {
+  await renderHeader("cards.html");
+  DICTS = await loadDicts();
+  await renderList();
+}
+
+async function renderList() {
+  const sec = document.getElementById("listSection");
+  const fStatus = selectEl([
+    { id: "draft", name: "Черновик" }, { id: "submitted", name: "Отправлена" },
+    { id: "accepted", name: "Принята" }, { id: "routed", name: "Направлена" },
+    { id: "processed", name: "Отработана" },
+  ], "Любой статус");
+  const btn = document.createElement("button");
+  btn.className = "btn ghost";
+  btn.textContent = "Показать";
+
+  async function apply() {
+    const q = new URLSearchParams();
+    if (fStatus.value) q.set("card_status", fStatus.value);
+    const cards = await act(() => api("/cards?" + q.toString()));
+    const wrap = document.getElementById("cardsTable") || document.createElement("div");
+    wrap.id = "cardsTable";
+    wrap.innerHTML = "";
+    wrap.appendChild(tableEl([
+      { key: "sequence_number", label: "№" },
+      { key: "study_task_id", label: "Учебная задача", fmt: trunc },
+      { key: "status", label: "Статус", fmt: v => "<span class='status s-" + esc(v) + "'>" + statusLabel(v) + "</span>" },
+      { key: "machine_score", label: "Машинная", fmt: fmtNum },
+      { key: "ai_score", label: "ИИ", fmt: fmtNum },
+      { key: "final_score", label: "Итоговая", fmt: fmtNum },
+      { key: "duration_ms", label: "Время, с", fmt: (v) => v ? Math.round(v / 1000) : "—" },
+      { key: "created_at", label: "Создана", fmt: fmtDate },
+      { key: "submitted_at", label: "Отправлена", fmt: fmtDate },
+      { key: "_act", label: "", fmt: (v, r) =>
+          "<button class='btn' onclick='openCard(\"" + r.id + "\")'>Открыть</button>" },
+    ], cards, "Карточек нет"));
+    sec.appendChild(wrap);
+  }
+  btn.onclick = apply;
+  sec.innerHTML = "";
+  sec.appendChild(filterBar([{ label: "Статус", el: fStatus }]));
+  const bar = sec.querySelector(".filter-bar");
+  bar.appendChild(btn);
+  await apply();
+}
+
+async function openCard(id) {
+  const c = await act(() => api("/cards/" + id));
+  const sec = document.getElementById("cardSection");
+  sec.style.display = "block";
+  sec.innerHTML = "<h2>Карточка происшествия</h2><div class='row'>" +
+    "<div class='panel'><h3>Данные</h3>" +
+      "<p>ID: <span class='mono'>" + esc(c.id) + "</span></p>" +
+      "<p>Статус: <b>" + statusLabel(c.status) + "</b> · № в сессии: " + c.sequence_number + "</p>" +
+      "<p>Машинная оценка: <b>" + fmtNum(c.machine_score) + "</b> · ИИ: " + fmtNum(c.ai_score) +
+      " · Итоговая: <b>" + fmtNum(c.final_score) + "</b></p>" +
+      "<p>Создана: " + fmtDate(c.created_at) + " · отправлена: " + fmtDate(c.submitted_at) +
+      "<br>принята: " + fmtDate(c.accepted_at) + " · направлена: " + fmtDate(c.routed_at) + " · отработана: " + fmtDate(c.processed_at) + "</p>" +
+      "<p>Длительность: " + (c.duration_ms ? Math.round(c.duration_ms / 1000) + " с" : "—") + "</p>" +
+      "<div class='form-actions'>" +
+        "<label class='field'>Итоговая оценка (0–100): <input type='number' id='gScore' min='0' max='100' value='" + esc(c.final_score ?? 0) + "' style='width:120px'></label>" +
+        "<button class='btn ok' onclick='grade(\"" + c.id + "\")'>Выставить оценку</button>" +
+        "<button class='btn ghost' onclick='document.getElementById(\"cardSection\").style.display=\"none\"'>Закрыть</button>" +
+      "</div>" +
+    "</div>" +
+    "<div class='panel'><h3>Содержимое карточки (JSONB)</h3>" + fmtJson(c.content) + "</div>" +
+  "</div>";
+  sec.scrollIntoView({ behavior: "smooth" });
+}
+
+async function grade(id) {
+  const score = Number(document.getElementById("gScore").value);
+  if (isNaN(score) || score < 0 || score > 100) { toast("Оценка от 0 до 100", "err"); return; }
+  await act(async () => {
+    await api("/cards/" + id + "/grade", { method: "POST", json: { final_score: score } });
+  }, "Оценка выставлена");
+  await openCard(id);
+}
+
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>

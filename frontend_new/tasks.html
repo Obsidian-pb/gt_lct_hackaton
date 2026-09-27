@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Учебные задачи — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <div class="page-title">
+    <div>
+      <h1>Учебные задачи</h1>
+      <p class="sub">Окна 7–8 ТЗ: список задач, диспозиция (сообщение заявителя), эталонная карточка, сложность, утверждение.</p>
+    </div>
+    <button class="btn" onclick="openEdit('')">+ Новая задача</button>
+  </div>
+
+  <section id="listSection"></section>
+  <section id="editSection" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let DICTS = null;
+
+async function load() {
+  DICTS = await loadDicts();
+  await renderList();
+}
+
+/* ---------- список с фильтрами (окно 7) ---------- */
+async function renderList() {
+  const sec = document.getElementById("listSection");
+  const fDifficulty = selectEl([1,2,3,4,5].map(d => ({id: d, name: "Сложность " + d})), "Любая сложность");
+  const fStatus = selectEl([
+    { id: "draft", name: "Черновик" }, { id: "approved", name: "Утверждена" }, { id: "rejected", name: "Отклонена" },
+  ], "Любой статус");
+  const fSearch = document.createElement("input");
+  fSearch.type = "text";
+  fSearch.placeholder = "поиск по сообщению…";
+
+  const bar = filterBar([{ label: "Сложность", el: fDifficulty }, { label: "Статус", el: fStatus }, { label: "Поиск", el: fSearch }]);
+  const btn = document.createElement("button");
+  btn.className = "btn ghost";
+  btn.textContent = "Применить";
+  bar.appendChild(btn);
+
+  async function apply() {
+    const q = new URLSearchParams();
+    if (fDifficulty.value) q.set("difficulty", fDifficulty.value);
+    if (fStatus.value) q.set("status", fStatus.value);
+    if (fSearch.value.trim()) q.set("search", fSearch.value.trim());
+    const tasks = await act(() => api("/study-tasks?" + q.toString()));
+    const wrap = document.getElementById("tasksTable") || document.createElement("div");
+    wrap.id = "tasksTable";
+    wrap.innerHTML = "";
+    wrap.appendChild(tableEl([
+      { key: "difficulty", label: "Сл." },
+      { key: "caller_message", label: "Сообщение заявителя", fmt: trunc },
+      { key: "event_class_id", label: "Тип происшествия", fmt: (v) => {
+          const g = DICTS.eventGroups.find(x => x.id === v);
+          return g ? esc(g.name) : "—";
+        } },
+      { key: "status", label: "Статус", fmt: v => "<span class='status s-" + esc(v) + "'>" + statusLabel(v) + "</span>" },
+      { key: "created_at", label: "Создана", fmt: fmtDate },
+      { key: "_act", label: "", fmt: (v, r) =>
+          "<button class='btn' onclick='openEdit(\"" + r.id + "\")'>Открыть</button>" +
+          (r.status === "draft" || r.status === "rejected" ? "<button class='btn ok' style='margin-left:6px' onclick='decide(\"" + r.id + "\",true)'>Утвердить</button>" : "") },
+    ], tasks));
+    sec.appendChild(wrap);
+  }
+  btn.onclick = apply;
+  sec.innerHTML = "";
+  sec.appendChild(bar);
+  await apply();
+}
+
+/* ---------- редактор задачи (окно 8) ---------- */
+async function openEdit(id) {
+  let t = { difficulty: 2, extra_fields: {}, etalon_content: {}, field_schema: [] };
+  if (id) t = await act(() => api("/study-tasks/" + id));
+  const sec = document.getElementById("editSection");
+  sec.style.display = "block";
+
+  const evOpts = DICTS.eventGroups.map(g => "<option value='" + esc(g.id) + "'" + (t.event_class_id === g.id ? " selected" : "") + ">" + esc(g.event_number + " · " + g.name) + "</option>").join("");
+  const svcOpts = DICTS.services.map(s => "<option value='" + esc(s.id) + "'" + (t.main_service_id === s.id ? " selected" : "") + ">" + esc(s.code + " · " + s.name) + "</option>").join("");
+  const appOpts = DICTS.applicantStatuses.map(s => "<option value='" + esc(s.id) + "'" + (t.applicant_status_id === s.id ? " selected" : "") + ">" + esc(s.name) + "</option>").join("");
+  const svcMulti = DICTS.services.map(s =>
+    "<label class='checkline'><input type='checkbox' class='svc-cb' value='" + esc(s.id) + "'" + ((t.services || []).some(x => x.id === s.id) ? " checked" : "") + "> " + esc(s.code + " · " + s.name) + "</label>").join("");
+  const flags = [
+    ["has_victims", "Пострадавшие"],
+    ["no_scene_refusal", "Нет на месте / отказ от скорой"],
+    ["no_access", "Нет доступа / заблаговременно"],
+    ["no_contact", "Нет контакта"],
+    ["call_dropped", "Срыв звонка"],
+  ].map(([k, label]) =>
+    "<label class='checkline'><input type='checkbox' id='f_" + k + "'" + (t[k] ? " checked" : "") + "> " + label + "</label>").join("");
+
+  const addr = [
+    ["country", "Страна"], ["federal_subject", "Субъект"], ["locality", "Населённый пункт"], ["address_object", "Объект"],
+    ["administrative_district", "Округ"], ["district", "Район"], ["street", "Улица"], ["house", "Дом"],
+    ["building", "Корпус"], ["structure", "Строение"], ["apartment", "Квартира"], ["entrance", "Подъезд"],
+    ["floor", "Этаж"], ["intercom_code", "Код"], ["descriptive_address", "Описательный адрес"],
+  ].map(([k, label]) => "<label class='field'>" + label + "<input type='text' id='f_" + k + "' value='" + esc(t[k] ?? "") + "'></label>");
+
+  sec.innerHTML = "<h2>" + (id ? "Учебная задача" : "Новая учебная задача") + "</h2>" +
+  "<div class='row'>" +
+    "<div class='panel'><h3>Диспозиция (исходные данные)</h3>" +
+      "<label class='field'>Сложность (1–5) <select id='f_difficulty'>" + [1,2,3,4,5].map(d => "<option value='" + d + "'" + (t.difficulty === d ? " selected" : "") + ">" + d + "</option>").join("") + "</select></label>" +
+      "<label class='field'>Сообщение заявителя *<textarea id='f_caller_message'>" + esc(t.caller_message || "") + "</textarea></label>" +
+      "<div class='row'>" +
+        "<label class='field'>Телефон (АОН)<input type='text' id='f_aon_phone' value='" + esc(t.aon_phone || "") + "'></label>" +
+        "<label class='field'>Телефон (предоставленный)<input type='text' id='f_provided_phone' value='" + esc(t.provided_phone || "") + "'></label>" +
+        "<label class='field'>Телефон (на место)<input type='text' id='f_scene_phone' value='" + esc(t.scene_phone || "") + "'></label>" +
+      "</div>" +
+      "<div class='row'>" +
+        "<label class='field'>ФИО заявителя<input type='text' id='f_caller_full_name' value='" + esc(t.caller_full_name || "") + "'></label>" +
+        "<label class='field'>Статус заявителя<select id='f_applicant_status_id'><option value=''>— не выбран —</option>" + appOpts + "</select></label>" +
+      "</div>" +
+      "<label class='field'>Описание со слов заявителя<textarea id='f_incident_description'>" + esc(t.incident_description || "") + "</textarea></label>" +
+      "<h3 style='margin-top:12px'>Флаги</h3>" + flags +
+    "</div>" +
+    "<div class='panel'><h3>Адрес</h3>" +
+      "<div class='row'>" + addr.join("") +
+        "<label class='field'>Широта<input type='number' step='any' id='f_latitude' value='" + esc(t.latitude ?? "") + "'></label>" +
+        "<label class='field'>Долгота<input type='number' step='any' id='f_longitude' value='" + esc(t.longitude ?? "") + "'></label>" +
+      "</div>" +
+      "<h3 style='margin-top:12px'>Классификация</h3>" +
+      "<label class='field'>Тип происшествия (класс)<select id='f_event_class_id'><option value=''>— не выбран —</option>" + evOpts + "</select></label>" +
+      "<label class='field'>Основная служба<select id='f_main_service_id'><option value=''>— не выбрана —</option>" + svcOpts + "</select></label>" +
+      "<h3 style='margin-top:12px'>Привлекаемые службы</h3>" + svcMulti +
+      "<label class='field'>Доп. поля группы (extra_fields, JSON)<textarea class='code' id='f_extra_fields'>" + esc(JSON.stringify(t.extra_fields || {}, null, 2)) + "</textarea></label>" +
+    "</div>" +
+    "<div class='panel'><h3>Эталон (окно 14 — пример заполненной карточки)</h3>" +
+      "<div class='note'>Эталон — образец заполнения карточки происшествия; сравнивается с ответом обучающегося (машинная оценка).</div>" +
+      "<label class='field'>Содержимое эталона (etalon_content, JSON)<textarea class='code' id='f_etalon_content'>" + esc(JSON.stringify(t.etalon_content || {}, null, 2)) + "</textarea></label>" +
+      "<label class='field'>Схема полей (field_schema, JSON)<textarea class='code' id='f_field_schema'>" + esc(JSON.stringify(t.field_schema || [], null, 2)) + "</textarea></label>" +
+      "<div class='form-actions'>" +
+        "<button class='btn ok' onclick='saveTask(\"" + (id || "") + "\")'>Сохранить</button>" +
+        (id && t.status === "draft" ? "<button class='btn' onclick='decide(\"" + id + "\",true)'>Утвердить</button>" : "") +
+        (id ? "<button class='btn ghost' onclick='genAI(\"" + id + "\")'>Генерация ИИ</button>" : "") +
+        (id ? "<button class='btn danger' onclick='delTask(\"" + id + "\")'>Удалить</button>" : "") +
+        "<button class='btn ghost' onclick='document.getElementById(\"editSection\").style.display=\"none\"'>Закрыть</button>" +
+      "</div>" +
+    "</div>" +
+  "</div>";
+  sec.scrollIntoView({ behavior: "smooth" });
+}
+
+function val(id) { return document.getElementById(id).value.trim(); }
+
+function collectPayload() {
+  let extra = {}, etalon = {}, schema = [];
+  try { extra = JSON.parse(document.getElementById("f_extra_fields").value || "{}"); }
+  catch (e) { throw new Error("extra_fields: невалидный JSON"); }
+  try { etalon = JSON.parse(document.getElementById("f_etalon_content").value || "{}"); }
+  catch (e) { throw new Error("etalon_content: невалидный JSON"); }
+  try { schema = JSON.parse(document.getElementById("f_field_schema").value || "[]"); }
+  catch (e) { throw new Error("field_schema: невалидный JSON"); }
+
+  const payload = {
+    difficulty: Number(document.getElementById("f_difficulty").value) || 2,
+    caller_message: val("f_caller_message"),
+    aon_phone: val("f_aon_phone") || null,
+    provided_phone: val("f_provided_phone") || null,
+    scene_phone: val("f_scene_phone") || null,
+    caller_full_name: val("f_caller_full_name") || null,
+    applicant_status_id: document.getElementById("f_applicant_status_id").value || null,
+    country: val("f_country") || null, federal_subject: val("f_federal_subject") || null,
+    locality: val("f_locality") || null, address_object: val("f_address_object") || null,
+    administrative_district: val("f_administrative_district") || null, district: val("f_district") || null,
+    street: val("f_street") || null, house: val("f_house") || null, building: val("f_building") || null,
+    structure: val("f_structure") || null, apartment: val("f_apartment") || null, entrance: val("f_entrance") || null,
+    floor: val("f_floor") || null, intercom_code: val("f_intercom_code") || null, descriptive_address: val("f_descriptive_address") || null,
+    latitude: parseFloat(val("f_latitude")) || null, longitude: parseFloat(val("f_longitude")) || null,
+    incident_description: val("f_incident_description") || null,
+    has_victims: document.getElementById("f_has_victims").checked,
+    no_scene_refusal: document.getElementById("f_no_scene_refusal").checked,
+    no_access: document.getElementById("f_no_access").checked,
+    no_contact: document.getElementById("f_no_contact").checked,
+    call_dropped: document.getElementById("f_call_dropped").checked,
+    event_class_id: document.getElementById("f_event_class_id").value || null,
+    main_service_id: document.getElementById("f_main_service_id").value || null,
+    service_ids: Array.from(document.querySelectorAll("#editSection input.svc-cb:checked")).map(i => i.value),
+    extra_fields: extra,
+    etalon_content: etalon,
+    field_schema: schema,
+  };
+  if (!payload.caller_message) throw new Error("Заполните сообщение заявителя");
+  return payload;
+}
+
+async function saveTask(id) {
+  let payload;
+  try { payload = collectPayload(); } catch (e) { toast(e.message, "err"); return; }
+  await act(async () => {
+    if (id) await api("/study-tasks/" + id, { method: "PATCH", json: payload });
+    else await api("/study-tasks", { method: "POST", json: payload });
+  }, "Задача сохранена");
+  document.getElementById("editSection").style.display = "none";
+  await renderList();
+}
+
+async function decide(id, approve) {
+  await act(async () => {
+    await api("/study-tasks/" + id + "/approve", { method: "POST", json: { approve } });
+  }, approve ? "Задача утверждена" : "Задача отклонена");
+  document.getElementById("editSection").style.display = "none";
+  await renderList();
+}
+
+async function delTask(id) {
+  if (!confirm("Удалить учебную задачу?")) return;
+  await act(() => api("/study-tasks/" + id, { method: "DELETE" }), "Удалена");
+  document.getElementById("editSection").style.display = "none";
+  await renderList();
+}
+
+async function genAI(id) {
+  try {
+    await act(() => api("/study-tasks/" + id + "/generate", { method: "POST" }));
+  } catch (e) {
+    /* 501 — ожидаемая заглушка */
+    toast("Генерация ИИ пока не реализована на бэкенде (501). Эталон заполняется вручную.", "info");
+  }
+}
+
+async function init() {
+  await renderHeader("tasks.html");
+  await load();
+}
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>
