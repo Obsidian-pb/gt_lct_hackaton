@@ -87,6 +87,11 @@ if [ "$MODE" = "--update" ]; then
   exit 0
 fi
 
+# Готовые настройки (доступ из класса) — только в полном комплекте:
+# архив обновления распаковывается поверх и не должен затирать то,
+# что на месте поменяли под себя.
+crlf ops/portable/settings.cmd "$KIT/settings.cmd"
+
 # --- Среды выполнения ---------------------------------------------------------
 fetch "$PY_ZIP" "https://www.python.org/ftp/python/$PY_VER/$PY_ZIP"
 fetch "$PG_ZIP" "https://get.enterprisedb.com/postgresql/$PG_ZIP"
@@ -169,7 +174,7 @@ done
 if perl -CSD -ne 'exit 1 if /[\x{4e00}-\x{9fff}]/' "$KIT/start.cmd" "$KIT/stop.cmd" "$KIT/README-ЗАПУСК.txt"; then :; else
   echo "в файлах комплекта иероглифы" >&2; exit 1
 fi
-for f in start.cmd stop.cmd settings.example.cmd; do
+for f in start.cmd stop.cmd settings.cmd settings.example.cmd; do
   perl -ne 'exit 1 unless /\r\n\z/' "$KIT/$f" || { echo "$f не в CRLF" >&2; exit 1; }
 done
 
