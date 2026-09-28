@@ -152,19 +152,33 @@ async function openEdit(id) {
     "</div>" +
     "<div class='panel'><h3>Эталон (окно 14 — пример заполненной карточки)</h3>" +
       "<div class='note'>Эталон — заполненная карточка происшествия: поля, которые обучающийся должен заполнить (классификация, заявитель, адрес, службы, доп. поля). Сложность и поля задания в эталон не входят.</div>" +
-      "<button class='btn' type='button' onclick='fillEtalonFromTask()'>Сформировать эталон из задачи</button>" +
+      "<div id='bannerBox'></div>" +
+      "<div class='form-actions'>" +
+        "<button class='btn' type='button' onclick='fillEtalonFromTask()'>Сформировать эталон из задачи</button>" +
+        (id ? "<button class='btn' type='button' onclick='referencePreviewAI(\"" + id + "\")'>Превью эталона ИИ</button>" : "") +
+        (id ? "<button class='btn ghost' type='button' onclick='validateFieldsAI(\"" + id + "\")'>Проверить поля</button>" : "") +
+      "</div>" +
       "<div style='margin-top:8px'></div>" +
-      "<label class='field'>Содержимое эталона (etalon_content, JSON)<textarea class='code' id='f_etalon_content'>" + esc(JSON.stringify(t.etalon_content || {}, null, 2)) + "</textarea></label>" +
-      "<label class='field'>Схема полей (field_schema, JSON — устаревшее, см. схему доп. полей)<textarea class='code' id='f_field_schema'>" + esc(JSON.stringify(t.field_schema || [], null, 2)) + "</textarea></label>" +
       "<div class='form-actions'>" +
         "<button class='btn ok' onclick='saveTask(\"" + (id || "") + "\")'>Сохранить</button>" +
         (id && t.status === "draft" ? "<button class='btn' onclick='decide(\"" + id + "\",true)'>Утвердить</button>" : "") +
-        (id ? "<button class='btn ghost' onclick='genAI(\"" + id + "\")'>Генерация ИИ</button>" : "") +
+        (id ? "<button class='btn' onclick='genAI(\"" + id + "\")'>Генерация ИИ ✨</button>" : "") +
         (id ? "<button class='btn danger' onclick='delTask(\"" + id + "\")'>Удалить</button>" : "") +
         "<button class='btn ghost' onclick='document.getElementById(\"editSection\").style.display=\"none\"'>Закрыть</button>" +
       "</div>" +
     "</div>" +
-  "</div>";
+  "</div>" +
+  (id ? "<div class='panel' style='margin-top:14px'><h3>Мастерская диалога с заявителем (ИИ)</h3>" +
+      "<div class='note'>Задайте вопрос от имени оператора-112 — заявитель ответит в соответствии с содержанием задачи. История ходов передаётся на сервер; уровень поведения по умолчанию определяется сложностью задачи.</div>" +
+      "<div class='chat' id='wChat'><div class='msg sys'>Начните диалог — например, уточните адрес и что случилось.</div></div>" +
+      "<div class='row' style='align-items:center'>" +
+        "<input type='text' id='wQuestion' placeholder='Вопрос заявителю…' style='flex:1 1 100%'>" +
+        "<label class='field' style='flex:0 0 auto; margin:0'>Уровень <select id='wLevel'><option value=''>авто</option><option value='easy'>лёгкий</option><option value='medium'>средний</option><option value='hard'>сложный</option></select></label>" +
+        "<button class='mic-btn' id='wMic' title='Голосовой ввод' onclick='workshopListen()'>🎤</button>" +
+        "<button class='btn' onclick='workshopAsk(\"" + id + "\")'>Спросить</button>" +
+      "</div>" +
+      "<p class='turns-counter' id='wTurns'>Ходов: 0</p>" +
+    "</div>" : "");
   rebuildCascade(t);
   renderSchema();
   updateClsInfo();
@@ -234,6 +248,20 @@ function updateClsInfo() {
   if (f3) parts.push("<b>Признак 3:</b> " + esc(f3.name));
   if (ec) parts.push("<b>Класс:</b> №" + ec.event_number + " «" + esc(ec.name) + "»");
   box.innerHTML = parts.length ? parts.join(" · ") : "Выберите группу и признаки 1–3 — класс определится автоматически.";
+  renderBanner();
+}
+
+/* ---------- баннер происшествия по выбранной классификации (пункт 6 плана №2) ---------- */
+async function renderBanner() {
+  const box = document.getElementById("bannerBox");
+  if (!box) return;
+  const et = (DICTS.eventTypes || []).find(x => x.id === document.getElementById("f_event_type_id").value);
+  const ec = (DICTS.eventGroups || []).find(x => x.id === document.getElementById("f_event_class_id").value);
+  const msg = (document.getElementById("f_caller_message") || {}).value || (document.getElementById("f_incident_description") || {}).value || "";
+  const map = await loadBannerMap();
+  const img = pickBanner(map, { text: msg, className: ec ? ec.name : "", groupName: et ? et.name : "", categoryCode: et ? et.code : "" });
+  box.innerHTML = "<figure class='banner'><img src='banners/" + esc(img) + ".png' alt='Баннер происшествия'>" +
+    "<figcaption>Класс: " + esc(ec ? ec.name : (et ? et.name : "не выбран")) + " · баннер: " + esc(img) + "</figcaption></figure>";
 }
 
 /* ---------- схема доп. полей задачи (строки формы) ---------- */
@@ -395,13 +423,83 @@ async function delTask(id) {
   await renderList();
 }
 
+/* ---------- ИИ-интеграция (пункт 2/7 плана №2, endpoints /api/v1) ---------- */
+
+/* Генерация содержимого учебной задачи: backend_new заполняет типизированные
+ * поля (сообщение заявителя, адрес, телефоны, флаги), после чего форма
+ * перезагружается и преподаватель видит результат. */
 async function genAI(id) {
+  const topic = val("f_incident_description") || val("f_caller_message");
+  const location = val("f_locality");
+  await act(() => aiGenerate(id, { topic, location }));
+  toast("Генерация ИИ выполнена: сообщение заявителя и данные карточки обновлены. Проверьте поля и при необходимости сохраните задачу.", "ok");
+  await openEdit(id);
+}
+
+/* Превью эталона: ИИ формирует expected_fields, эталон записывается в задачу. */
+async function referencePreviewAI(id) {
+  const r = await act(() => aiReferencePreview(id, { caller_scenario_phone: val("f_provided_phone") || null }));
+  document.getElementById("f_etalon_content").value = JSON.stringify(r.etalon_content || {}, null, 2);
+  document.getElementById("f_field_schema").value = JSON.stringify(r.field_schema || [], null, 2);
+  const ref = (r.reference && r.reference.answer) || {};
+  const count = Object.keys(ref.expected_fields || {}).length;
+  toast("Эталон сформирован ИИ: " + count + " полей. Проверьте JSON и сохраните задачу.", "ok");
+}
+
+/* Валидация полей карточки в ИИ-формате (мастерская). */
+async function validateFieldsAI(id) {
+  let etalon;
+  try { etalon = JSON.parse(document.getElementById("f_etalon_content").value || "{}"); }
+  catch (e) { toast("etalon_content: невалидный JSON", "err"); return; }
+  const r = await act(() => aiValidateFields(id, etalon));
+  toast("Поля валидны: " + Object.keys(r.content || {}).length + " полей обработано", "ok");
+}
+
+/* ---------- мастерская диалога с заявителем ---------- */
+let WORKSHOP_TURNS = [];
+
+function workshopAdd(role, text) {
+  const chat = document.getElementById("wChat");
+  if (!chat) return;
+  chat.insertAdjacentHTML("beforeend",
+    "<div class='msg " + role + "'><span class='who'>" + (role === "me" ? "Оператор-112" : "Заявитель") + "</span>" + esc(text) + "</div>");
+  chat.scrollTop = chat.scrollHeight;
+  const t = document.getElementById("wTurns");
+  if (t) t.textContent = "Ходов: " + WORKSHOP_TURNS.length;
+}
+
+async function workshopAsk(id) {
+  const q = document.getElementById("wQuestion").value.trim();
+  if (!q) { toast("Введите вопрос заявителю", "err"); return; }
+  workshopAdd("me", q);
+  WORKSHOP_TURNS.push({ role: "operator", content: q });
+  const level = document.getElementById("wLevel").value || null;
+  busy(true);
   try {
-    await act(() => api("/study-tasks/" + id + "/generate", { method: "POST" }));
+    const r = await aiCallerReplyTask(id, { question: q, turns: WORKSHOP_TURNS, level });
+    WORKSHOP_TURNS.push({ role: "caller", content: r.reply });
+    workshopAdd("caller", r.reply + (r.callback_disclosed ? "\n\n[заявитель оставил номер для связи]" : ""));
+    if (speechSupported()) speak(r.reply);
   } catch (e) {
-    /* 501 — ожидаемая заглушка */
-    toast("Генерация ИИ пока не реализована на бэкенде (501). Эталон заполняется вручную.", "info");
+    toast(e.message, "err");
+  } finally {
+    busy(false);
   }
+  document.getElementById("wQuestion").value = "";
+}
+
+function workshopListen() {
+  const btn = document.getElementById("wMic");
+  if (!btn) return;
+  if (!recognitionSupported()) { toast("Голосовой ввод не поддерживается этим браузером (нужен Chrome/Edge)", "info"); return; }
+  if (btn.classList.contains("listening")) { btn.classList.remove("listening"); return; }
+  btn.classList.add("listening");
+  listen(t => {
+    const inp = document.getElementById("wQuestion");
+    if (inp) inp.value = t;
+    btn.classList.remove("listening");
+    toast("Распознано: «" + t + "»", "info");
+  }, () => btn.classList.remove("listening"));
 }
 
 async function init() {

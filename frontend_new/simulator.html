@@ -256,9 +256,20 @@ async function renderCardForm() {
         "<p class='muted'>АОН: <b>" + esc(t.aon_phone || "—") + "</b> · предоставленный: <b>" + esc(t.provided_phone || "—") + "</b> · на место: <b>" + esc(t.scene_phone || "—") + "</b>.</p>" +
         "<div class='form-actions'>" +
           "<button class='btn ok' onclick='submitCard()'>Сохранить и отправить (сверить с эталоном)</button>" +
+          "<button class='btn' onclick='aiEvalCard()'>🤖 Оценка ИИ</button>" +
         "</div>" +
       "</div>" +
-    "</div></div>");
+    "</div></div>" +
+    "<div class='panel' style='margin-top:14px'><h3>Диалог с заявителем (ИИ)</h3>" +
+      "<div class='note'>Ведите разговор как оператор-112: уточняйте адрес, происшествие, пострадавших. Реплики заявителя соответствуют содержанию задачи и уровню сложности.</div>" +
+      "<div class='chat' id='callerChat'><div class='msg sys'>Звонок принят. Представьтесь и уточните, что случилось.</div></div>" +
+      "<div class='row' style='align-items:center'>" +
+        "<input type='text' id='callerQ' placeholder='Ваш вопрос заявителю…' style='flex:1 1 100%'>" +
+        "<button class='mic-btn' id='callerMic' title='Голосовой ввод' onclick='callerListen()'>🎤</button>" +
+        "<button class='btn' onclick='callerAsk()'>Спросить</button>" +
+      "</div>" +
+      "<p class='turns-counter' id='callerTurns'>Ходов: 0</p>" +
+    "</div>");
   rebuildCascade();
   updateClsInfo();
   box.lastElementChild.scrollIntoView({ behavior: "smooth" });
@@ -409,12 +420,135 @@ async function renderDispatcher(trId, kind) {
           if (r.status === "submitted") b += "<button class='btn' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"accept\")'>Принять</button>";
           if (r.status === "accepted") b += "<button class='btn' style='margin-left:6px' onclick='routeCard(\"" + r.id + "\")'>Направить в службу</button>";
         }
-        if (kind === "service" && r.status === "routed") b += "<button class='btn ok' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"process\")'>Отработать</button>";
+        if (kind === "service") {
+          if (r.status === "routed") b += "<button class='btn ok' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"process\")'>Отработать</button>";
+          b += "<button class='btn ghost' style='margin-left:6px' onclick='openServiceCall(\"" + r.id + "\")'>📞 Позвонить в службу</button>";
+        }
         return b;
       } },
   ];
   const box = document.getElementById("dispBox");
   box.appendChild(tableEl(cols, cards, "Карточек в работе нет. Оператор-112 ещё не заполнил ни одной карточки."));
+
+  if (kind === "service") {
+    box.insertAdjacentHTML("beforeend",
+      "<div class='panel' style='margin-top:14px'><h3>Исходящий звонок в службу (ИИ)</h3>" +
+      "<div class='note'>Диспетчер ДДС звонит в службу по выбранной карточке: уточните прибытие, силы и средства. Параметр «режим» имитирует состояние канала связи.</div>" +
+      "<div class='chat' id='svcChat'><div class='msg sys'>Выберите карточку кнопкой «Позвонить в службу».</div></div>" +
+      "<div class='row' style='align-items:center'>" +
+        "<label class='field' style='flex:0 0 auto; margin:0'>Канал <select id='svcMode'><option value='clear'>чистый</option><option value='partial'>помехи</option><option value='drop'>обрыв</option><option value='hangup'>сброс</option></select></label>" +
+        "<input type='text' id='svcQ' placeholder='Вопрос службе…' style='flex:1 1 100%'>" +
+        "<button class='btn' onclick='serviceAsk()'>Позвонить</button>" +
+      "</div>" +
+      "<p class='turns-counter' id='svcTurns'>Ходов: 0</p></div>");
+  }
+}
+
+/* ---------- ИИ: оценка карточки (запись ai_score / ai_eval_details) ---------- */
+async function aiEvalCard() {
+  if (!CARD) { toast("Нет активной карточки", "err"); return; }
+  const card = await act(() => aiEval(CARD.id, { history: CALLER_TURNS || [], hints_used: 0 }));
+  CARD = card;
+  const det = card.ai_eval_details || {};
+  const panel = document.getElementById("cardPanel");
+  panel.insertAdjacentHTML("beforeend",
+    "<div class='ai-preview ok'><b>🤖 Предварительная оценка ИИ:</b> " + fmtNum(card.ai_score) + " %" +
+    (det.summary ? "<br>" + esc(det.summary) : "") +
+    (det.score !== undefined && det.score !== null ? "<br>Оценка модели: " + esc(String(det.score)) : "") +
+    "</div>");
+  toast("Оценка ИИ сохранена: " + fmtNum(card.ai_score) + " %", "ok");
+}
+
+/* ---------- ИИ: диалог с заявителем (Сценарий 3 ТЗ, окно 17) ---------- */
+let CALLER_TURNS = [];
+
+function callerAdd(role, text) {
+  const chat = document.getElementById("callerChat");
+  if (!chat) return;
+  chat.insertAdjacentHTML("beforeend",
+    "<div class='msg " + role + "'><span class='who'>" + (role === "me" ? "Вы (оператор-112)" : "Заявитель") + "</span>" + esc(text) + "</div>");
+  chat.scrollTop = chat.scrollHeight;
+  const t = document.getElementById("callerTurns");
+  if (t) t.textContent = "Ходов: " + CALLER_TURNS.length;
+}
+
+async function callerAsk() {
+  if (!CARD) { toast("Сначала примите вызов — карточка ещё не создана", "err"); return; }
+  const q = document.getElementById("callerQ").value.trim();
+  if (!q) { toast("Введите вопрос заявителю", "err"); return; }
+  callerAdd("me", q);
+  CALLER_TURNS.push({ role: "operator", content: q });
+  busy(true);
+  try {
+    const r = await aiCallerReplyCard(CARD.id, { question: q, turns: CALLER_TURNS });
+    CALLER_TURNS.push({ role: "caller", content: r.reply });
+    callerAdd("caller", r.reply + (r.callback_disclosed ? "\n\n[заявитель оставил номер для связи]" : ""));
+    if (speechSupported()) speak(r.reply);
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+  document.getElementById("callerQ").value = "";
+}
+
+function callerListen() {
+  const btn = document.getElementById("callerMic");
+  if (!btn) return;
+  if (!recognitionSupported()) { toast("Голосовой ввод не поддерживается этим браузером (нужен Chrome/Edge)", "info"); return; }
+  if (btn.classList.contains("listening")) { btn.classList.remove("listening"); return; }
+  btn.classList.add("listening");
+  listen(t => {
+    const inp = document.getElementById("callerQ");
+    if (inp) inp.value = t;
+    btn.classList.remove("listening");
+    toast("Распознано: «" + t + "»", "info");
+  }, () => btn.classList.remove("listening"));
+}
+
+/* ---------- ИИ: исходящий звонок в службу ДДС (Сценарий 4 ТЗ) ---------- */
+let ACTIVE_CARD = null;
+let SVC_TURNS = [];
+
+function svcAdd(role, text) {
+  const chat = document.getElementById("svcChat");
+  if (!chat) return;
+  chat.insertAdjacentHTML("beforeend",
+    "<div class='msg " + role + "'><span class='who'>" + (role === "me" ? "Вы (ДДС)" : "Диспетчер службы") + "</span>" + esc(text) + "</div>");
+  chat.scrollTop = chat.scrollHeight;
+  const t = document.getElementById("svcTurns");
+  if (t) t.textContent = "Ходов: " + SVC_TURNS.length;
+}
+
+async function openServiceCall(id) {
+  ACTIVE_CARD = id;
+  SVC_TURNS = [];
+  const chat = document.getElementById("svcChat");
+  if (chat) chat.innerHTML = "<div class='msg sys'>Диспетчер службы на линии · карточка <span class='mono'>" + esc(String(id).slice(0, 8)) + "…</span></div>";
+  toast("Звонок в службу по карточке начат", "info");
+}
+
+async function serviceAsk() {
+  if (!ACTIVE_CARD) { toast("Выберите карточку кнопкой «Позвонить в службу»", "err"); return; }
+  const q = document.getElementById("svcQ").value.trim();
+  if (!q) { toast("Введите вопрос службе", "err"); return; }
+  const mode = document.getElementById("svcMode").value;
+  svcAdd("me", q);
+  SVC_TURNS.push({ role: "dds", content: q });
+  busy(true);
+  try {
+    const r = await aiServiceReply(ACTIVE_CARD, { question: q, history: SVC_TURNS, mode, attempt: SVC_TURNS.length });
+    SVC_TURNS.push({ role: "service", content: r.reply });
+    const shown = r.delivered === "yes" ? r.reply
+      : (r.delivered === "partial" ? r.reply + " [связь с помехами]" : "— связь прервана (сброс) —");
+    svcAdd("caller", shown);
+    if (speechSupported()) speak(r.reply);
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+  document.getElementById("svcQ").value = "";
 }
 
 async function showCardContent(id) {

@@ -1,11 +1,13 @@
 """Маппинг между форматом полной карточки ИИ-проекта и моделями backend_new.
 
-ИИ-формат (card_factory.LABELS: caller_name, city, street, ...) используется
-в промптах генерации/диалога/эталона. backend_new хранит задачу в типизированных
+ИИ-формат (ключи LABELS: caller_name, city, street, ...) используется в
+промптах генерации/диалога/эталона. backend_new хранит задачу в типизированных
 колонках StudyTask, а эталон и карточку ученика — в плоском JSONB
 (etalon.content / incident_cards.content) с ключами вида caller_full_name,
 federal_subject, locality, ... (как в fillEtalonFromTask / collectCardContent
 frontend_new). Этот модуль — единственное место перевода между форматами.
+Список ключей ИИ-карточки зафиксирован локально: ядро вынесено в ai_service,
+поэтому зависимости от card_factory здесь нет.
 """
 from __future__ import annotations
 
@@ -13,9 +15,18 @@ import re
 from typing import Any
 from uuid import UUID
 
-from . import card_factory
-
 UNKNOWN = "Неизвестно"
+
+# Ключи полной карточки ИИ-проекта (эквивалент card_factory.LABELS):
+# фиксируется здесь, чтобы mapping не зависел от ядра в ai_service.
+AI_LABELS: tuple[str, ...] = (
+    "caller_name", "caller_role", "phone_aon", "phone_callback", "phone_scene",
+    "country", "region", "city", "object", "district", "area", "street", "house",
+    "block", "building", "apartment", "entrance", "floor", "intercom",
+    "latitude", "longitude", "address_text", "access",
+    "description", "people", "injured", "floors", "extra_signs", "vis_info",
+    "external_number", "registered_by", "control_at", "controlled_by", "control_notes",
+)
 # Значения, которые не нужно записывать в типизированные колонки задачи.
 SKIP_VALUES = {
     "",
@@ -250,7 +261,7 @@ def task_to_ai_content(
     classification = classification or {}
     service_names = service_names or []
     fields: dict[str, str] = {}
-    for ai_key in card_factory.LABELS:
+    for ai_key in AI_LABELS:
         fields[ai_key] = "" if ai_key in OPTIONAL_EMPTY else UNKNOWN
     for ai_key, column in AI_TO_TASK_COLUMN.items():
         value = task.get(column)

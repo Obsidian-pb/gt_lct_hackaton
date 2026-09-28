@@ -26,15 +26,10 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
 
-    # --- ИИ-провайдер: ключ хранится только на сервере и не отдаётся браузеру ---
-    ai_provider: str = ""  # openai | gigachat | gemini | anthropic | openai_compatible
-    ai_api_key: str = ""  # Authorization-ключ провайдера (без "Basic "/"Bearer ")
-    ai_model: str = "auto"  # auto — автоподбор из списка моделей, иначе точное имя
-    ai_base_url: str = ""  # обязателен для openai_compatible
-    ai_scope: str = "auto"  # scope GigaChat (GIGACHAT_API_PERS/B2B/CORP)
-    ai_oauth_url: str = ""  # переопределение адреса OAuth GigaChat
-    ai_ca_bundle: str = ""  # путь к CA-бандлу (иначе встроенный корневой сертификат)
-    ai_verify_ssl: bool = True
+    # --- ИИ-микросервис: ключ провайдера хранится ТОЛЬКО в ai_service.
+    # backend_new обращается к нему по HTTP с Bearer AI_SERVICE_TOKEN. ---
+    ai_service_url: str = "http://127.0.0.1:8890"
+    ai_service_token: str = ""
 
 
 @lru_cache

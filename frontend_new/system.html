@@ -55,6 +55,29 @@ async function renderHealth(sec) {
       })()
     ));
   } catch (e) { showError(sec, e); }
+
+  /* Мониторинг ИИ (пункт 7 плана №2): статус ИИ-микросервиса и провайдера */
+  const aiCard = cardEl("ИИ-микросервис (окно 30 — параметры ИИ)", document.createElement("div"));
+  sec.appendChild(aiCard);
+  try {
+    const st = await act(() => aiStatus());
+    const dot = st.state === "ok" ? "ok" : (st.state === "degraded" ? "warn" : "err");
+    aiCard.firstElementChild.insertAdjacentHTML("beforeend",
+      "<div class='ai-status'>" +
+        "<span class='dot " + dot + "'></span>" +
+        "<b>" + esc(st.state === "ok" ? "ИИ доступен" : (st.state || "недоступен")) + "</b>" +
+        (st.provider ? "<span class='tag'>" + esc(st.provider) + "</span>" : "") +
+        (st.model && st.model !== "auto" ? "<span class='tag'>модель: " + esc(st.model) + "</span>" : "") +
+        (st.model_selected ? "<span class='tag'>модель подобрана</span>" : "") +
+        (st.scope_detected ? "<span class='tag'>scope определён</span>" : "") +
+      "</div>" +
+      "<p class='muted' style='margin-top:8px'>" + esc(st.message || "") + "</p>" +
+      "<p class='muted'>Провайдер и ключ хранятся в ai_service/.env; backend_new обращается к микросервису по HTTP с Bearer AI_SERVICE_TOKEN.</p>");
+  } catch (e) {
+    aiCard.firstElementChild.insertAdjacentHTML("beforeend",
+      "<div class='ai-status'><span class='dot err'></span><b>ИИ недоступен</b></div>" +
+      "<p class='muted'>" + esc(e.message) + "</p>");
+  }
 }
 
 async function renderSettings(sec) {
