@@ -159,8 +159,6 @@ async function openEdit(id) {
         (id ? "<button class='btn ghost' type='button' onclick='validateFieldsAI(\"" + id + "\")'>Проверить поля</button>" : "") +
       "</div>" +
       "<div style='margin-top:8px'></div>" +
-      "<label class='field'>Содержимое эталона (etalon_content, JSON)<textarea class='code' id='f_etalon_content'>" + esc(JSON.stringify(t.etalon_content || {}, null, 2)) + "</textarea></label>" +
-      "<label class='field'>Схема полей (field_schema, JSON — устаревшее, см. схему доп. полей)<textarea class='code' id='f_field_schema'>" + esc(JSON.stringify(t.field_schema || [], null, 2)) + "</textarea></label>" +
       "<div class='form-actions'>" +
         "<button class='btn ok' onclick='saveTask(\"" + (id || "") + "\")'>Сохранить</button>" +
         (id && t.status === "draft" ? "<button class='btn' onclick='decide(\"" + id + "\",true)'>Утвердить</button>" : "") +

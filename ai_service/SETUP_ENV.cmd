@@ -28,7 +28,7 @@ if exist "%BACKEND_DIR%\.env" (
     findstr /C:"AI_SERVICE_TOKEN=" "%BACKEND_DIR%\.env" >nul
     if errorlevel 1 (
         >>"%BACKEND_DIR%\.env" echo.
-        >>"%BACKEND_DIR%\.env" echo # ИИ-микросервис (plans/plan3_ai_microservice.md): URL и токен доступа
+        >>"%BACKEND_DIR%\.env" echo # ИИ-микросервис ^(plans/plan3_ai_microservice.md^): URL и токен доступа
         >>"%BACKEND_DIR%\.env" echo AI_SERVICE_URL=http://127.0.0.1:8890
         >>"%BACKEND_DIR%\.env" echo AI_SERVICE_TOKEN=%TOKEN%
         echo [2/2] В backend_new\.env добавлены AI_SERVICE_URL и AI_SERVICE_TOKEN
