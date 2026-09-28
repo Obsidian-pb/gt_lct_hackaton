@@ -137,6 +137,23 @@ try {
 
     Step 'Everything is ready. Opening the interface...'
     Start-Process 'http://127.0.0.1:8878'
+
+    Step 'Checking the data layer (PostgreSQL)...'
+    try {
+        $dataLayerOutput = (& $python 'data_layer.py' 2>&1 | Out-String).Trim()
+        $dataLayerCode = $LASTEXITCODE
+    } catch {
+        $dataLayerOutput = $_.Exception.Message
+        $dataLayerCode = 1
+    }
+    Set-Content -Path (Join-Path $runtime 'data-layer.log') -Value $dataLayerOutput -Encoding UTF8
+    Write-Host ''
+    if ($dataLayerCode -eq 0) {
+        Write-Host $dataLayerOutput -ForegroundColor Green
+    } else {
+        Write-Host $dataLayerOutput -ForegroundColor Yellow
+    }
+
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray
