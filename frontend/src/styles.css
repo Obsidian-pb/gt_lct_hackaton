@@ -551,7 +551,12 @@ button {
   align-items: center;
   justify-content: flex-end;
   padding: 24px 6.5vw;
-  background: #f4f6f8 url('/hero-bg.jpg') left center / cover no-repeat;
+  /* Иллюстрация в оттенках серого; синий тон поверх связывает её с цветом
+     приложения, чтобы вход и интерфейс внутри были одного стиля. */
+  background:
+    linear-gradient(rgb(26 79 138 / 16%), rgb(26 79 138 / 16%)),
+    #f4f6f8 url('/hero-bg.jpg') left center / cover no-repeat;
+  background-blend-mode: color, normal;
 }
 
 .login__box {
@@ -590,12 +595,12 @@ button {
   height: 48px;
   margin-top: 6px;
   border-radius: 2px;
-  background: #494d52;
+  background: var(--accent);
   font-size: 16px;
 }
 
 .login .btn:hover:not(:disabled) {
-  background: #303438;
+  background: #133b68;
 }
 
 @media (max-width: 760px) {
