@@ -1961,3 +1961,14 @@ button {
 .final-score input {
   max-width: 120px;
 }
+
+/* Разработчик — мелко, под формой входа. */
+.login__team {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid #e0e4e8;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7b8792;
+  text-align: center;
+}
