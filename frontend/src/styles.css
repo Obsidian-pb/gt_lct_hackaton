@@ -542,30 +542,79 @@ button {
 
 /* --- Вход --------------------------------------------------------------- */
 
+/* Иллюстрация диспетчерского зала и эмблема 112 — из оформления команды
+   проекта (ui/hero-*.svg). Растр из их SVG пережат в JPEG: 216 КБ вместо
+   2,7 МБ. Форма стоит на светлой правой части иллюстрации. */
 .login {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(160deg, #1a4f8a, #0f3059);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 24px 6.5vw;
+  background: #f4f6f8 url('/hero-bg.jpg') left center / cover no-repeat;
 }
 
 .login__box {
-  background: var(--surface);
-  border-radius: 10px;
-  padding: 30px 34px;
-  width: 352px;
-  box-shadow: 0 12px 34px rgb(15 48 89 / 34%);
+  width: 380px;
+  padding: 34px 36px 28px;
+  background: rgb(248 250 251 / 88%);
+  border: 1px solid #e0e4e8;
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgb(34 39 44 / 8%);
+}
+
+.login__logo {
+  display: block;
+  width: 150px;
+  height: 86px;
+  margin: 0 auto 26px;
 }
 
 .login__title {
-  margin: 0 0 3px;
-  font-size: 20px;
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 400;
+  color: #30383f;
+  text-align: center;
 }
 
 .login__sub {
-  margin: 0 0 22px;
-  color: var(--muted);
-  font-size: 13px;
+  margin: 0 0 26px;
+  color: #60666d;
+  font-size: 14px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.login .btn {
+  height: 48px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: #494d52;
+  font-size: 16px;
+}
+
+.login .btn:hover:not(:disabled) {
+  background: #303438;
+}
+
+@media (max-width: 760px) {
+  .login {
+    justify-content: center;
+    padding: 24px 16px;
+    background-position: 35% center;
+  }
+
+  .login__box {
+    width: 100%;
+    max-width: 420px;
+    padding: 28px 22px 22px;
+  }
+
+  .login__logo {
+    width: 120px;
+    height: 69px;
+  }
 }
 
 .field {

@@ -28,9 +28,10 @@ export function LoginPage() {
   return (
     <div className="login">
       <form className="login__box" onSubmit={submit}>
-        <h1 className="login__title">АРМ-112</h1>
+        <img className="login__logo" src="/hero-logo.svg" alt="112" />
+        <h1 className="login__title">Учебный комплекс АРМ-112</h1>
         <p className="login__sub">
-          Учебный комплекс подготовки диспетчеров дежурно-диспетчерских служб
+          Подготовка операторов Службы 112 и диспетчеров дежурно-диспетчерских служб
         </p>
 
         {error && <div className="alert">{error}</div>}
