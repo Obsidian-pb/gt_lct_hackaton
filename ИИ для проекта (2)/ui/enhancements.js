@@ -1,7 +1,4 @@
 (()=>{
- const redirect=()=>{if(location.pathname==='/teacher'&&['#create-training','#scenarios'].includes(location.hash))location.replace('/scenarios');};
- redirect();window.addEventListener('hashchange',redirect);
- document.addEventListener('click',e=>{const a=e.target.closest('a');if(!a)return;const href=a.getAttribute('href');if(href==='/teacher#create-training'||href==='/teacher#scenarios'){e.preventDefault();location.assign('/scenarios');}});
  let busy=false;
  const enhance=()=>{if(busy)return;busy=true;queueMicrotask(()=>{busy=false;for(const cascade of document.querySelectorAll('.classification-cascade')){
    const rows=[...cascade.querySelectorAll('.cascade-row')];if(!rows.length)continue;

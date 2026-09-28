@@ -4,14 +4,19 @@ from pathlib import Path
 import re
 from datetime import datetime
 from ai_core import FIELDS, LEVELS, VERDICTS, validate_task, require_text
+from schemas import obj, TEXT
 from dds import WORKFLOWS, ACTION_LABELS
 import card_factory
 import card_reference
 import card_caller
+import dialogue_gateway
+import ai_rest_client
 import teacher_portal
 import incident_training
 import piper_tts
 import training_progress
+import curriculum
+import materials
 
 ROOT = Path(__file__).resolve().parent
 
@@ -161,7 +166,14 @@ def briefing_banner(task):
 def student_portal_view(engine, identifier, full_form=False):
     view = engine.student_view(identifier)
     session = engine.load(identifier)
+    if curriculum.expire(engine, session):
+        session = engine.load(identifier)
+        view = engine.student_view(identifier)
     view['training'] = session.get('training')
+    view['activated_at'] = session.get('activated_at')
+    view['machine_assessment'] = session.get('machine_assessment') if session['status'] == 'reviewed' else None
+    view['ai_percent'] = (session.get('assessment') or {}).get('percent') if session['status'] == 'reviewed' else None
+    view['timed_out'] = bool(session.get('timed_out'))
     view['training_reveals'] = session.get('training_reveals', [])
     view.update(briefing_meta(session['task']))
     if incident_training.is_full(session['task']):
@@ -177,21 +189,74 @@ def student_portal_view(engine, identifier, full_form=False):
 
 
 def dispatch(engine, action, p):
+    if action == 'materials_list':
+        return materials.items(engine)
+    if action == 'materials_add':
+        return materials.add(engine, p)
+    if action == 'reports_insights':
+        rows = [s for s in engine.list_items('s') if s.get('assessment') and
+                (not p.get('group') or (s.get('training') or {}).get('group') == p['group'])]
+        counts = {}
+        for s in rows:
+            for field, verdict in s['assessment']['fields'].items():
+                if verdict['verdict'] in ('incorrect','missing','partial'):
+                    label = (s['task'].get('field_labels') or {}).get(field, field)
+                    counts[label] = counts.get(label, 0) + 1
+        if not rows:
+            raise ValueError('Для аналитики сначала проверьте работы обучающихся.')
+        result = engine.provider.generate('Ты анализируешь только обезличенные агрегаты учебной группы. Не называй имена. JSON: {"summary":"типичные ошибки", "recommendations":"что отработать на следующем занятии"}. Не приписывай отсутствующие причины.',
+            {'works':len(rows), 'errors_by_field':counts}, .2, schema=obj(summary=TEXT,recommendations=TEXT))
+        return {'works':len(rows), 'counts':counts, 'summary':result['summary'], 'recommendations':result['recommendations']}
+    if action == 'scenario_list':
+        return curriculum.list_resources(engine, 'scenario')
+    if action == 'scenario_get':
+        return curriculum.get(engine, p['resource_id'])
+    if action == 'scenario_save':
+        return curriculum.save_scenario(engine, p, p.get('resource_id'))
+    if action == 'scenario_approve':
+        return curriculum.approve_scenario(engine, p['resource_id'], p['teacher'])
+    if action == 'scenario_delete':
+        return curriculum.delete_scenario(engine, p['resource_id'])
+    if action == 'training_list':
+        return curriculum.list_resources(engine, 'training')
+    if action == 'training_get':
+        return curriculum.get(engine, p['resource_id'])
+    if action == 'training_save':
+        return curriculum.save_training(engine, p, p.get('resource_id'))
+    if action == 'training_activate':
+        return curriculum.activate(engine, p['resource_id'])
+    if action == 'training_complete':
+        return curriculum.complete(engine, p['resource_id'], p['teacher'])
+    if action == 'training_delete':
+        return curriculum.delete_training(engine, p['resource_id'])
+    if action == 'training_desk':
+        return curriculum.desk(engine, p['student'])
+    if action == 'training_route':
+        return curriculum.route_card(engine, p['resource_id'], p['card_id'], p['student'], p['services'], p.get('updates', {}))
+    if action == 'training_service_action':
+        return curriculum.service_action(engine, p['resource_id'], p['card_id'], p['student'], p['text'])
     if action in ('teacher_dashboard', 'teacher_session', 'teacher_task', 'teacher_note', 'teacher_finish', 'teacher_launch'):
         return teacher_portal.dispatch(engine, action, p)
     if action == 'student_overview':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
         sessions = [s for s in engine.list_items('s') if s['student'] == student]
+        bound_ids = {task_id for scenario in curriculum.list_resources(engine, 'scenario')
+                     if scenario['status'] == 'approved' for task_id in scenario['task_ids']}
+        for candidate in sessions:
+            if curriculum.expire(engine, candidate):
+                candidate.update(engine.load(candidate['id']))
         return {'fields': FIELDS,
                 'tasks': [{'id': t['id'], 'title': t['title'],
                            'workflow': t.get('workflow', 'caller'), 'teacher': t.get('approved_by', ''),
                            'created_at': t.get('approved_at', t['created_at']),
-                           **briefing_meta(t)} for t in engine.approved_tasks()],
+                           **briefing_meta(t)} for t in engine.approved_tasks() if t['id'] not in bound_ids],
                 'sessions': [{'id': s['id'], 'task_id': s['task']['id'], 'title': s['task']['title'],
                               'workflow': s['task'].get('workflow', 'caller'),
                               'status': s['status'], 'created_at': s['created_at'], 'activated_at': s.get('activated_at'),
                               'teacher': (s.get('training') or {}).get('teacher') or s['task'].get('approved_by', ''),
                               'training': s.get('training'), **briefing_meta(s['task']),
+                              'duration_seconds': (int((datetime.fromisoformat(s['submitted_at']) - datetime.fromisoformat(s.get('activated_at') or s['created_at'])).total_seconds()) if s.get('submitted_at') else None),
+                              'final_percent': (s.get('teacher_decision') or {}).get('percent') if s['status'] == 'reviewed' else None,
                               'grade': s['teacher_decision']['grade'] if s['status'] == 'reviewed' else None}
                              for s in sessions]}
     if action == 'student_start':
@@ -200,6 +265,8 @@ def dispatch(engine, action, p):
         for s in engine.list_items('s'):
             if s['student'] == student and s['task']['id'] == task_id and s['status'] == 'active':
                 return student_portal_view(engine, s['id'], p.get('full_form', False))
+        if any(task_id in scenario['task_ids'] for scenario in curriculum.list_resources(engine, 'scenario') if scenario['status'] == 'approved'):
+            raise ValueError('Задание выполняется в назначенной активной тренировке. Примите входящий вызов в списке.')
         return student_portal_view(engine, engine.start(task_id, student)['id'], p.get('full_form', False))
     if action == 'student_action':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
@@ -207,15 +274,26 @@ def dispatch(engine, action, p):
         if current['student'] != student:
             raise ValueError('Эта тренировка относится к другому обучающемуся.')
         operation = p.get('operation')
-        if operation not in ('student', 'ask', 'nudge', 'save_card', 'submit', 'connect', 'channel'):
+        if operation not in ('student', 'accept', 'ask', 'nudge', 'save_card', 'submit', 'connect', 'channel'):
             raise ValueError('Действие недоступно в панели обучающегося.')
+        if operation == 'accept':
+            curriculum.accept_call(engine, current)
+            return student_portal_view(engine, p['id'], p.get('full_form', False))
         if current.get('status') == 'queued':
             raise ValueError('Сначала завершите предыдущую карточку этого сценария.')
+        if curriculum.expire(engine, current):
+            if operation != 'student':
+                raise ValueError('Время карточки истекло. Сохранена последняя версия.')
+            return student_portal_view(engine, p['id'], p.get('full_form', False))
         if operation == 'nudge':
             training_progress.coaching_nudge(engine, p['id'], p.get('card'))
             return student_portal_view(engine, p['id'], p.get('full_form', False))
-        dispatch(engine, operation, p)
+        if operation == 'ask':
+            engine.ask(p['id'], p['question'], p.get('source', 'text'), p.get('card'))
+        else:
+            dispatch(engine, operation, p)
         if operation == 'submit':
+            curriculum.on_submission(engine, engine.load(p['id']))
             progression = training_progress.advance(engine, p['id'])
             if progression['next_id']:
                 view = student_portal_view(engine, progression['next_id'], p.get('full_form', False))
@@ -242,8 +320,17 @@ def dispatch(engine, action, p):
         return incident_training.publish(engine, p)
     if action == 'card_meta':
         return card_factory.metadata()
+    if action == 'services_list':
+        return card_factory.SERVICES
     if action == 'ai_status':
-        return engine.provider.status()
+        # Keep the existing provider status for authoring features, and also
+        # expose the dedicated dialogue service used by learner/teacher caller chat.
+        result = engine.provider.status()
+        try:
+            result = {**result, 'dialogue_rest': ai_rest_client.health()}
+        except RuntimeError as exc:
+            result = {**result, 'dialogue_rest': {'state': 'error', 'message': str(exc)}}
+        return result
     if action == 'tts_status':
         return piper_tts.status()
     if action == 'tts_synthesize':
@@ -253,7 +340,8 @@ def dispatch(engine, action, p):
     if action == 'card_reference':
         return card_reference.generate(engine.provider, p)
     if action == 'card_caller':
-        return card_caller.ask(engine.provider, p)
+        return dialogue_gateway.ask(content=p.get('content'), caller_scenario=p.get('caller_scenario'),
+                                    turns=p.get('turns'), question=p.get('question'), student_fields={})
     if action == 'card_approve':
         result = card_factory.approve(p)
         if p.get('publish_training'):
@@ -293,7 +381,7 @@ def dispatch(engine, action, p):
     if action == 'student':
         return engine.student_view(p['id'])
     if action == 'ask':
-        engine.ask(p['id'], p['question'], p.get('source', 'text'))
+        engine.ask(p['id'], p['question'], p.get('source', 'text'), p.get('card'))
         return engine.student_view(p['id'])
     if action == 'hint':
         engine.hint(p['id'])
@@ -328,5 +416,6 @@ def dispatch(engine, action, p):
         return s
     if action == 'finalize':
         return engine.finalize(p['id'], p['teacher'], p['grade'], p['conclusion'], p['decisions'])
+    if action == 'finalize_percent':
+        return engine.finalize_percent(p['id'], p['teacher'], p['percent'], p['conclusion'], p['decisions'])
     raise ValueError('Неизвестное действие.')
-
