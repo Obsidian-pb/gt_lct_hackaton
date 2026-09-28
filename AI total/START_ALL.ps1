@@ -154,6 +154,22 @@ try {
         Write-Host $dataLayerOutput -ForegroundColor Yellow
     }
 
+    Step 'Initializing the users/auth layer (PostgreSQL)...'
+    try {
+        $authInitOutput = (& $python 'init_auth.py' '--init' 2>&1 | Out-String).Trim()
+        $authInitCode = $LASTEXITCODE
+    } catch {
+        $authInitOutput = $_.Exception.Message
+        $authInitCode = 1
+    }
+    Set-Content -Path (Join-Path $runtime 'auth-init.log') -Value $authInitOutput -Encoding UTF8
+    Write-Host ''
+    if ($authInitCode -eq 0) {
+        Write-Host $authInitOutput -ForegroundColor Green
+    } else {
+        Write-Host $authInitOutput -ForegroundColor Yellow
+    }
+
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray

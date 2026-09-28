@@ -3,12 +3,14 @@
 Supports SSL negotiation (prefer/require/disable) and password authentication
 methods: trust, cleartext, MD5 and SCRAM-SHA-256 (RFC 5802 / RFC 7677).
 The project keeps zero third-party Python dependencies, so psycopg2 is
-deliberately not used. This module only opens a verified connection and
-closes it; no queries beyond the internal "SELECT 1" verification are run.
+deliberately not used. Besides connecting and authenticating, the client can
+execute SQL through the Simple Query protocol (execute/fetchone), escape
+literals safely (quote_literal) and run transactional blocks (transaction).
 """
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import secrets
@@ -30,6 +32,26 @@ def _cstr(value: str) -> bytes:
     return value.encode('utf-8') + b'\x00'
 
 
+def quote_literal(value) -> str:
+    """Return a safely quoted SQL literal for the Simple Query protocol.
+
+    None becomes NULL, booleans become TRUE/FALSE, numbers stay unquoted and
+    strings are wrapped in single quotes with embedded quotes doubled
+    (standard_conforming_strings is on since PostgreSQL 9.1, so backslashes
+    need no special treatment). NUL bytes are rejected.
+    """
+    if value is None:
+        return 'NULL'
+    if value is True or value is False:
+        return 'TRUE' if value else 'FALSE'
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if '\x00' in text:
+        raise DbConnectionError('Строковый литерал содержит NUL-байт')
+    return "'" + text.replace("'", "''") + "'"
+
+
 class PostgresConnection:
     def __init__(self, host: str, port: int, dbname: str, user: str, password: str,
                  connect_timeout: float = 10, sslmode: str = 'prefer'):
@@ -44,6 +66,8 @@ class PostgresConnection:
         self._buffer = b''
         self._auth_method = ''
         self._server_params: Dict[str, str] = {}
+        self._command_tag = ''
+        self._rowcount = 0
         # SCRAM state kept between the SASL steps.
         self._scram_client_first_bare = ''
         self._scram_auth_message = ''
@@ -100,6 +124,59 @@ class PostgresConnection:
     @property
     def server_params(self) -> Dict[str, str]:
         return dict(self._server_params)
+
+    @property
+    def command_tag(self) -> str:
+        """Server command tag of the last executed statement (e.g. 'INSERT 0 1')."""
+        return self._command_tag
+
+    @property
+    def rowcount(self) -> int:
+        """Affected row count of the last INSERT/UPDATE/DELETE/SELECT statement."""
+        return self._rowcount
+
+    # ----------------------------------------------------------------- queries
+
+    def execute(self, sql: str) -> list:
+        """Execute SQL via the Simple Query protocol and return all result rows.
+
+        Values arrive in text format and are decoded as UTF-8 (client_encoding
+        is set to UTF8 during startup). DDL/DML without RETURNING return an
+        empty list; the affected row count is available through self.rowcount
+        and the raw command tag through self.command_tag. To pass untrusted
+        values safely, embed them with quote_literal().
+        """
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError('SQL-запрос не может быть пустым.')
+        rows, tag = self._simple_query(sql)
+        self._command_tag = tag
+        self._rowcount = self._tag_rowcount(tag)
+        return rows
+
+    def fetchone(self, sql: str):
+        """Execute a query and return the first row or None."""
+        rows = self.execute(sql)
+        return rows[0] if rows else None
+
+    @contextlib.contextmanager
+    def transaction(self):
+        """Run a block inside BEGIN/COMMIT, rolling back on any exception.
+
+        Usage:
+            with connection.transaction():
+                connection.execute("INSERT ...")
+        """
+        self.execute('BEGIN')
+        try:
+            yield self
+        except BaseException:
+            try:
+                self.execute('ROLLBACK')
+            except DbConnectionError:
+                pass
+            raise
+        else:
+            self.execute('COMMIT')
 
     # ------------------------------------------------------------------- setup
 
@@ -250,26 +327,74 @@ class PostgresConnection:
 
     def _verify_select1(self) -> None:
         """Confirm the session can execute a trivial query."""
-        self._send_payload(b'Q', b'SELECT 1\x00')
-        completed = False
+        rows, _tag = self._simple_query('SELECT 1')
+        if not rows:
+            raise DbConnectionError('Запрос проверки SELECT 1 не вернул данных')
+
+    def _simple_query(self, sql: str) -> tuple:
+        """Send a Simple Query and consume messages up to ReadyForQuery."""
+        self._send_payload(b'Q', sql.encode('utf-8') + b'\x00')
+        rows: list = []
+        columns: list = []
+        tag = ''
         while True:
             code, body = self._read_message()
-            if code == b'D':
-                completed = True
-            elif code == b'C':
+            if code == b'T':  # RowDescription
+                columns = self._parse_row_description(body)
+            elif code == b'D':  # DataRow
+                rows.append(self._parse_data_row(body))
+            elif code == b'C':  # CommandComplete
+                tag = body[:-1].decode('utf-8', 'replace')
+            elif code == b'I':  # EmptyQueryResponse
                 pass
-            elif code == b'T':
-                pass
-            elif code == b'Z':
+            elif code == b'E':  # ErrorResponse — drain then raise
+                error = _error_fields(body)
+                while True:
+                    code, body = self._read_message()
+                    if code == b'Z':
+                        break
+                raise DbConnectionError(error)
+            elif code == b'Z':  # ReadyForQuery
                 break
-            elif code == b'E':
-                raise DbConnectionError('Запрос проверки SELECT 1 отклонён: ' + _error_fields(body))
             elif code in (b'S', b'N', b'K'):
                 pass
             else:
-                raise DbConnectionError('Неожиданный ответ на запрос проверки сессии')
-        if not completed:
-            raise DbConnectionError('Запрос проверки SELECT 1 не вернул данных')
+                raise DbConnectionError(f'Неожиданный ответ сервера: {code.decode("ascii", "replace")}')
+        return rows, tag
+
+    def _parse_row_description(self, body: bytes) -> list:
+        count = struct.unpack('!h', body[:2])[0]
+        columns = []
+        offset = 2
+        for _ in range(count):
+            end = body.index(b'\x00', offset)
+            columns.append(body[offset:end].decode('utf-8', 'replace'))
+            offset = end + 1 + 18  # oid(4) + attr(2) + type_oid(4) + typlen(2) + typmod(4) + format(2)
+        return columns
+
+    def _parse_data_row(self, body: bytes) -> tuple:
+        count = struct.unpack('!h', body[:2])[0]
+        values = []
+        offset = 2
+        for _ in range(count):
+            length = struct.unpack('!i', body[offset:offset + 4])[0]
+            offset += 4
+            if length == -1:
+                values.append(None)
+            else:
+                values.append(body[offset:offset + length].decode('utf-8', 'replace'))
+                offset += length
+        return tuple(values)
+
+    @staticmethod
+    def _tag_rowcount(tag: str) -> int:
+        parts = tag.split()
+        if parts and parts[0] in ('INSERT', 'UPDATE', 'DELETE', 'SELECT', 'MOVE', 'FETCH', 'COPY'):
+            try:
+                return int(parts[-1])
+            except ValueError:
+                return 0
+        return 0
 
 
 def _error_fields(body: bytes) -> str:

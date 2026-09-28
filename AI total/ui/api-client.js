@@ -15,10 +15,10 @@
   const base=(configuration.baseUrl||globalThis.TRAINING_API_BASE||meta('api-base')||'/api/v1').replace(/\/$/,'');
   if(!path.startsWith('/')||path.startsWith('//'))throw new APIError('Укажите относительный путь ресурса REST API.');
   let url=base+path;
-  const headers={'Accept':'application/json'};
+  const headers={'Accept':'application/json',...(options.headers||{})};
   const bearer=configuration.token||globalThis.TRAINING_API_TOKEN;
-  if(bearer)headers.Authorization='Bearer '+bearer;
-  else if(meta('ui-token'))headers['X-UI-Token']=meta('ui-token');
+  if(!headers.Authorization&&bearer)headers.Authorization='Bearer '+bearer;
+  if(!headers.Authorization&&meta('ui-token'))headers['X-UI-Token']=meta('ui-token');
   if(method==='GET') {
    const query=new URLSearchParams();
    for(const [key,value] of Object.entries(payload))if(value!==undefined&&value!==null)query.set(key,String(value));
@@ -40,7 +40,7 @@
    throw error;
   } finally {clearTimeout(timer);}
  }
- async function api(action,payload={}) {
+ async function api(action,payload={},options={}) {
   const key=action==='student_action'?action+'_'+payload.operation:action;
   const route=globalThis.TrainingAPIRoutes?.[key];
   if(!route)throw new APIError('Неизвестная операция интерфейса.',{code:'unknown_operation'});
@@ -50,7 +50,7 @@
    if(data[name]===undefined||data[name]===null)throw new APIError('Не задан параметр '+name,{code:'missing_parameter'});
    path=path.replace('{'+name+'}',encodeURIComponent(data[name]));delete data[name];
   }
-  return request(route.method,path,data,{timeout:action==='card_reference'?240000:110000});
+  return request(route.method,path,data,{timeout:action==='card_reference'?240000:110000,...options});
  }
  globalThis.TrainingAPI=Object.freeze({api,request,configure,APIError});
 })();

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from api_contract import PREFIX, ROUTES, COMMON, input_schema
 from application import dispatch
+import auth_service
 
 ROOT = Path(__file__).resolve().parent
 
@@ -67,6 +68,7 @@ class RestAPI:
     def __init__(self, engine, lock):
         self.engine, self.lock = engine, lock
         self.speech_lock = threading.Lock()
+        self.auth_lock = threading.Lock()
         self.routes = [(r, re.compile('^' + re.sub(r'\{\w+\}', '([^/]+)', PREFIX + r.path) + '/?$')) for r in ROUTES]
 
     def resolve(self, method, target):
@@ -153,12 +155,19 @@ class RestAPI:
         if action in active_actions | {'nudge'} and current['status'] != 'active':
             raise APIError(409, 'state_conflict', 'Работа не активна: завершена или ожидает предыдущую карточку.')
 
-    def handle(self, method, target, body=None):
+    def handle(self, method, target, body=None, authorization=''):
         try:
             route, path_values = self.resolve(method, target)
             payload = self.payload(route, path_values, target, body)
-            with self.lock if route.storage else self.speech_lock if route.action == 'tts_synthesize' else nullcontext():
+            with self.lock if route.storage else self.speech_lock if route.action == 'tts_synthesize' else self.auth_lock if route.action.startswith('auth_') else nullcontext():
                 self.check_state(route, payload)
+                # JWT middleware (Этап 2.1): routes with route.auth require a
+                # valid Bearer token; roles are enforced for non-'user' levels.
+                if route.auth:
+                    user = auth_service.authenticate_access_token(authorization or '')
+                    if route.auth != 'user':
+                        auth_service.require_role(user, (route.auth,))
+                    payload['_auth_user'] = user
                 if route.action == 'geo_map':
                     result = geo_file('map.json')
                 elif route.action == 'geo_addresses':
@@ -172,12 +181,14 @@ class RestAPI:
                 else:
                     result = dispatch(self.engine, route.action, payload)
             headers = {}
-            if route.status == 201 and isinstance(result, dict) and result.get('id'):
+            if route.status == 201 and isinstance(result, dict) and isinstance(result.get('id'), str):
                 resource = '/tasks/' if result['id'].startswith('t-') else '/sessions/'
                 headers['Location'] = PREFIX + resource + result['id']
             return APIResponse(result, route.status, headers)
         except APIError:
             raise
+        except auth_service.AuthError as exc:
+            raise APIError(exc.status, exc.code, exc.message) from None
         except FileNotFoundError:
             raise APIError(404, 'not_found', 'Данные не найдены.') from None
         except (ValueError, KeyError, TypeError) as exc:

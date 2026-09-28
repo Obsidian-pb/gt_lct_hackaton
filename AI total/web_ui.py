@@ -144,10 +144,13 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
                 supplied_auth = self.headers.get('Authorization', '')
                 ui_ok = not api_only and secrets.compare_digest(supplied_ui.encode(), token.encode())
                 bearer_ok = api_token and secrets.compare_digest(supplied_auth.encode(), ('Bearer ' + api_token).encode())
-                if not (ui_ok or bearer_ok):
+                # /api/v1/auth/* is protected by its own JWT checks (Этап 2.1),
+                # so the legacy UI/API tokens are not required for it.
+                auth_path = path.startswith(PREFIX + '/auth/')
+                if not auth_path and not (ui_ok or bearer_ok):
                     raise APIError(401, 'unauthorized', 'Нужен токен локального интерфейса или отдельный токен REST API.', headers={'WWW-Authenticate':'Bearer'})
                 body = self.read_json()
-                result = router.handle('GET' if self.command == 'HEAD' else self.command, self.path, body)
+                result = router.handle('GET' if self.command == 'HEAD' else self.command, self.path, body, authorization=supplied_auth)
                 headers.update(result.headers)
                 self.respond(result.status, {'data': result.data, 'request_id':request_id}, headers=headers)
             except APIError as exc:

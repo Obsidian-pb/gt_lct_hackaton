@@ -17,6 +17,7 @@ import piper_tts
 import training_progress
 import curriculum
 import materials
+import auth_service
 
 ROOT = Path(__file__).resolve().parent
 
@@ -418,4 +419,47 @@ def dispatch(engine, action, p):
         return engine.finalize(p['id'], p['teacher'], p['grade'], p['conclusion'], p['decisions'])
     if action == 'finalize_percent':
         return engine.finalize_percent(p['id'], p['teacher'], p['percent'], p['conclusion'], p['decisions'])
+    # --- Этап 2.1: слой пользователей и аутентификации (JWT) ---
+    if action == 'auth_login':
+        return auth_service.login(p.get('login', ''), p.get('password', ''), p.get('user_agent', ''))
+    if action == 'auth_refresh':
+        return auth_service.refresh(p.get('refresh_token', ''), p.get('user_agent', ''))
+    if action == 'auth_logout':
+        auth_service.logout(p.get('refresh_token', ''))
+        return {'ok': True}
+    if action == 'auth_me':
+        return auth_service.me(p['_auth_user']['id'])
+    if action == 'auth_users_list':
+        return auth_service.list_users()
+    if action == 'auth_users_create':
+        return auth_service.create_user(p['login'], p['password'], p['full_name'], p['role'])
+    if action == 'auth_users_update':
+        return auth_service.update_user(
+            int(p['user_id']), full_name=p.get('full_name'), role=p.get('role'),
+            is_active=p.get('is_active'), password=p.get('password'),
+            display_name=p.get('display_name'))
+    if action == 'auth_users_delete':
+        auth_service.delete_user(int(p['user_id']))
+        return {'ok': True}
+    if action == 'auth_groups_list':
+        return auth_service.list_groups()
+    if action == 'auth_groups_create':
+        teacher_id = int(p['teacher_id']) if p.get('teacher_id') else None
+        return auth_service.create_group(p['name'], p.get('description', ''), teacher_id)
+    if action == 'auth_groups_update':
+        teacher_id = int(p['teacher_id']) if p.get('teacher_id') else None
+        return auth_service.update_group(int(p['group_id']), name=p.get('name'),
+                                         description=p.get('description'),
+                                         teacher_id=teacher_id)
+    if action == 'auth_groups_delete':
+        auth_service.delete_group(int(p['group_id']))
+        return {'ok': True}
+    if action == 'auth_groups_members':
+        return auth_service.list_group_members(int(p['group_id']))
+    if action == 'auth_groups_add_member':
+        auth_service.add_group_member(int(p['group_id']), int(p['user_id']))
+        return {'ok': True}
+    if action == 'auth_groups_remove_member':
+        auth_service.remove_group_member(int(p['group_id']), int(p['user_id']))
+        return {'ok': True}
     raise ValueError('Неизвестное действие.')

@@ -37,6 +37,19 @@ COMMON = {
     'task_difficulties': OBJECT,
     'services': STRINGS, 'updates': OBJECT,
     'difficulty': {'type': 'string', 'enum': ['easy','medium','hard','adaptive']},
+    # --- Этап 2.1: пользователи и аутентификация ---
+    'login': {'type': 'string', 'minLength': 3, 'maxLength': 64, 'pattern': '^[a-z0-9_.-]+$'},
+    'password': {'type': 'string', 'minLength': 6, 'maxLength': 128},
+    'refresh_token': {'type': 'string', 'minLength': 32, 'maxLength': 200},
+    'full_name': {'type': 'string', 'minLength': 1, 'maxLength': 160},
+    'role': {'type': 'string', 'enum': ['admin', 'teacher', 'student']},
+    'is_active': BOOL,
+    'display_name': {'type': 'string', 'maxLength': 160},
+    'user_agent': {'type': 'string', 'maxLength': 256},
+    'description': {'type': 'string', 'maxLength': 1999},
+    'user_id': {'type': 'string', 'pattern': '^\\d+$'},
+    'group_id': {'type': 'string', 'pattern': '^\\d+$'},
+    'teacher_id': {'type': 'string', 'pattern': '^\\d+$'},
 }
 
 
@@ -54,6 +67,9 @@ class Route:
     # Complex workshop/task payloads retain extensible fields; domain validators
     # still enforce their full schemas before modifying stored training data.
     extensible: bool = False
+    # Required auth level for the route: '' = legacy tokens only,
+    # 'user' = any authenticated JWT user, 'admin'/'teacher'/'student' = role.
+    auth: str = ''
 
     @property
     def parameters(self):
@@ -134,6 +150,22 @@ ROUTES = [
     Route('PUT', '/works/{id}/percentage-decision', 'finalize_percent', 'Итоговая оценка преподавателя 0–100%, без обязательного вызова ИИ', ('teacher','percent','conclusion','decisions')),
     Route('GET', '/geo/addresses', 'geo_addresses', 'Локальные адреса OSM', (), ('q','limit'), storage=False),
     Route('GET', '/geo/map', 'geo_map', 'Локальные геоданные карты OSM', storage=False),
+    # --- Этап 2.1: слой пользователей и аутентификации (JWT) ---
+    Route('POST', '/auth/login', 'auth_login', 'Вход по логину и паролю', ('login','password'), ('user_agent',), storage=False),
+    Route('POST', '/auth/refresh', 'auth_refresh', 'Обновить пару токенов', ('refresh_token',), ('user_agent',), storage=False),
+    Route('POST', '/auth/logout', 'auth_logout', 'Завершить сессию (отозвать refresh-токен)', ('refresh_token',), storage=False),
+    Route('GET', '/auth/me', 'auth_me', 'Текущий пользователь по JWT', auth='user', storage=False),
+    Route('GET', '/auth/users', 'auth_users_list', 'Список пользователей', auth='admin', storage=False),
+    Route('POST', '/auth/users', 'auth_users_create', 'Создать пользователя', ('login','password','full_name','role'), auth='admin', status=201, storage=False),
+    Route('PUT', '/auth/users/{user_id}', 'auth_users_update', 'Изменить пользователя', (), ('full_name','role','is_active','password','display_name'), auth='admin', storage=False),
+    Route('DELETE', '/auth/users/{user_id}', 'auth_users_delete', 'Удалить пользователя', auth='admin', storage=False),
+    Route('GET', '/auth/groups', 'auth_groups_list', 'Список учебных групп', auth='admin', storage=False),
+    Route('POST', '/auth/groups', 'auth_groups_create', 'Создать учебную группу', ('name',), ('description','teacher_id'), auth='admin', status=201, storage=False),
+    Route('PUT', '/auth/groups/{group_id}', 'auth_groups_update', 'Изменить группу', ('name',), ('description','teacher_id'), auth='admin', storage=False),
+    Route('DELETE', '/auth/groups/{group_id}', 'auth_groups_delete', 'Удалить группу', auth='admin', storage=False),
+    Route('GET', '/auth/groups/{group_id}/members', 'auth_groups_members', 'Состав учебной группы', auth='admin', storage=False),
+    Route('POST', '/auth/groups/{group_id}/members', 'auth_groups_add_member', 'Добавить участника в группу', ('user_id',), auth='admin', status=201, storage=False),
+    Route('DELETE', '/auth/groups/{group_id}/members/{user_id}', 'auth_groups_remove_member', 'Удалить участника из группы', auth='admin', storage=False),
 ]
 
 

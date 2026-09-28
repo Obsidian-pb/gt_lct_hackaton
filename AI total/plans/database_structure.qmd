@@ -155,11 +155,37 @@ erDiagram
 
 ## 5. Стратегия миграции из JSON в БД
 
-### Этап 1. Инициализация схемы
+### Этап 1. Подключение к PostgreSQL (слой данных)
+
+Создать для проекта механизм подключения к БД PostgreSQL. Пока **только подключение и не более того**.
+
+Логика: при запуске приложения посредством `START.cmd` на сервере запускается также и слой
+данных. Проверяется подключение: если БД подключилась — в консоль выводится сообщение, что БД
+подключена; если нет — сообщение, что этого не произошло.
+
+### Этап 2. Инициализация схемы
+
+#### Этап 2.1. Инициализация слоя пользователей и аутентификации
+- Создать таблицы необходимые для работы с пользователями и аутентификации.
+- Реализовать авторизацию и аутентификацию на основе JWT.
+- Посеять Администратора
+- Протестировать вход в систему под учеткой Администратором
+
+**Статус: выполнено (2026-09-28, отчёт `workflow/step_2.md`).**
+Реализовано: таблицы `user`, `student_group`, `group_member`, `auth_session` (+ `schema_migration` v2.1.0);
+JWT HS256 + PBKDF2-HMAC-SHA256 на stdlib (без сторонних библиотек); маршруты `/auth/*`
+(login/refresh/logout/me/users/groups); посев админа `admin/admin123` (переопределяемый);
+вход под администратором протестирован (init → login → me → refresh → logout).
+Фронтенд: вход админа через `/auth/login`, панель пользователей/групп через `/auth/*`.
+Новый код: `auth_crypto.py`, `auth_repository.py`, `auth_service.py`, `init_auth.py`, `TEST_AUTH.cmd`;
+расширен `db_connection.py` (execute/fetchone/quote_literal/transaction).
+
+#### Этап 2.2. 
 - Создать таблицы по разделу 2, индексы и внешние ключи.
 - Импортировать статические справочники: `classifier_category`, `classifier_entry`, `classifier_entry_service`, `service` из `catalog/classifier.json`; при необходимости `geo_address`/`geo_building` из `ui/geo/*.json`.
 
-### Этап 2. Перенос учебных данных
+### Этап 3. Перенос учебных данных
+- Проверить наличие даннных о которых речь пойдет далее.
 - `t-*.json` → `task` (+ `task_dds`, `task_incident_source`). Для `incident-v1` заполнить `identity_hash`.
 - `s-*.json` → `session` (+ `session_turn`, `session_hint`, `session_card_edit`, `session_reveal`, `machine_assessment`, `ai_assessment`/`ai_assessment_field`, `teacher_decision`/`teacher_decision_field`).
 - `curriculum/scenario-*.json` → `scenario` + `scenario_task`.
@@ -167,11 +193,11 @@ erDiagram
 - `curriculum/materials.json` → `material`.
 - Строковые имена студентов/преподавателей: создать/найти записи `user` (сгенерированный login), связать по `display_name`, сохранить связь в отдельную таблицу соответствий на время переходного периода.
 
-### Этап 3. Импорт мастерской карточек
+### Этап 4. Импорт мастерской карточек
 - При входе преподавателя: прочитать `localStorage` `giik.card-workshop.v1` → `workshop_card` + `workshop_card_reference` + `workshop_card_version` + `workshop_card_event`.
 - Повторный импорт идемпотентен (по `workshop_card.id`/хешу).
 
-### Этап 4. Переключение репозитория
+### Этап 5. Переключение репозитория
 - Ввести адаптер хранилища с тем же интерфейсом, что у `Engine.save/load/list_items` ([ai_core.py](ai_core.py:56)): режим работы «файлы → БД», затем «только БД».
 - Поэтапно переводить операции REST ([api_contract.py](api_contract.py:67)) на новый репозиторий без изменения контрактов API.
 - Оставить `config.local.json` (ключ ИИ) вне БД — это секрет, не доменные данные.
