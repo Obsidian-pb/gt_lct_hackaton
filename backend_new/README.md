@@ -34,6 +34,16 @@ docker compose up -d backend
 
 ### Вариант 2: локально
 
+#### Настройка PostgreSQL
+
+```{sql}
+CREATE ROLE system112 LOGIN PASSWORD 'system112';
+CREATE DATABASE system112_trainer OWNER system112;
+```
+
+
+#### Настройка окружения
+
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
