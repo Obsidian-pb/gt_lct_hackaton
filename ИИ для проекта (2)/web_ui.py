@@ -13,336 +13,18 @@ from urllib.parse import urlsplit
 import webbrowser
 from datetime import datetime
 
-from ai_core import Engine, FIELDS, LEVELS, VERDICTS, validate_task, require_text
+from ai_core import Engine
 from provider import AIProvider
-from dds import WORKFLOWS, ACTION_LABELS
-import card_factory
-import card_reference
-import card_caller
-import teacher_portal
-import incident_training
-import piper_tts
-import training_progress
 from ui_release import release_id, validate_ui, compatible_server
+from api_contract import PREFIX, openapi
+from rest_api import APIError, RestAPI
+import uuid
 
 ROOT = Path(__file__).resolve().parent
 # Capture once: changing files must not make an old process claim to run new code.
 UI_REVISION = release_id()
 
-BANNER_DIR = ROOT / 'ui' / 'banners'
-BANNER_FILES = {path.stem: path.name for path in BANNER_DIR.glob('*.png')}
-_CLASS_BY_ID = {row['id']: row for row in card_factory.CATALOG}
-_BANNER_MAP_PATH = ROOT / 'ui' / 'banners' / 'banner-map.json'
-
-
-def _task_class_ids(task):
-    source = task.get('incident_source') or {}
-    ids = source.get('class_ids') if isinstance(source, dict) else None
-    if isinstance(ids, list) and ids:
-        return [str(value) for value in ids if str(value) in _CLASS_BY_ID]
-    row = (task.get('fields') or {}).get('_class_ids') or {}
-    raw = row.get('expected') or row.get('truth') if isinstance(row, dict) else ''
-    if isinstance(raw, str) and raw:
-        try:
-            values = json.loads(raw)
-            if isinstance(values, list):
-                return [str(value) for value in values if str(value) in _CLASS_BY_ID]
-        except (ValueError, TypeError):
-            pass
-    return []
-
-
-def _banner_map():
-    """Load editable classifier-to-banner bindings without hard-coding every photo in React."""
-    try:
-        data = json.loads(_BANNER_MAP_PATH.read_text(encoding='utf-8'))
-        if isinstance(data, dict):
-            return data
-    except (OSError, ValueError, TypeError):
-        pass
-    return {}
-
-
-def _norm_text(value):
-    value = str(value or '').lower().replace('ё', 'е')
-    return re.sub(r'\s+', ' ', value).strip()
-
-
-def _mapped_banner(row, mapping):
-    title = _norm_text(row.get('title') or row.get('ekp_type') or '')
-    group = _norm_text(row.get('group') or '')
-    exact = mapping.get('class_ids') if isinstance(mapping.get('class_ids'), dict) else {}
-    title_keywords = mapping.get('title_keywords') if isinstance(mapping.get('title_keywords'), dict) else {}
-    group_keywords = mapping.get('group_keywords') if isinstance(mapping.get('group_keywords'), dict) else {}
-    categories = mapping.get('categories') if isinstance(mapping.get('categories'), dict) else {}
-
-    class_id = str(row.get('id') or '')
-    if class_id in exact:
-        return exact[class_id]
-    for needle, banner in sorted(title_keywords.items(), key=lambda item: len(_norm_text(item[0])), reverse=True):
-        if _norm_text(needle) and _norm_text(needle) in title:
-            return banner
-    for needle, banner in sorted(group_keywords.items(), key=lambda item: len(_norm_text(item[0])), reverse=True):
-        if _norm_text(needle) and _norm_text(needle) in group:
-            return banner
-    category_banner = categories.get(str(row.get('category', '')))
-    if category_banner:
-        return category_banner
-    return None
-
-
-def _legacy_banner_for_row(row):
-    category = str(row.get('category', ''))
-    text = ' '.join(str(row.get(key, '')) for key in
-                    ('group', 'statistical_group', 'sign1', 'sign2', 'sign3', 'extra_signs', 'title', 'ekp_type')).lower()
-    if category == '2' and 'пострадав' in text:
-        return 'road-injured'
-    if category == '13':
-        return 'gas-leak'
-    if category == '17':
-        return 'person-danger'
-    if category == '1' and any(word in text for word in ('производств', 'цех', 'завод', 'промышлен', 'производственно-склад')):
-        return 'industrial-fire'
-    if category == '1' and any(word in text for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'мусоропровод', 'подвал')):
-        return 'residential-fire'
-    if category == '15' and any(word in text for word in ('массов', 'скопление людей', 'толпа', 'давка', 'митинг', 'шествие', 'пикет')):
-        return 'mass-event'
-    return None
-
-
-def briefing_meta(task):
-    """Return classifier-derived preparation text and the configured illustration key."""
-    class_ids = _task_class_ids(task)
-    rows = [_CLASS_BY_ID[class_id] for class_id in class_ids if class_id in _CLASS_BY_ID]
-    mapping = _banner_map()
-    exact = mapping.get('class_ids') if isinstance(mapping.get('class_ids'), dict) else {}
-    categories = mapping.get('categories') if isinstance(mapping.get('categories'), dict) else {}
-
-    banner = None
-    for class_id, row in zip(class_ids, rows):
-        banner = exact.get(class_id)
-        if banner:
-            break
-        banner = _mapped_banner(row, mapping)
-        if banner:
-            break
-        banner = _legacy_banner_for_row(row)
-        if banner:
-            break
-    if not banner:
-        for row in rows:
-            banner = categories.get(str(row.get('category', ''))) or mapping.get('default')
-            if banner:
-                break
-
-    if rows:
-        # The selected classifier is authoritative for what is shown before the card opens.
-        titles = []
-        for row in rows:
-            title = str(row.get('title') or row.get('ekp_type') or row.get('group') or '').strip()
-            if title and title not in titles:
-                titles.append(title)
-        incident_label = '; '.join(titles) if titles else str(task.get('title', '')).strip()
-        group_label = '; '.join(dict.fromkeys(str(row.get('group', '')).strip() for row in rows if str(row.get('group', '')).strip()))
-        return {'banner_key': banner, 'incident_label': incident_label,
-                'incident_group': group_label, 'classifier_ids': class_ids}
-
-    # Compatibility for old exercises that do not contain classifier ids.
-    title = str(task.get('title', '')).strip()
-    low = title.lower()
-    if not banner:
-        if 'дтп' in low and 'пострадав' in low:
-            banner = 'road-injured'
-        elif any(word in low for word in ('запах газа', 'утечка газа', 'газопровод')):
-            banner = 'gas-leak'
-        elif any(word in low for word in ('человек в опасности', 'крики о помощи', 'человека зажало', 'падение с высоты')):
-            banner = 'person-danger'
-        elif any(word in low for word in ('массовое мероприят', 'массовые беспоряд', 'скопление людей', 'толпа', 'давка', 'митинг', 'концерт')):
-            banner = 'mass-event'
-        elif 'пожар' in low and any(word in low for word in ('производств', 'цех', 'завод', 'промышлен', 'склад')):
-            banner = 'industrial-fire'
-        elif 'пожар' in low and any(word in low for word in ('жилой дом', 'квартир', 'частный дом', 'балкон', 'подъезд', 'лестничн', 'подвал')):
-            banner = 'residential-fire'
-    return {'banner_key': banner or _banner_map().get('default'), 'incident_label': title or 'Учебное происшествие',
-            'incident_group': '', 'classifier_ids': []}
-
-
-def briefing_banner(task):
-    """Backward-compatible banner-only helper."""
-    return briefing_meta(task)['banner_key']
-
-
-def student_portal_view(engine, identifier, full_form=False):
-    view = engine.student_view(identifier)
-    session = engine.load(identifier)
-    view['training'] = session.get('training')
-    view['training_reveals'] = session.get('training_reveals', [])
-    view.update(briefing_meta(session['task']))
-    if incident_training.is_full(session['task']):
-        view.update(incident_training.public_metadata(session))
-    view['reference'] = ({key: row['expected'] for key, row in session['task']['fields'].items()}
-                         if session['status'] == 'reviewed' else None)
-    view['duration_seconds'] = (max(0, int((datetime.fromisoformat(session['submitted_at']) -
-                                           datetime.fromisoformat(session.get('activated_at') or session['created_at'])).total_seconds()))
-                                if session.get('submitted_at') else None)
-    if full_form and not incident_training.is_full(session['task']):
-        return incident_training.legacy_projection(session, view)
-    return view
-
-
-def dispatch(engine, action, p):
-    if action in ('teacher_dashboard', 'teacher_session', 'teacher_task', 'teacher_note', 'teacher_finish', 'teacher_launch'):
-        return teacher_portal.dispatch(engine, action, p)
-    if action == 'student_overview':
-        student = require_text(p.get('student'), 'Имя обучающегося', 160)
-        sessions = [s for s in engine.list_items('s') if s['student'] == student]
-        return {'fields': FIELDS,
-                'tasks': [{'id': t['id'], 'title': t['title'],
-                           'workflow': t.get('workflow', 'caller'), 'teacher': t.get('approved_by', ''),
-                           'created_at': t.get('approved_at', t['created_at']),
-                           **briefing_meta(t)} for t in engine.approved_tasks()],
-                'sessions': [{'id': s['id'], 'task_id': s['task']['id'], 'title': s['task']['title'],
-                              'workflow': s['task'].get('workflow', 'caller'),
-                              'status': s['status'], 'created_at': s['created_at'], 'activated_at': s.get('activated_at'),
-                              'teacher': (s.get('training') or {}).get('teacher') or s['task'].get('approved_by', ''),
-                              'training': s.get('training'), **briefing_meta(s['task']),
-                              'grade': s['teacher_decision']['grade'] if s['status'] == 'reviewed' else None}
-                             for s in sessions]}
-    if action == 'student_start':
-        student = require_text(p.get('student'), 'Имя обучающегося', 160)
-        task_id = p.get('task_id')
-        for s in engine.list_items('s'):
-            if s['student'] == student and s['task']['id'] == task_id and s['status'] == 'active':
-                return student_portal_view(engine, s['id'], p.get('full_form', False))
-        return student_portal_view(engine, engine.start(task_id, student)['id'], p.get('full_form', False))
-    if action == 'student_action':
-        student = require_text(p.get('student'), 'Имя обучающегося', 160)
-        current = engine.load(p.get('id'))
-        if current['student'] != student:
-            raise ValueError('Эта тренировка относится к другому обучающемуся.')
-        operation = p.get('operation')
-        if operation not in ('student', 'ask', 'nudge', 'save_card', 'submit', 'connect', 'channel'):
-            raise ValueError('Действие недоступно в панели обучающегося.')
-        if current.get('status') == 'queued':
-            raise ValueError('Сначала завершите предыдущую карточку этого сценария.')
-        if operation == 'nudge':
-            training_progress.coaching_nudge(engine, p['id'], p.get('card'))
-            return student_portal_view(engine, p['id'], p.get('full_form', False))
-        dispatch(engine, operation, p)
-        if operation == 'submit':
-            progression = training_progress.advance(engine, p['id'])
-            if progression['next_id']:
-                view = student_portal_view(engine, progression['next_id'], p.get('full_form', False))
-                view.update(auto_advanced=True, previous_session_id=p['id'],
-                            scenario_complete=False, adaptation=progression['adaptation'])
-                return view
-            view = student_portal_view(engine, p['id'], p.get('full_form', False))
-            view.update(auto_advanced=False,
-                        scenario_complete=bool((engine.load(p['id']).get('training') or {}).get('plan_id')),
-                        adaptation=progression['adaptation'])
-            return view
-        return student_portal_view(engine, p['id'], p.get('full_form', False))
-    if action == 'teacher_overview':
-        return {
-            'sessions': [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'],
-                          'status': s['status'], 'workflow': s['task'].get('workflow', 'caller'),
-                          'created_at': s.get('created_at'),
-                          'grade': (s.get('teacher_decision') or {}).get('grade') if s['status'] == 'reviewed' else None}
-                         for s in engine.list_items('s')],
-            'tasks': [{key: t.get(key) for key in ('id', 'title', 'status', 'workflow', 'level')}
-                      for t in engine.list_items('t')],
-        }
-    if action == 'card_publish':
-        return incident_training.publish(engine, p)
-    if action == 'card_meta':
-        return card_factory.metadata()
-    if action == 'ai_status':
-        return engine.provider.status()
-    if action == 'tts_status':
-        return piper_tts.status()
-    if action == 'tts_synthesize':
-        return piper_tts.synthesize(p.get('text'), p.get('voice'))
-    if action == 'card_generate':
-        return card_factory.generate(engine.provider, p)
-    if action == 'card_reference':
-        return card_reference.generate(engine.provider, p)
-    if action == 'card_caller':
-        return card_caller.ask(engine.provider, p)
-    if action == 'card_approve':
-        result = card_factory.approve(p)
-        if p.get('publish_training'):
-            result.update(incident_training.publish(engine, p))
-        return result
-    if action == 'card_validate':
-        return card_factory.validate_content(p.get('content'))
-    if action == 'home':
-        return {'count': len(engine.approved_tasks()), 'fields': FIELDS, 'levels': LEVELS, 'verdicts': VERDICTS,
-                'workflows': WORKFLOWS, 'action_labels': ACTION_LABELS,
-                'counts': {key: len(engine.approved_tasks(key)) for key in WORKFLOWS}}
-    if action == 'tasks':
-        return engine.list_items('t')
-    if action == 'create':
-        return engine.sample(p['level'], p.get('workflow', 'caller')) if p.get('sample') else engine.draft(p['topic'], p['level'], p.get('workflow', 'caller'))
-    if action == 'save_task':
-        task = engine.load(p['id'])
-        if not task['id'].startswith('t-') or task['status'] != 'draft':
-            raise ValueError('Изменять можно только черновик задания.')
-        for key in ('title', 'opening', 'persona', 'fields'):
-            task[key] = p[key]
-        if task.get('workflow') == 'dds':
-            for key in ('incoming_card', 'verification_notes', 'service', 'faults', 'actions'):
-                task[key] = p[key]
-        validate_task(task)
-        return engine.save(task)
-    if action == 'approve':
-        return engine.approve(p['id'], p['teacher'])
-    if action == 'start':
-        return engine.start_assigned(p['student'], p.get('workflow'))
-    if action == 'connect':
-        return engine.connect_service(p['id'])
-    if action == 'channel':
-        return engine.set_channel(p['id'], p['mode'])
-    if action == 'sessions':
-        return [engine.student_view(s['id']) for s in engine.list_items('s') if s['student'] == p['student']]
-    if action == 'student':
-        return engine.student_view(p['id'])
-    if action == 'ask':
-        engine.ask(p['id'], p['question'], p.get('source', 'text'))
-        return engine.student_view(p['id'])
-    if action == 'hint':
-        engine.hint(p['id'])
-        return engine.student_view(p['id'])
-    if action in ('save_card', 'submit'):
-        s = engine._active(p['id'])
-        card = p['card']
-        if incident_training.is_full(s['task']):
-            incident_training.save_card(engine, s, card, action == 'submit')
-            return student_portal_view(engine, p['id'], p.get('full_form', False))
-        if p.get('full_form'):
-            incident_training.save_legacy_card(engine, s, card, action == 'submit')
-            return student_portal_view(engine, p['id'], True)
-        if not isinstance(card, dict) or set(card) != set(FIELDS) or any(not isinstance(v, str) or len(v) > 2000 for v in card.values()):
-            raise ValueError('Проверьте поля карточки: не более 2000 символов в каждом.')
-        # Validate the entire card before changing any fields.
-        for key, value in card.items():
-            if value != s['card'][key]:
-                engine.set_field(p['id'], key, value)
-        if action == 'submit':
-            engine.submit(p['id'])
-        return engine.student_view(p['id'])
-    if action == 'assess':
-        engine.assess(p['id'])
-        return {'status': 'pending_teacher'}
-    if action == 'works':
-        return [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'], 'status': s['status']} for s in engine.list_items('s') if s['status'] != 'active']
-    if action == 'review':
-        s = engine.load(p['id'])
-        if not s['id'].startswith('s-') or s['status'] == 'active':
-            raise ValueError('Эта работа ещё не сдана.')
-        return s
-    if action == 'finalize':
-        return engine.finalize(p['id'], p['teacher'], p['grade'], p['conclusion'], p['decisions'])
-    raise ValueError('Неизвестное действие.')
+from application import dispatch, student_portal_view, briefing_meta, briefing_banner, BANNER_FILES
 
 
 class LocalServer(ThreadingHTTPServer):
@@ -355,28 +37,134 @@ class LocalServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def make_server(engine, port=8878):
+def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_only=False, legacy_api=True):
     lock = threading.Lock()
     token = secrets.token_urlsafe(32)
+    if api_token is not None and (not isinstance(api_token, str) or len(api_token) < 24 or not api_token.isascii() or any(c.isspace() for c in api_token)):
+        raise ValueError('TRAINING_API_TOKEN: используйте отдельный случайный токен не короче 24 символов без пробелов.')
+    if api_only and not api_token:
+        raise ValueError('Для отдельного REST-сервера задайте TRAINING_API_TOKEN; это не ключ провайдера ИИ.')
+    permitted_origins = set()
+    for origin in allowed_origins:
+        parsed = urlsplit(origin)
+        if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username:
+            raise ValueError('Разрешённый Origin: точный http(s)://host:port без пути и параметров.')
+        permitted_origins.add(origin.rstrip('/'))
+    router = RestAPI(engine, lock)
 
     class Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(30)
+
         def log_message(self, *args):
             pass
 
-        def respond(self, code, body, mime='application/json; charset=utf-8'):
+        def respond(self, code, body, mime='application/json; charset=utf-8', headers=None):
+            content = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode('utf-8')
             self.send_response(code)
             self.send_header('Content-Type', mime)
+            self.send_header('Content-Length', str(len(content)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')
+            origin = self.headers.get('Origin')
+            if origin in permitted_origins:
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Access-Control-Expose-Headers', 'Location, X-Request-ID')
+                self.send_header('Vary', 'Origin')
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode())
+            try:
+                if self.command != 'HEAD':
+                    self.wfile.write(content)
+            except (BrokenPipeError, ConnectionResetError):
+                # Client cancellation must not undo an operation already saved.
+                pass
+
+        def read_json(self):
+            if self.headers.get('Transfer-Encoding'):
+                raise APIError(400, 'unsupported_transfer', 'Используйте Content-Length без Transfer-Encoding.')
+            sizes = self.headers.get_all('Content-Length', [])
+            if len(sizes) > 1:
+                raise APIError(400, 'invalid_length', 'Повторный Content-Length недопустим.')
+            try:
+                size = int(sizes[0]) if sizes else 0
+            except ValueError:
+                raise APIError(400, 'invalid_length', 'Некорректная длина запроса.') from None
+            if size < 0:
+                raise APIError(400, 'invalid_length', 'Некорректная длина запроса.')
+            if size > 256000:
+                raise APIError(413, 'payload_too_large', 'Запрос превышает 256000 байт.')
+            if self.command in ('GET','HEAD'):
+                if size:
+                    raise APIError(400, 'unexpected_body', 'GET/HEAD не принимают тело запроса.')
+                return None
+            if not size:
+                return {}
+            if self.headers.get_content_type() != 'application/json':
+                raise APIError(415, 'unsupported_media_type', 'Используйте Content-Type: application/json.')
+            try:
+                data = json.loads(self.rfile.read(size).decode('utf-8-sig'), parse_constant=lambda x: (_ for _ in ()).throw(ValueError()))
+            except (ValueError, UnicodeError, RecursionError):
+                raise APIError(400, 'invalid_json', 'Некорректный JSON в теле запроса.') from None
+            if not isinstance(data, dict):
+                raise APIError(400, 'invalid_json', 'Тело запроса должно быть JSON-объектом.')
+            return data
+
+        def rest_request(self):
+            request_id = uuid.uuid4().hex
+            headers = {'X-Request-ID': request_id}
+            try:
+                if not self.local_host():
+                    raise APIError(403, 'invalid_host', 'Доступ только через 127.0.0.1.')
+                origin = self.headers.get('Origin')
+                own_origin = f'http://127.0.0.1:{self.server.server_port}'
+                if origin is not None and origin not in {own_origin, *permitted_origins}:
+                    raise APIError(403, 'origin_denied', 'Этот Origin не разрешён для API.')
+                path = urlsplit(self.path).path
+                if path in (PREFIX + '/health', PREFIX + '/openapi.json'):
+                    if self.command not in ('GET','HEAD'):
+                        raise APIError(405, 'method_not_allowed', 'Используйте GET.', headers={'Allow':'GET, HEAD'})
+                    self.read_json()
+                    body = openapi() if path.endswith('openapi.json') else {'data':{'status':'ok','api_version':'1.0.0'},'request_id':request_id}
+                    self.respond(200, body, headers=headers); return
+                if self.command == 'OPTIONS':
+                    methods = router.allowed_methods(self.path)
+                    requested_method = self.headers.get('Access-Control-Request-Method')
+                    requested_headers = {h.strip().lower() for h in self.headers.get('Access-Control-Request-Headers','').split(',') if h.strip()}
+                    if requested_method and requested_method not in methods or requested_headers - {'authorization','content-type','x-ui-token'}:
+                        raise APIError(403, 'preflight_denied', 'Метод или заголовки не разрешены для этого API.')
+                    headers.update({'Allow':', '.join(methods), 'Access-Control-Allow-Methods':', '.join(methods),
+                                    'Access-Control-Allow-Headers':'Authorization, Content-Type, X-UI-Token', 'Access-Control-Max-Age':'600'})
+                    self.respond(204, b'', headers=headers); return
+                supplied_ui = self.headers.get('X-UI-Token', '')
+                supplied_auth = self.headers.get('Authorization', '')
+                ui_ok = not api_only and secrets.compare_digest(supplied_ui.encode(), token.encode())
+                bearer_ok = api_token and secrets.compare_digest(supplied_auth.encode(), ('Bearer ' + api_token).encode())
+                if not (ui_ok or bearer_ok):
+                    raise APIError(401, 'unauthorized', 'Нужен токен локального интерфейса или отдельный токен REST API.', headers={'WWW-Authenticate':'Bearer'})
+                body = self.read_json()
+                result = router.handle('GET' if self.command == 'HEAD' else self.command, self.path, body)
+                headers.update(result.headers)
+                self.respond(result.status, {'data': result.data, 'request_id':request_id}, headers=headers)
+            except APIError as exc:
+                headers.update(exc.headers)
+                self.respond(exc.status, exc.body(request_id), headers=headers)
+            except Exception:
+                exc = APIError(500, 'internal_error', 'Не удалось выполнить запрос. Сохранённые работы доступны после обновления страницы.')
+                self.respond(exc.status, exc.body(request_id), headers=headers)
 
         def local_host(self):
             return self.headers.get('Host') == f'127.0.0.1:{self.server.server_port}'
 
         def do_GET(self):
+            if urlsplit(self.path).path.startswith('/api/') and urlsplit(self.path).path != '/api/docs':
+                self.rest_request(); return
+            if api_only:
+                self.respond(404, {'error': 'Используйте /api/v1/health или /api/v1/openapi.json.'}); return
             if not self.local_host():
                 self.respond(403, {'error': 'Доступ только через 127.0.0.1.'}); return
             path = urlsplit(self.path).path
@@ -398,7 +186,8 @@ def make_server(engine, port=8878):
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
                 return
-            names = {'/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
+            names = {'/api/docs': ('api-docs.html', 'text/html'), '/api-client.js': ('api-client.js', 'text/javascript'),
+                     '/api-routes.js': ('api-routes.js', 'text/javascript'), '/': ('react.html', 'text/html'), '/teacher': ('react.html', 'text/html'),
                      '/admin-login': ('react.html', 'text/html'), '/admin': ('react.html', 'text/html'), '/admin.css': ('admin.css', 'text/css'),
                      '/student': ('react.html', 'text/html'), '/student.css': ('student.css', 'text/css'),
                      '/theme.css': ('theme.css', 'text/css'),
@@ -431,6 +220,10 @@ def make_server(engine, port=8878):
             self.respond(200, body.encode(), mime + '; charset=utf-8')
 
         def do_POST(self):
+            if urlsplit(self.path).path.startswith('/api/'):
+                self.rest_request(); return
+            if not legacy_api or api_only:
+                self.respond(410, {'error': 'Старый RPC отключён. Используйте REST API /api/v1.'}); return
             origin = f'http://127.0.0.1:{self.server.server_port}'
             if not self.local_host() or self.headers.get('Origin') not in (None, origin) or self.headers.get('X-UI-Token') != token:
                 self.respond(403, {'error': 'Откройте интерфейс заново.'}); return
@@ -443,13 +236,19 @@ def make_server(engine, port=8878):
                 data = json.loads(self.rfile.read(size))
                 with lock:
                     result = dispatch(engine, data['action'], data.get('payload', {}))
-                self.respond(200, {'result': result})
+                self.respond(200, {'result': result}, headers={'X-Deprecated-API':'Use /api/v1'})
             except (ValueError, KeyError, TypeError, FileNotFoundError) as exc:
                 self.respond(400, {'error': str(exc) if isinstance(exc, ValueError) else 'Данные не найдены или имеют неверный формат.'})
             except RuntimeError as exc:
                 self.respond(502, {'error': str(exc)})
             except Exception:
                 self.respond(500, {'error': 'Не удалось выполнить действие. Сохранённые работы доступны после обновления страницы.'})
+
+        do_PUT = rest_request
+        do_PATCH = rest_request
+        do_DELETE = rest_request
+        do_OPTIONS = rest_request
+        do_HEAD = rest_request
 
     server = LocalServer(('127.0.0.1', port), Handler)
     server.daemon_threads = True
@@ -461,13 +260,18 @@ def main():
     parser.add_argument('--port', type=int, default=8878)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir')
+    parser.add_argument('--api-only', action='store_true', help='Только REST API, без интерфейса')
+    parser.add_argument('--allowed-origin', action='append', default=[], help='Точный Origin отдельного frontend')
+    parser.add_argument('--no-legacy-api', action='store_true', help='Отключить прежний POST /api')
     args = parser.parse_args()
-    validate_ui()
+    if not args.api_only:
+        validate_ui()
     engine = Engine(AIProvider(), args.data_dir)
     try:
-        server = make_server(engine, args.port)
+        server = make_server(engine, args.port, api_token=os.environ.get('TRAINING_API_TOKEN'),
+                             allowed_origins=args.allowed_origin, api_only=args.api_only, legacy_api=not args.no_legacy_api)
     except OSError:
-        if not args.no_browser and not args.data_dir:
+        if not args.no_browser and not args.data_dir and not args.api_only:
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health', timeout=2) as r:
                     status = json.load(r)
@@ -481,7 +285,9 @@ def main():
             'Если программа запущена из другой папки, сначала закройте ту копию.\n'
             f'Текущая папка: {ROOT}\nДиагностика: http://127.0.0.1:{args.port}/health') from None
     url = f'http://127.0.0.1:{server.server_port}'
-    if not args.no_browser:
+    if args.api_only or args.no_browser:
+        print('REST API: ' + url + '/api/v1', flush=True)
+    if not args.no_browser and not args.api_only:
         threading.Timer(.4, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

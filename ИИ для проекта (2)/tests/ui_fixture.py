@@ -1,5 +1,6 @@
 """Browser test server with a fake provider and a disposable exercise directory."""
 import tempfile
+import os
 import json
 import sys
 from pathlib import Path
@@ -31,6 +32,6 @@ class FakeProvider:
 
 
 with tempfile.TemporaryDirectory() as folder:
-    server = make_server(Engine(FakeProvider(), folder), 0)
+    server = make_server(Engine(FakeProvider(), folder), 0, legacy_api=os.environ.get('AI_TEST_REST_ONLY') != '1')
     print(f'http://127.0.0.1:{server.server_port}', flush=True)
     server.serve_forever()

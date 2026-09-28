@@ -3,7 +3,7 @@ const token=document.querySelector('meta[name=ui-token]').content;
 const STORAGE='giik.training-plans.v1';
 const profile=()=>{try{return JSON.parse(localStorage.getItem('giik.teacher.profile.v1'))?.name||'Преподаватель';}catch{return 'Преподаватель';}};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(action,payload={}){const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json','X-UI-Token':token},body:JSON.stringify({action,payload})});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Ошибка запроса');return d.result;}
+async function api(action,payload={}){return globalThis.TrainingAPI.api(action,payload);}
 const fresh=()=>({id:crypto.randomUUID(),title:'',mode:'training',seconds:300,location:'',count:40,category:'1',classification:{},topic:'',comment:'',students:[],group:'',task_ids:[],assignment_task_ids:[]});
 function read(){try{const v=JSON.parse(localStorage.getItem(STORAGE));return Array.isArray(v)?v.filter(x=>x&&typeof x.id==='string'&&Array.isArray(x.task_ids)).map(x=>({...fresh(),...x,assignment_task_ids:Array.isArray(x.assignment_task_ids)?x.assignment_task_ids.filter(id=>x.task_ids.includes(id)):[...x.task_ids]})):[];}catch{return [];}}
 let catalogs=read(),scenario=catalogs.at(-1)||fresh(),tasks=[],meta=null,busy=false,stop=false,notice='',error='';

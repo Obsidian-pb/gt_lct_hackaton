@@ -12,16 +12,8 @@ function persist(){
  try{localStorage.setItem(STORAGE,JSON.stringify(state));return true;}
  catch(e){storageWarning('Браузер не смог сохранить изменения. Карточки остаются на экране: скачайте JSON до закрытия вкладки.');return false;}
 }
-async function api(action,payload={}){
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),110000);
- try{
-  const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json','X-UI-Token':$('meta[name=ui-token]').content},body:JSON.stringify({action,payload}),signal:controller.signal});
-  let data;try{data=await r.json();}catch{throw Error('Сервер вернул некорректный ответ. Готовые карточки остаются в браузере.');}
-  if(!r.ok||data.error)throw Error(data.error||'Не удалось выполнить запрос.');
-  return data.result;
- }catch(e){if(e.name==='AbortError')throw Error('Время ожидания ИИ истекло. Можно продолжить с этой позиции.');throw e;}
- finally{clearTimeout(timer);}
-}
+async function api(action,payload={}){return globalThis.TrainingAPI.api(action,payload);}
+
 function emptyContent(){return {title:'Новая карточка',report:'',fields:Object.fromEntries(Object.values(meta.groups).flatMap(([,fields])=>Object.keys(fields).map(k=>[k,'']))),class_ids:[],services:[],main_service:''};}
 function addCard(content,provenance){
  const at=new Date().toISOString(), id=crypto.randomUUID();
