@@ -1,12 +1,14 @@
 """Оркестрация ИИ-операций backend_new: генерация, диалог, эталон, оценка.
 
-Все обращения к провайдеру выполняются в отдельном потоке (urllib блокирующий),
-состояние диалога хранит клиент/БД — функции ИИ-ядра stateless. Ключ провайдера
-остаётся в процессе бэкенда и в ответах API не участвует.
+Все обращения к ИИ выполняются HTTP-клиентом AIServiceClient к stateless
+микросервису ai_service (см. plans/plan3_ai_microservice.md): ключ провайдера
+хранится только в микросервисе. Состояние диалога хранит клиент/БД —
+функции микросервиса stateless.
 """
 from __future__ import annotations
 
-import asyncio
+import json
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -19,7 +21,7 @@ from app.models.content import StudyTask, TaskEtalon
 from app.models.training import IncidentCard
 from app.repositories.content import ContentRepository
 from app.repositories.training import TrainingRepository
-from app.services.ai import AIConfigError, ai_core, card_caller, card_factory, card_reference, dds, get_provider
+from app.services.ai import AIConfigError, get_ai_client
 from app.services.ai import mapping
 
 STAFF_ROLES = {"system_admin", "admin", "teacher"}
@@ -33,9 +35,21 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
 
-async def _run(fn, *args, **kwargs):
-    """Блокирующий вызов провайдера ИИ — вне event loop."""
-    return await asyncio.to_thread(fn, *args, **kwargs)
+def difficulty_to_level(difficulty: int) -> str:
+    """Сложность учебной задачи (1..5) -> уровень поведения заявителя."""
+    return "easy" if difficulty <= 2 else "medium" if difficulty <= 4 else "hard"
+
+
+def _serialize_assessment(assessment: dict) -> dict:
+    """Готовит заключение ИИ к сохранению в ai_eval_details (JSONB)."""
+    payload = {
+        "summary": assessment.get("summary", ""),
+        "fields": assessment.get("fields", {}),
+        "score": assessment.get("score"),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    json.dumps(payload, ensure_ascii=False)  # проверка сериализуемости
+    return payload
 
 
 class AIService:
@@ -51,10 +65,9 @@ class AIService:
     @staticmethod
     async def status() -> dict:
         try:
-            result = await _run(get_provider().status)
+            return await get_ai_client().status()
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
-        return result
 
     # --- Вспомогательная загрузка задачи --------------------------------------
 
@@ -143,7 +156,7 @@ class AIService:
             "incident_class": incident_class,
         }
         try:
-            result = await _run(card_factory.generate, get_provider(), request)
+            result = await get_ai_client().generate_card(request)
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
         values = mapping.ai_content_to_task_values(result["content"])
@@ -181,7 +194,7 @@ class AIService:
         }
         request = {"content": content, "caller_scenario": scenario, "incident_class": incident_class}
         try:
-            reference = await _run(card_reference.generate, get_provider(), request)
+            reference = await get_ai_client().reference_preview(request)
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
 
@@ -240,11 +253,11 @@ class AIService:
             "caller_scenario": {"version": 1, "phone_callback": mapping.scenario_phone(task.provided_phone, task.id)},
             "question": question,
             "turns": turns,
-            "level": level or ai_core.difficulty_to_level(task.difficulty),
+            "level": level or difficulty_to_level(task.difficulty),
             "incident_class": incident_class,
         }
         try:
-            return await _run(card_caller.ask, get_provider(), request)
+            return await get_ai_client().caller_reply(request)
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
 
@@ -271,21 +284,20 @@ class AIService:
             "knowledge": service_info.get("knowledge")
             or "Знает только свою должность и компетенцию. О происшествии узнаёт из звонка диспетчера ДДС.",
         }
-        level = payload.get("level") or (ai_core.difficulty_to_level(task.difficulty) if task else "medium")
+        level = payload.get("level") or (difficulty_to_level(task.difficulty) if task else "medium")
         try:
-            reply, delivered = await _run(
-                dds.service_reply, get_provider(),
-                service=service,
-                persona=payload.get("persona") or "сотрудник учебной службы",
-                level=level,
-                history=payload.get("history") or [],
-                question=payload.get("question") or "",
-                mode=payload.get("mode") or "clear",
-                attempt=int(payload.get("attempt") or 1),
-            )
+            result = await get_ai_client().service_reply({
+                "service": service,
+                "persona": payload.get("persona") or "сотрудник учебной службы",
+                "level": level,
+                "history": payload.get("history") or [],
+                "question": payload.get("question") or "",
+                "mode": payload.get("mode") or "clear",
+                "attempt": int(payload.get("attempt") or 1),
+            })
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
-        return {"reply": reply, "delivered": delivered, "mode": payload.get("mode") or "clear"}
+        return {"reply": result["reply"], "delivered": result["delivered"], "mode": payload.get("mode") or "clear"}
 
     # --- Предварительная оценка ИИ ----------------------------------------------
 
@@ -308,18 +320,17 @@ class AIService:
         if not labels:
             labels = {k: mapping.COLUMN_LABELS.get(k, k) for k in task.etalon.content}
         try:
-            assessment = await _run(
-                ai_core.assess_card, get_provider(),
-                labels=labels,
-                card=card.content or {},
-                expected=task.etalon.content,
-                history=payload.get("history") or [],
-                hints_used=int(payload.get("hints_used") or 0),
-            )
+            assessment = await get_ai_client().assess({
+                "labels": labels,
+                "card": card.content or {},
+                "expected": task.etalon.content,
+                "history": payload.get("history") or [],
+                "hints_used": int(payload.get("hints_used") or 0),
+            })
         except (AIConfigError, RuntimeError, ValueError) as exc:
             raise _http_error(exc) from None
         card.ai_score = Decimal(str(assessment["score"]))
-        card.ai_eval_details = ai_core.serialize_assessment(assessment)
+        card.ai_eval_details = _serialize_assessment(assessment)
         await self._session.commit()
         card = await self._training.get_card(card_id)
         return card, assessment
@@ -329,10 +340,10 @@ class AIService:
     async def validate_fields(self, task_id: UUID, content: dict) -> dict:
         await self._require_task(task_id)
         try:
-            valid = card_factory.validate_content(content)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from None
-        return {"valid": True, "content": valid}
+            valid = await get_ai_client().validate_fields(content)
+        except (AIConfigError, RuntimeError, ValueError) as exc:
+            raise _http_error(exc) from None
+        return {"valid": True, "content": valid["content"]}
 
     # --- Доступ к карточке для диалога ------------------------------------------
 

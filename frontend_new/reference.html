@@ -21,6 +21,7 @@
     <button class="btn ghost" onclick="showTab('applicantStatuses')">Статусы заявителей (32)</button>
     <button class="btn ghost" onclick="showTab('trainingRoles')">Роли обучающихся (35)</button>
     <button class="btn ghost" onclick="showTab('classifier')">Группы происшествий (28–29)</button>
+    <button class="btn" onclick="showTab('workshop')">Мастерская классификатора</button>
   </div>
 
   <section id="content"></section>
@@ -39,6 +40,7 @@ async function showTab(name) {
     else if (name === "applicantStatuses") await renderSimple(sec, "/applicant-statuses", "Статус заявителя");
     else if (name === "trainingRoles") await renderTrainingRoles(sec);
     else if (name === "classifier") await renderClassifier(sec);
+    else if (name === "workshop") await renderClassifierWorkshop(sec);
   } catch (e) { showError(sec, e); }
 }
 
@@ -186,6 +188,83 @@ async function openGroup(id) {
     (extra || "<tr><td colspan='5' class='empty'>Дополнительных полей нет</td></tr>") + "</tbody></table>" +
     "</div>");
   sec.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+/* ---------- Мастерская зависимого классификатора (пункт 4 плана №2) ----------
+ * Дерево: Группа (код Г) → Признак 1 → Признак 2 → Признак 3 → Класс (код).
+ * Поиск фильтрует ветки по названию/коду. */
+async function renderClassifierWorkshop(sec) {
+  const [types, f1s, f2s, f3s, groups] = await Promise.all([
+    act(() => api("/classifier/event-types")).catch(() => []),
+    act(() => api("/classifier/features-1")).catch(() => []),
+    act(() => api("/classifier/features-2")).catch(() => []),
+    act(() => api("/classifier/features-3")).catch(() => []),
+    act(() => api("/event-groups")).catch(() => []),
+  ]);
+  sec.innerHTML = "<h2>Мастерская классификатора (зависимый: группа → признаки → код)</h2>" +
+    "<div class='note'>Полное дерево классификатора: Группа происшествий (код Г) → Признак 1 → Признак 2 → Признак 3 → Класс события (код). Используется как справочник при подготовке учебных задач и заполнении карточек.</div>" +
+    "<div class='filter-bar'><label class='field' style='margin:0'>Поиск: <input type='text' id='wsQ' placeholder='напр. «пожар», «Г4», «ДТП»' oninput='wsFilter()' style='min-width:240px'></label>" +
+    "<button class='btn ghost' onclick='wsExpand(true)'>Развернуть всё</button>" +
+    "<button class='btn ghost' onclick='wsExpand(false)'>Свернуть всё</button></div>" +
+    "<div id='wsTree'></div>";
+  window.__WS = { types, f1s, f2s, f3s, groups };
+  wsRender();
+}
+
+function wsRender() {
+  const { types, f1s, f2s, f3s, groups } = window.__WS || {};
+  const q = ((document.getElementById("wsQ") || {}).value || "").trim().toLowerCase();
+  const tree = document.getElementById("wsTree");
+  if (!tree) return;
+  let html = "";
+  for (const t of types || []) {
+    const tName = "Г" + t.code + " · " + t.name;
+    const tHit = !q || tName.toLowerCase().includes(q);
+    const f1List = (f1s || []).filter(x => x.event_type_id === t.id);
+    const rows = [];
+    for (const f1 of f1List) {
+      const f1Name = (f1.code ? f1.code + " · " : "") + (f1.statistics_name || f1.operator_label || f1.name);
+      const f1Hit = !q || f1Name.toLowerCase().includes(q);
+      const f2List = (f2s || []).filter(x => x.event_feature_1_id === f1.id);
+      const f2rows = [];
+      for (const f2 of f2List) {
+        const f2Name = (f2.code ? f2.code + " · " : "") + f2.name;
+        const f2Hit = !q || f2Name.toLowerCase().includes(q);
+        const f3List = (f3s || []).filter(x => x.event_feature_2_id === f2.id);
+        const f3rows = [];
+        for (const f3 of f3List) {
+          const f3Name = (f3.code ? f3.code + " · " : "") + f3.name;
+          const f3Hit = !q || f3Name.toLowerCase().includes(q);
+          const classes = (groups || []).filter(g => g.event_feature_3_id === f3.id);
+          const clsRows = classes.map(c => {
+            const cName = "№" + c.event_number + " «" + c.name + "»";
+            return (!q || cName.toLowerCase().includes(q)) ? "<li><span class='tag'>" + esc(cName) + "</span></li>" : "";
+          }).join("");
+          if (f3Hit || clsRows) {
+            f3rows.push("<li><b>Признак 3:</b> " + esc(f3Name) + (clsRows ? "<ul>" + clsRows + "</ul>" : "") + "</li>");
+          }
+        }
+        if (f2Hit || f3rows.length) {
+          f2rows.push("<li><b>Признак 2:</b> " + esc(f2Name) + (f3rows.length ? "<ul>" + f3rows.join("") + "</ul>" : "") + "</li>");
+        }
+      }
+      if (f1Hit || f2rows.length) {
+        rows.push("<li><b>Признак 1:</b> " + esc(f1Name) + (f2rows.length ? "<ul>" + f2rows.join("") + "</ul>" : "") + "</li>");
+      }
+    }
+    if (tHit || rows.length) {
+      html += "<details class='ws-group'" + (q ? " open" : "") + "><summary>" + esc(tName) + "</summary>" +
+        (rows.length ? "<ul class='ws-tree'>" + rows.join("") + "</ul>" : "<p class='muted'>признаков не задано</p>") +
+        "</details>";
+    }
+  }
+  tree.innerHTML = html || "<p class='empty'>Ничего не найдено по запросу «" + esc(q) + "»</p>";
+}
+
+function wsFilter() { wsRender(); }
+
+function wsExpand(open) {
+  document.querySelectorAll("#wsTree details").forEach(d => { d.open = open; });
 }
 
 async function init() {

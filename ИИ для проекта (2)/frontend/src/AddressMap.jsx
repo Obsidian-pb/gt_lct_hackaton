@@ -1,8 +1,9 @@
-import {useEffect,useRef,useState} from 'react';
-const project=([lon,lat])=>[(lon-93.53286)*61800,(56.250938-lat)*111200];
+import {useEffect,useMemo,useRef,useState} from 'react';
 
 export default function AddressMap({data,point,kind,label}){
  const canvas=useRef(null),drag=useRef(null),[view,setView]=useState({x:0,y:0,scale:.035});
+ const origin=useMemo(()=>{const points=data?.boundary||[];if(!points.length)return [0,0];return [points.reduce((sum,p)=>sum+p[0],0)/points.length,points.reduce((sum,p)=>sum+p[1],0)/points.length];},[data]);
+ const project=([lon,lat])=>[(lon-origin[0])*111200*Math.cos(origin[1]*Math.PI/180),(origin[1]-lat)*111200];
  const center=()=>{const [x,y]=point?project(point):[0,0];setView({x,y,scale:point?(kind==='street'?.18:.65):.035});};
  useEffect(center,[point?.[0],point?.[1],kind]);
  const zoom=factor=>setView(v=>({...v,scale:Math.max(.018,Math.min(3,v.scale*factor))}));
@@ -28,7 +29,7 @@ export default function AddressMap({data,point,kind,label}){
   render();const observer=new ResizeObserver(render);observer.observe(el);return()=>observer.disconnect();
  },[data,view,point?.[0],point?.[1],kind]);
  return <div className="address-map" data-map-kind={point?kind:'none'} data-map-point={point?.join(',')||''}>
-  <canvas ref={canvas} role="img" aria-label={point?`Карта: ${label}. ${kind==='street'?'Примерное положение улицы':'Точка по координатам карточки'}`:'Карта Железногорска'} tabIndex={0}
+  <canvas ref={canvas} role="img" aria-label={point?`Карта: ${label}. ${kind==='street'?'Примерное положение улицы':'Точка по координатам карточки'}`:'Карта '+(data?.city||'учебного города')} tabIndex={0}
    onKeyDown={e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();setView(v=>({...v,x:v.x+(e.key==='ArrowLeft'?-80:e.key==='ArrowRight'?80:0)/v.scale,y:v.y+(e.key==='ArrowUp'?-80:e.key==='ArrowDown'?80:0)/v.scale}));}if(e.key==='+'||e.key==='=')zoom(1.5);if(e.key==='-')zoom(1/1.5);}}
    onPointerDown={e=>{drag.current={x:e.clientX,y:e.clientY,view};e.currentTarget.setPointerCapture(e.pointerId);}}
    onPointerMove={e=>{if(drag.current){const d=drag.current;setView({...d.view,x:d.view.x-(e.clientX-d.x)/d.view.scale,y:d.view.y-(e.clientY-d.y)/d.view.scale});}}}

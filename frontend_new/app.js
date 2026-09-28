@@ -289,3 +289,199 @@ function logout() {
 function showError(el, err) {
   el.innerHTML = "<div class='err-box'>⚠ " + esc(err && err.message ? err.message : err) + "</div>";
 }
+
+/* ============================================================================
+ * ИИ-интеграция frontend_new с endpoints backend_new /api/v1 (пункт 2 плана №2)
+ * Контракт: backend_new/app/api/v1/ai.py + schemas/ai.py. Ключ провайдера живёт
+ * только в ai_service; браузер работает через backend_new.
+ * ========================================================================== */
+
+/* Проверка доступности ИИ (мониторинг, system.html) */
+async function aiStatus() {
+  return api("/system/ai/status");
+}
+
+/* Генерация содержимого учебной задачи (tasks.html). Заполняет типизированные
+ * поля задачи: сообщение заявителя, адрес, телефоны, флаги. */
+async function aiGenerate(taskId, opts = {}) {
+  return api("/study-tasks/" + taskId + "/generate", { method: "POST", json: opts });
+}
+
+/* Превью эталона: ИИ формирует expected_fields и ЗАПИСЫВАЕТ эталон в задачу.
+ * Возвращает {task_id, etalon_content, field_schema, reference}. */
+async function aiReferencePreview(taskId, opts = {}) {
+  return api("/study-tasks/" + taskId + "/reference-preview", { method: "POST", json: opts });
+}
+
+/* Реплика заявителя в мастерской преподавателя (tasks.html). */
+async function aiCallerReplyTask(taskId, payload) {
+  return api("/study-tasks/" + taskId + "/caller-reply", { method: "POST", json: payload });
+}
+
+/* Реплика заявителя в симуляторе обучающегося (simulator.html, карточка). */
+async function aiCallerReplyCard(cardId, payload) {
+  return api("/cards/" + cardId + "/caller-reply", { method: "POST", json: payload });
+}
+
+/* Реплика службы ДДС (исходящий звонок, simulator.html). */
+async function aiServiceReply(cardId, payload) {
+  return api("/cards/" + cardId + "/service-reply", { method: "POST", json: payload });
+}
+
+/* Предварительная оценка ИИ карточки (cards.html, simulator.html). */
+async function aiEval(cardId, payload = {}) {
+  return api("/cards/" + cardId + "/ai-eval", { method: "POST", json: payload });
+}
+
+/* Локальная валидация полей карточки в ИИ-формате (мастерская). */
+async function aiValidateFields(taskId, content) {
+  return api("/study-tasks/" + taskId + "/validate-fields", { method: "POST", json: { content } });
+}
+
+/* ============================================================================
+ * Клиентские виджеты (пункт 6 плана №2): голос, баннеры, адрес/карта.
+ * Без внешних библиотек; данные — статика в frontend_new/geo и banners/.
+ * ========================================================================== */
+
+/* ---------- голосовой ввод (SpeechRecognition) и озвучивание (TTS) ---------- */
+function speechSupported() {
+  return typeof window !== "undefined" && !!window.speechSynthesis;
+}
+function recognitionSupported() {
+  return typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+/* Озвучить текст реплики заявителя/службы (ru-RU). Возвращает true, если озвучено. */
+function speak(text) {
+  if (!speechSupported()) return false;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text || ""));
+    u.lang = "ru-RU";
+    u.rate = 1.02;
+    u.pitch = 1;
+    speechSynthesis.speak(u);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function stopSpeak() {
+  if (speechSupported()) { try { speechSynthesis.cancel(); } catch (e) { /* ignore */ } }
+}
+
+/* Распознавание речи: onResult(text), onEnd(ok). Возвращает объект rec (null, если не поддержано). */
+function listen(onResult, onEnd) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    if (onEnd) onEnd(false);
+    return null;
+  }
+  let rec;
+  try { rec = new SR(); } catch (e) { if (onEnd) onEnd(false); return null; }
+  rec.lang = "ru-RU";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = ev => {
+    const t = ev.results && ev.results[0] && ev.results[0][0] ? ev.results[0][0].transcript : "";
+    if (t) onResult(t);
+  };
+  rec.onerror = () => { if (onEnd) onEnd(false); };
+  rec.onend = () => { if (onEnd) onEnd(true); };
+  try { rec.start(); } catch (e) { if (onEnd) onEnd(false); return null; }
+  return rec;
+}
+
+/* ---------- баннеры происшествий (banners/banner-map.json + PNG) ---------- */
+let BANNER_MAP = null;
+async function loadBannerMap() {
+  if (BANNER_MAP) return BANNER_MAP;
+  try {
+    const r = await fetch("banners/banner-map.json");
+    BANNER_MAP = await r.json();
+  } catch (e) {
+    BANNER_MAP = { categories: {}, title_keywords: {}, group_keywords: {}, default: "general" };
+  }
+  return BANNER_MAP;
+}
+
+/* Подбор баннера: точные ключевые слова сообщения → группа → категория → default. */
+function pickBanner(map, opts) {
+  map = map || { categories: {}, title_keywords: {}, group_keywords: {}, default: "general" };
+  opts = opts || {};
+  const text = String((opts.text || "") + " " + (opts.className || "") + " " + (opts.groupName || "")).toLowerCase();
+  for (const [kw, img] of Object.entries(map.title_keywords || {})) {
+    if (text.includes(kw)) return img;
+  }
+  for (const [kw, img] of Object.entries(map.group_keywords || {})) {
+    if (text.includes(kw)) return img;
+  }
+  if (opts.categoryCode && map.categories && map.categories[opts.categoryCode]) {
+    return map.categories[opts.categoryCode];
+  }
+  return map.default || "general";
+}
+function bannerHtml(img) {
+  return "<div class='banner'><img src='banners/" + esc(img) + ".png' alt='Баннер происшествия' loading='lazy'></div>";
+}
+
+/* ---------- адрес/карта: локальный поиск по geo/addresses.json ---------- */
+let GEO_ADDRESSES = null;
+async function loadGeoAddresses() {
+  if (GEO_ADDRESSES) return GEO_ADDRESSES;
+  try {
+    const r = await fetch("geo/addresses.json");
+    GEO_ADDRESSES = await r.json();
+  } catch (e) {
+    GEO_ADDRESSES = { version: 1, city: "", region: "", country: "", addresses: [] };
+  }
+  return GEO_ADDRESSES;
+}
+function geoSearch(query, limit) {
+  const q = String(query || "").trim().toLowerCase();
+  if (q.length < 3) return [];
+  const out = [];
+  for (const item of (GEO_ADDRESSES && GEO_ADDRESSES.addresses) || []) {
+    const street = String(item.street || "").toLowerCase();
+    const house = String(item.house || "").toLowerCase();
+    if (street.includes(q) || (house && (street + " " + house).includes(q))) {
+      out.push({ id: item.id, label: item.street + ", " + item.house, point: item.point });
+      if (out.length >= (limit || 8)) break;
+    }
+  }
+  return out;
+}
+function geoLabel(item) {
+  return item && item.street ? item.street + ", " + (item.house || "") : (item ? item.id : "");
+}
+
+/* Схематичная карта-виджет без внешних сервисов: сетка + маркер + ссылка OSM.
+ * el — DOM-контейнер; lat/lng — координаты точки. */
+function renderMiniMap(el, lat, lng, label) {
+  if (!el) return;
+  const L = Number(lat), G = Number(lng);
+  if (isNaN(L) || isNaN(G)) {
+    el.innerHTML = "<div class='map-panel'><p class='muted'>Координаты не заданы — карта недоступна.</p></div>";
+    return;
+  }
+  const size = 280, c = size / 2, span = 0.004;
+  const x = c + (G - G) * 0; // маркер в центре; сетка — локальная
+  const grid = [];
+  for (let i = 1; i < 6; i++) {
+    const off = Math.round(size * i / 6);
+    grid.push("<line x1='0' y1='" + off + "' x2='" + size + "' y2='" + off + "' stroke='#d7dfe6'/>");
+    grid.push("<line x1='" + off + "' y1='0' x2='" + off + "' y2='" + size + "' stroke='#d7dfe6'/>");
+  }
+  el.innerHTML =
+    "<div class='map-panel'>" +
+      "<svg viewBox='0 0 " + size + " " + size + "' role='img' aria-label='Схема местности'>" +
+        "<rect width='" + size + "' height='" + size + "' fill='#eef4f0'/>" +
+        grid.join("") +
+        "<circle cx='" + c + "' cy='" + c + "' r='9' fill='#c0392b' stroke='#fff' stroke-width='2'/>" +
+        "<text x='" + c + "' y='" + (c + 26) + "' text-anchor='middle' font-size='11' fill='#30383f'>" + esc(label || "Точка вызова") + "</text>" +
+      "</svg>" +
+      "<p class='muted mono'>lat " + L.toFixed(6) + " · lng " + G.toFixed(6) +
+      " · <a href='https://www.openstreetmap.org/?mlat=" + L + "&mlon=" + G + "#map=17/" + L + "/" + G + "' target='_blank' rel='noopener'>открыть в OSM ↗</a></p>" +
+    "</div>";
+  void x; void span;
+}
