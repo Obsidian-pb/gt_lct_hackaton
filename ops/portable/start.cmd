@@ -48,9 +48,7 @@ set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 set "PYTHONPATH=%ROOT%\app\backend"
 
-echo.
-echo  === Тренажёр операторов и диспетчеров Системы-112 ===
-echo.
+"%PY%" "%ROOT%\runtime\banner.py"
 
 rem --- База данных -----------------------------------------------------------
 if not exist "%PGDATA%\PG_VERSION" (
