@@ -99,15 +99,46 @@ async function openCard(id) {
       "<p>Создана: " + fmtDate(c.created_at) + " · отправлена: " + fmtDate(c.submitted_at) +
       "<br>принята: " + fmtDate(c.accepted_at) + " · направлена: " + fmtDate(c.routed_at) + " · отработана: " + fmtDate(c.processed_at) + "</p>" +
       "<p>Длительность: " + (c.duration_ms ? Math.round(c.duration_ms / 1000) + " с" : "—") + "</p>" +
+      "<div id='mapBox'></div>" +
+      "<div id='aiEvalBox'>" + aiEvalDetailsHtml(c) + "</div>" +
       "<div class='form-actions'>" +
         "<label class='field'>Итоговая оценка (0–100): <input type='number' id='gScore' min='0' max='100' value='" + esc(c.final_score ?? 0) + "' style='width:120px'></label>" +
         "<button class='btn ok' onclick='grade(\"" + c.id + "\")'>Выставить оценку</button>" +
+        "<button class='btn' onclick='aiEvalCard(\"" + c.id + "\")'>🤖 Оценка ИИ</button>" +
         "<button class='btn ghost' onclick='document.getElementById(\"cardSection\").style.display=\"none\"'>Закрыть</button>" +
       "</div>" +
     "</div>" +
     "<div class='panel'><h3>Содержимое карточки (JSONB)</h3>" + fmtJson(c.content) + "</div>" +
   "</div>";
+  const mapBox = sec.querySelector("#mapBox");
+  if (mapBox && c.content) renderMiniMap(mapBox, c.content.latitude, c.content.longitude, classText(c));
   sec.scrollIntoView({ behavior: "smooth" });
+}
+
+function aiEvalDetailsHtml(c) {
+  const det = c.ai_eval_details || null;
+  if (!det) return "<p class='muted'>Оценка ИИ ещё не выполнялась — нажмите «Оценка ИИ» (предварительная оценка по эталону).</p>";
+  let html = "<div class='ai-preview ok'><b>🤖 Заключение ИИ</b> (" + fmtDate(det.at) + "):";
+  if (det.score !== undefined && det.score !== null) html += "<br>Оценка модели: <b>" + esc(String(det.score)) + "</b>";
+  if (det.summary) html += "<br>" + esc(det.summary);
+  const fields = det.fields || {};
+  const fkeys = Object.keys(fields);
+  if (fkeys.length) {
+    html += "<details style='margin-top:6px'><summary>Поля (" + fkeys.length + ")</summary><table style='font-size:12px'><thead><tr><th>Поле</th><th>Оценка</th></tr></thead><tbody>";
+    for (const k of fkeys) {
+      const v = fields[k];
+      html += "<tr><td>" + esc(k) + "</td><td>" + esc(typeof v === "object" ? JSON.stringify(v) : String(v)) + "</td></tr>";
+    }
+    html += "</tbody></table></details>";
+  }
+  return html + "</div>";
+}
+
+/* ИИ: предварительная оценка карточки по эталону (запись ai_score). */
+async function aiEvalCard(id) {
+  const card = await act(() => aiEval(id, { history: [], hints_used: 0 }));
+  toast("Оценка ИИ сохранена: " + fmtNum(card.ai_score) + " %", "ok");
+  await openCard(id);
 }
 
 async function grade(id) {

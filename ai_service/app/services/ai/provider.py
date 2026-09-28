@@ -64,7 +64,7 @@ def infer_provider(key, config):
     if key.startswith('AIza'):
         return 'gemini'
     if key.startswith('sk-'):
-        raise ValueError('ИИ: выберите провайдера в настройках backend_new (AI_PROVIDER). По префиксу sk- нельзя отличить OpenAI от других сервисов.')
+        raise ValueError('ИИ: выберите провайдера в настройках ИИ-микросервиса (AI_PROVIDER). По префиксу sk- нельзя отличить OpenAI от других сервисов.')
     return 'gigachat'  # legacy configurations contained GigaChat credentials
 
 
@@ -218,7 +218,7 @@ class AIProvider:
 
     def _authorize(self):
         if not self.key:
-            raise RuntimeError('Ключ ИИ не найден. Задайте AI_API_KEY в .env backend_new или config.local.json.')
+            raise RuntimeError('Ключ ИИ не найден. Задайте AI_API_KEY в .env ИИ-микросервиса (ai_service) или config.local.json.')
         if self.provider == 'gigachat':
             if self.key.startswith(('sk-', 'AIza')):
                 raise RuntimeError('ИИ: выбран GigaChat, но ключ похож на ключ другого сервиса. Проверьте настройку AI_PROVIDER.')
