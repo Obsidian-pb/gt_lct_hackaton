@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    ai,
     auth,
     cards,
     catalog,
@@ -23,6 +24,7 @@ api_router.include_router(reference.applicant_status_router)
 api_router.include_router(reference.training_role_router)
 api_router.include_router(catalog.router, prefix="")
 api_router.include_router(tasks.router)
+api_router.include_router(ai.router)
 api_router.include_router(scenarios.router)
 api_router.include_router(trainings.router)
 api_router.include_router(runtime.router)

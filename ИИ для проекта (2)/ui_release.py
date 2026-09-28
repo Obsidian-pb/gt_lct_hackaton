@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-REQUIRED_UI = ('react.html', 'react/app.js', 'student.css', 'teacher.css', 'workspace.css',
+REQUIRED_UI = ('api-client.js', 'api-routes.js', 'api-docs.html', 'react.html', 'react/app.js', 'student.css', 'teacher.css', 'workspace.css',
                'theme.css', 'making.css', 'cards.css', 'welcome.css', 'admin.css', 'hero-logo.svg',
                'hero-background.svg', 'address.css', 'geo/addresses.json', 'geo/map.json',
                'scenarios.html', 'scenarios.css', 'scenarios.js', 'enhancements.js',

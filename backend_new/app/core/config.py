@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
 
+    # --- ИИ-микросервис: ключ провайдера хранится ТОЛЬКО в ai_service.
+    # backend_new обращается к нему по HTTP с Bearer AI_SERVICE_TOKEN. ---
+    ai_service_url: str = "http://127.0.0.1:8890"
+    ai_service_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

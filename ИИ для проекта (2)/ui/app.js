@@ -5,7 +5,7 @@ const token = $('meta[name=ui-token]').content;
 const remembered = key => localStorage.getItem('practice:'+key) || '';
 const remember = (key,value) => localStorage.setItem('practice:'+key,value);
 function notice(text,error=false){$('#notice').hidden=!text;$('#notice').textContent=text;$('#notice').className=error?'error':'';}
-async function api(action,payload={}){const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json','X-UI-Token':token},body:JSON.stringify({action,payload})});const data=await r.json();if(!r.ok)throw Error(data.error||'Не удалось выполнить действие');return data.result;}
+async function api(action,payload={}){return globalThis.TrainingAPI.api(action,payload);}
 async function run(text,fn){if(busy)return;stopMic();busy=true;notice(text);$('#content').inert=true;$('.sidebar').inert=true;document.body.setAttribute('aria-busy','true');try{await fn();if($('#notice').textContent===text)notice('');}catch(e){notice(e.message,true);}finally{busy=false;$('#content').inert=false;$('.sidebar').inert=false;document.body.setAttribute('aria-busy','false');}}
 function badge(status){return `<span class="badge ${['approved','reviewed'].includes(status)?'good':''}">${esc(statuses[status])}</span>`;}
 function input(label,name,value='',type='text'){return `<label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${esc(value)}" required>`;}

@@ -1,9 +1,12 @@
 /* ============================================================================
  * Тренажёр оператора ДДС «Система-112» — элементарный веб-клиент (прототип)
  * Общие стили. Никаких внешних библиотек.
+ * Токены дизайна перенесены из ui/theme.css ИИ-проекта (пункт 5 плана №2):
+ * --ui-* добавлены как переопределяемый слой поверх базовых токенов.
  * ========================================================================== */
 
 :root {
+  /* базовые токены frontend_new */
   --bg: #eef2f6;
   --panel: #ffffff;
   --line: #d7dfe6;
@@ -16,9 +19,32 @@
   --bad: #b3362e;
   --radius: 10px;
   --shadow: 0 3px 14px rgba(23, 51, 71, 0.10);
+
+  /* токены ui/theme.css ИИ-проекта (перенос, пункт 5 плана №2) */
+  --ui-font: Arial, Helvetica, sans-serif;
+  --ui-bg: #f4f6f8;
+  --ui-panel: #f8fafb;
+  --ui-field: #fff;
+  --ui-line: #d9e0e6;
+  --ui-text: #30383f;
+  --ui-muted: #7b8792;
+  --ui-blue: #1998e5;
+  --ui-blue-soft: #dcecf9;
+  --ui-dark: #22272c;
+  --ui-green: #32975b;
+  --ui-focus: #1479bd;
+  --ui-radius: 2px;
+
+  /* виджеты (карта, баннеры, голос, чат) */
+  --mic-size: 40px;
 }
 
 * { box-sizing: border-box; }
+
+/* Доступность: видимый фокус (правило ui/theme.css) */
+button, a, input, select, textarea { outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--ui-focus); }
 
 body {
   margin: 0;
@@ -167,3 +193,84 @@ summary { cursor: pointer; font-weight: 600; color: var(--brand-dark); }
   header { flex-direction: column; align-items: stretch; }
   .row > * { flex-basis: 100%; }
 }
+
+/* ============================================================================
+ * Виджеты ИИ-этапа (пункты 5–6 плана №2): диалог, баннер, карта, микрофон.
+ * ========================================================================== */
+
+/* панель ИИ-статуса (system.html, tasks.html) */
+.ai-status { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.ai-status .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.ai-status .dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(30,127,70,.15); }
+.ai-status .dot.warn { background: #c9a227; box-shadow: 0 0 0 4px rgba(201,162,39,.18); }
+.ai-status .dot.err { background: var(--bad); box-shadow: 0 0 0 4px rgba(179,54,46,.15); }
+.ai-status .tag { background: var(--ui-blue-soft); color: var(--ui-focus); }
+
+/* баннер происшествия */
+.banner {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  background: var(--ui-dark); min-height: 120px;
+}
+.banner img { display: block; width: 100%; height: 180px; object-fit: cover; }
+.banner figcaption {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,.72));
+  color: #fff; padding: 22px 14px 8px; font-size: 13px;
+}
+
+/* схематичная карта (виджет адрес/карта) */
+.map-panel {
+  background: var(--ui-panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px;
+}
+.map-panel svg { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.map-panel .muted { margin: 6px 0 0; font-size: 12px; }
+
+/* диалог с заявителем/службой (чат) */
+.chat {
+  display: flex; flex-direction: column; gap: 8px; max-height: 340px;
+  overflow-y: auto; padding: 10px; background: var(--ui-bg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.chat .msg {
+  max-width: 82%; padding: 9px 12px; border-radius: 12px;
+  font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+}
+.chat .msg.caller { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+.chat .msg.me { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 3px; }
+.chat .msg.sys { align-self: center; background: var(--ui-blue-soft); color: var(--ui-focus); font-size: 12.5px; }
+.chat .msg .who { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.chat .empty { border: 0; }
+
+/* микрофон (голосовой ввод) */
+.mic-btn {
+  width: var(--mic-size); height: var(--mic-size); border-radius: 50%;
+  border: 0; cursor: pointer; background: var(--ui-blue); color: #fff;
+  font-size: 17px; display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; transition: transform .15s;
+}
+.mic-btn:hover { filter: brightness(1.1); }
+.mic-btn.listening { background: var(--bad); animation: mic-pulse 1.2s infinite; }
+@keyframes mic-pulse { 50% { transform: scale(1.12); box-shadow: 0 0 0 8px rgba(179,54,46,.15); } }
+.mic-note { font-size: 12px; color: var(--muted); margin-left: 8px; }
+.speak-btn { cursor: pointer; background: none; border: 0; color: var(--ui-focus); font-size: 13px; padding: 2px 6px; }
+
+/* превью эталона / генерации (tasks.html) */
+.ai-preview {
+  background: #f0f8ef; border: 1px solid #bfe0c0; border-radius: 8px;
+  padding: 10px 14px; margin: 10px 0; font-size: 13.5px;
+}
+.ai-preview.err { background: #fdeeee; border-color: #eec; color: var(--bad); }
+.ai-preview.ok { background: #eef6fb; border-color: #bcd9ea; color: var(--brand-dark); }
+.turns-counter { font-size: 12.5px; color: var(--muted); margin: 4px 0 8px; }
+
+/* мастерская зависимого классификатора (reference.html) */
+.ws-tree, .ws-tree ul {
+  margin: 4px 0 4px 18px; padding-left: 12px;
+  border-left: 1px dashed var(--line); list-style: none;
+}
+.ws-group summary { cursor: pointer; font-weight: 600; color: var(--brand-dark); padding: 3px 0; }
+.ws-group[open] > summary { color: var(--ui-focus); }
+.ws-tree li { margin: 3px 0; font-size: 13.5px; }
