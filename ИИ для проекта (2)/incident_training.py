@@ -9,6 +9,7 @@ import re
 from ai_core import now, require_text
 import card_factory as cards
 import card_caller
+import dialogue_gateway
 
 FORMAT = 'incident-v1'
 EXTRA = {'_report': 'Описание со слов заявителя', '_class_ids': 'Типы происшествия',
@@ -63,11 +64,20 @@ def initialize(session):
     session['callback_disclosed'] = False
 
 
-def ask(engine, session, question, source):
+def ask(engine, session, question, source, student_fields=None):
     turns = [{'role': row['role'], 'text': row['text']} for row in session['history'][1:]]
     task = session['task']
-    result = card_caller.ask(engine.provider, {'content': task['incident_source'],
-        'caller_scenario': task['caller_scenario'], 'turns': turns, 'question': question, 'level': session.get('effective_level', task['level'])})
+    # The browser may send unsaved learner edits so the caller can react to the
+    # learner's current context. They are never trusted facts and are never saved
+    # by this operation. If an older client omits them, use the last saved card.
+    current_fields = session['card'] if student_fields is None else student_fields
+    result = dialogue_gateway.ask(
+        content=task['incident_source'],
+        caller_scenario=task['caller_scenario'],
+        turns=turns,
+        question=question,
+        student_fields=current_fields,
+    )
     session['history'].extend([{'id': len(session['history'])+1, 'role': 'dispatcher', 'text': question, 'source': source},
                                {'id': len(session['history'])+2, 'role': 'caller', 'text': result['reply']}])
     session['callback_disclosed'] = session['callback_disclosed'] or result['callback_disclosed']
@@ -88,7 +98,19 @@ def save_card(engine, session, value, submit=False):
         content = {'title': session['task']['title'], 'report': value['_report'],
             'fields': {k: value[k] for k in cards.LABELS}, 'class_ids': json.loads(value['_class_ids']),
             'services': json.loads(value['_services']), 'main_service': value['_main_service'], 'flags': json.loads(value['_flags'])}
-        cards.validate_content(content)
+        if submit:
+            cards.validate_content(content)
+        else:
+            # A learner must be able to save an incomplete card during a call.
+            # Structure, codes and size are checked here; completeness is checked
+            # on submission so the server retains useful timeout drafts.
+            if any(code not in cards.SERVICES for code in content['services']):
+                raise ValueError('Выбрана неизвестная служба.')
+            if any(code not in {r['id'] for r in cards.CATALOG + cards.LEGACY_CATALOG} for code in content['class_ids']):
+                raise ValueError('Выбран неизвестный тип происшествия.')
+            if content['main_service'] and content['main_service'] not in content['services']:
+                raise ValueError('Основная служба должна входить в состав привлекаемых.')
+            cards.validate_flags(content['flags'])
     except (ValueError, TypeError, KeyError):
         raise ValueError('Проверьте поля, координаты, тип происшествия и службы.') from None
     for key, text in value.items():
@@ -97,6 +119,8 @@ def save_card(engine, session, value, submit=False):
     session['card'] = copy.deepcopy(value)
     if submit:
         session.update(status='submitted', submitted_at=now())
+        from scoring import compare
+        session['machine_assessment'] = compare(session)
     engine.save(session)
 
 
@@ -141,6 +165,8 @@ def save_legacy_card(engine, session, value, submit=False):
     session['card_edits'] = temporary['card_edits']
     if submit:
         session.update(status='submitted', submitted_at=temporary['submitted_at'])
+        from scoring import compare
+        session['machine_assessment'] = compare(session)
         if session['task'].get('workflow') == 'dds':
             session.update(connection='ended', next_channel='clear')
     engine.save(session)

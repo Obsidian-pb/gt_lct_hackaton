@@ -25,7 +25,7 @@ function StudentDialogue({session,values,busy,act}){
    <div ref={log} className="student-chat" role="log" aria-label="Разговор с заявителем">{session.history.map(turn=><p key={turn.id}><strong>{({caller:'Заявитель',dispatcher:'Оператор 112',system:'Система'})[turn.role]||'Собеседник'}: </strong>{turn.text}</p>)}</div>
    <VoiceControls history={session.history} setQuestion={setQuestion} disabled={busy||!active}/>
    {session.training?.mode==='training'&&!!session.training_reveals?.length&&<div className="student-coach incident-training-coach" aria-live="polite"><strong>Учебная подсказка</strong><p>Эталонное поле «{session.training_reveals.at(-1).label}»: <b>{session.training_reveals.at(-1).value}</b></p><small>Подсказка появилась после паузы в работе. Продолжайте диалог и заполнение карточки.</small></div>}
-   {active&&<form onSubmit={async e=>{e.preventDefault();if(await act('ask',{question,source:'text'}))setQuestion('');}}>
+   {active&&<form onSubmit={async e=>{e.preventDefault();if(await act('ask',{question,source:'text',card:values}))setQuestion('');}}>
     <label htmlFor="student-question">Ваш вопрос заявителю</label>
     <textarea id="student-question" rows={2} maxLength={2000} value={question} disabled={busy} onChange={e=>setQuestion(e.target.value)} placeholder="Задайте уточняющий вопрос"/>
     <div className="student-buttons"><button className="student-blue" disabled={busy||!question.trim()}>{busy?'Заявитель отвечает…':'Отправить'}</button></div>
@@ -53,7 +53,7 @@ export default function StudentIncidentForm({session,values,setValues,busy,act})
   setValues({...values,_class_ids:JSON.stringify(routed.class_ids||[]),_services:JSON.stringify(routed.services||[]),_main_service:routed.main_service||'',_flags:JSON.stringify(routed.flags||{})});
  };
  const change=(key,value)=>{let next={...values,[key]:value};if(LOCATION_KEYS.includes(key)&&value!==values[key]){next.latitude='';next.longitude='';setGeocoding(null);}if(['latitude','longitude'].includes(key))setGeocoding(null);setValues(next);};
- const select=record=>{setValues({...values,...Object.fromEntries(ADDRESS_KEYS.map(k=>[k,''])),...addressFields(record)});setGeocoding(record);};
+ const select=(record,context)=>{setValues({...values,...Object.fromEntries(ADDRESS_KEYS.map(k=>[k,''])),...addressFields(record,context)});setGeocoding(record);};
  const clear=()=>{setValues({...values,...Object.fromEntries([...ADDRESS_KEYS,'latitude','longitude'].map(k=>[k,'']))});setGeocoding(null);};
  const field=(key,wide=false)=>{const label=session.field_labels[key]||key,auto=['phone_aon','external_number','registered_by'].includes(key),callback=key==='phone_callback'&&!session.callback_disclosed;const props={value:values[key]||'',readOnly:auto,disabled:disabled||callback,maxLength:3000,'data-student-field':session.legacy_map?.[key]||key,onChange:e=>change(key,e.target.value)};return <div key={key} data-incident-key={key} className={'incident-field '+(wide?'wide':'')}><label htmlFor={'student-'+key}>{label}</label>{wide?<textarea {...props} id={'student-'+key} rows={2}/>:<input {...props} id={'student-'+key} type={key.startsWith('phone_')?'tel':key==='control_at'?'datetime-local':'text'}/>} {key==='phone_aon'&&<p className="phone-hint">Определён автоматически · учебный номер</p>}{callback&&<p className="phone-hint">Сначала уточните номер у заявителя.</p>}</div>;};
  const store={

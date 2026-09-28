@@ -18,7 +18,7 @@ function App(){const [hash,setHash]=useState(location.hash.slice(1));useEffect((
  if(path==='/student')return <Student/>;
  if(path==='/admin-login')return <AdminLogin/>;
  if(path==='/admin')return <Admin/>;
- return <Shell section={section} journal>{journal?<CardJournal/>:path==='/cards'?<Cards/>:['create-training','monitoring','results','trainings'].includes(section)?<TrainingWorkspace key={section} section={section}/>:<Teacher section={section}/>}</Shell>;
+ return <Shell section={section} journal>{journal?<CardJournal/>:path==='/cards'?<Cards/>:['create-training','legacy-builder','monitoring','results','trainings'].includes(section)?<TrainingWorkspace key={section} section={section}/>:<Teacher section={section}/>}</Shell>;
 }
 class ErrorBoundary extends Component{state={error:false};static getDerivedStateFromError(){return {error:true};}render(){return this.state.error?<main style={{padding:40}}><h1>Не удалось открыть интерфейс</h1><p>Сохранённые карточки остаются в браузере.</p><button onClick={()=>location.reload()}>Обновить страницу</button></main>:this.props.children;}}
 createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);

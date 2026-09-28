@@ -8,6 +8,19 @@ sys.path.insert(0, str(Path('tests').resolve()))
 from card_fake import FactoryFake
 from ai_core import Engine, FIELDS
 from web_ui import make_server
+import ai_rest_client
+
+def fake_dialogue_reply(*, card, student_fields, turns, question):
+    if question == 'FAIL':
+        raise RuntimeError('Тестовая ошибка выделенного ИИ REST API')
+    q = question.lower()
+    if any(word in q for word in ('телефон', 'перезвон', 'этому номеру')):
+        return {'reply': card['fields'].get('phone_callback') or 'Не знаю.'}
+    if 'адрес' in q or 'улиц' in q or 'где' in q:
+        return {'reply': card['fields'].get('address_text') or card.get('report') or 'Не знаю.'}
+    return {'reply': 'Муж заходил внутрь, я не видела, чтобы он вышел.'}
+
+ai_rest_client.caller_reply = fake_dialogue_reply
 
 
 class FakeProvider:
