@@ -208,6 +208,24 @@ JWT HS256 + PBKDF2-HMAC-SHA256 на stdlib (без сторонних библи
 - `curriculum/materials.json` → `material`.
 - Строковые имена студентов/преподавателей: создать/найти записи `user` (сгенерированный login), связать по `display_name`, сохранить связь в отдельную таблицу соответствий на время переходного периода.
 
+**Статус: выполнено (2026-09-29, отчёт `workflow/step_4.md`, план `plans/step_3_plan.md`).**
+Реализовано: импортёр `data/*.json` → все таблицы раздела 2 (задания со снимками
+`task_dds`/`task_incident_source`, сессии со всеми дочерними коллекциями,
+сценарии/тренировки с карточками и действиями служб, материалы); версия схемы **2.3.0**
+(новая таблица соответствий имён `legacy_name_map`); маппинг строковых имён →
+`user` (генерация логина, приоритет роли teacher > student, случайный пароль,
+выдача через админку); стратегия импорта — транзакционная «полная перезапись»
+(идемпотентна); `identity_hash` (полный SHA-256) только для `incident-v1`;
+CLI `init_training_data.py --init/--check/--self-test` + `TEST_DATA.cmd` +
+некритичный шаг `--check` в `START_ALL.ps1` (лог `.runtime\training-data-init.log`).
+Новый код: `training_data_repository.py`, `training_data_importer.py`,
+`training_data_service.py`, `init_training_data.py`, `TEST_DATA.cmd`;
+тесты `tests/test_training_data_importer.py` (17 unit),
+`tests/test_training_data_integration.py` (5 integration, живая БД).
+Примечание: на текущем стенде каталог `data/` пуст — проверка наличия данных
+(`--check`) сообщает об этом; реальный импорт выполняется `TEST_DATA.cmd` там,
+где лежат `t-*.json`/`s-*.json`/`curriculum/*.json`.
+
 ### Этап 4. Импорт мастерской карточек
 - При входе преподавателя: прочитать `localStorage` `giik.card-workshop.v1` → `workshop_card` + `workshop_card_reference` + `workshop_card_version` + `workshop_card_event`.
 - Повторный импорт идемпотентен (по `workshop_card.id`/хешу).

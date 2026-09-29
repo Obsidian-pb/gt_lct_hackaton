@@ -186,6 +186,22 @@ try {
         Write-Host $catalogInitOutput -ForegroundColor Yellow
     }
 
+    Step 'Checking the training data layer (PostgreSQL)...'
+    try {
+        $dataInitOutput = (& $python 'init_training_data.py' '--check' 2>&1 | Out-String).Trim()
+        $dataInitCode = $LASTEXITCODE
+    } catch {
+        $dataInitOutput = $_.Exception.Message
+        $dataInitCode = 1
+    }
+    Set-Content -Path (Join-Path $runtime 'training-data-init.log') -Value $dataInitOutput -Encoding UTF8
+    Write-Host ''
+    if ($dataInitCode -eq 0) {
+        Write-Host $dataInitOutput -ForegroundColor Green
+    } else {
+        Write-Host $dataInitOutput -ForegroundColor Yellow
+    }
+
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray
