@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эмулятор АРМ-112 — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Эмулятор АРМ-112</h1>
+  <p class="sub">Окна 14, 17, 36 ТЗ: приём вызова, заполнение карточки происшествия, окно контроля карточек диспетчеров.</p>
+
+  <section id="setupSection" class="panel">
+    <h3>Выбор тренировки</h3>
+    <div class="filter-bar">
+      <span>Тренировка:</span><select id="trSel"></select>
+      <button class="btn" onclick="startWorkspace()">Начать работу</button>
+    </div>
+    <div class="note">Обучающийся запускает тренировку по кнопке «Пройти». Учебная роль определяется из назначения: Оператор-112, Диспетчер ДДС или Диспетчер службы.</div>
+  </section>
+
+  <section id="workspace" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let ME = null;
+let DICTS = null;
+let TRAININGS = [];
+let ROLE = null;          // код учебной роли участника
+let SESSION_ID = null;    // активная сессия оператора
+let CURRENT_TASK = null;  // выданная учебная задача
+let CARD = null;          // текущая карточка
+
+async function init() {
+  await renderHeader("simulator.html");
+  ME = await me();
+  DICTS = await loadDicts();
+  const trainings = await act(() => api("/trainings"));
+  TRAININGS = trainings;
+
+  const sel = document.getElementById("trSel");
+  sel.innerHTML = trainings.map(t =>
+    "<option value='" + esc(t.id) + "'>" + esc(t.title) + " — " + statusLabel(t.status) + "</option>").join("");
+
+  const q = new URLSearchParams(location.search).get("training");
+  if (q) { sel.value = q; startWorkspace(); }
+}
+
+async function findRole(trainingId) {
+  try {
+    const t = await api("/trainings/" + trainingId);
+    const p = (t.participants || []).find(x => x.user_id === ME.id);
+    if (!p) return null;
+    const r = DICTS.trainingRoles.find(x => x.id === p.training_role_id);
+    return r ? { code: r.code, participant: p } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function startWorkspace() {
+  const trId = document.getElementById("trSel").value;
+  if (!trId) { toast("Выберите тренировку", "err"); return; }
+  ROLE = await findRole(trId);
+
+  const ws = document.getElementById("workspace");
+  document.getElementById("setupSection").style.display = "none";
+  ws.style.display = "block";
+
+  if (ROLE && ROLE.code === "operator_112") await renderOperator(trId);
+  else if (ROLE && ROLE.code === "dispatcher_dds") await renderDispatcher(trId, "dds");
+  else if (ROLE && ROLE.code === "service_dispatcher") await renderDispatcher(trId, "service");
+  else await renderChooseRole(trId);
+}
+
+/* ---------- выбор роли вручную (если не определена) ---------- */
+function renderChooseRole(trId) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>Выберите режим (учебная роль не определена для этого пользователя)</h2>" +
+    "<div class='filter-bar'>" +
+    "<button class='btn' onclick='renderOperator(\"" + trId + "\")'>Оператор-112 (заполнение карточки)</button>" +
+    "<button class='btn' onclick='renderDispatcher(\"" + trId + "\",\"dds\")'>Диспетчер ДДС (окно 36)</button>" +
+    "<button class='btn' onclick='renderDispatcher(\"" + trId + "\",\"service\")'>Диспетчер службы (окно 36)</button>" +
+    "</div>";
+}
+
+/* ============ Оператор-112 (Сценарий 3 ТЗ, окно 17) ============ */
+async function renderOperator(trId) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>Эмулятор АРМ-112 — Оператор-112</h2>" +
+    "<div class='panel'><h3>Шаг 1. Старт сессии</h3>" +
+    "<p>После старта начнут выдаваться учебные задачи (сообщения заявителя), которые нужно принимать и оформлять в карточки.</p>" +
+    "<button class='btn ok' onclick='startSession()'>Начать сессию</button></div>" +
+    "<div id='sessionBox'></div>";
+
+  try {
+    const s = await act(() => api("/sessions/start", { method: "POST", json: { training_id: trId } }));
+    SESSION_ID = s.id;
+    await sessionStarted(s);
+  } catch (e) {
+    /* повторный старт — сессия уже есть, пробуем продолжить по выданной задаче */
+    toast(e.message, "err");
+  }
+}
+
+async function startSession() {
+  /* используется только если автозапуск не сработал */
+  const trId = document.getElementById("trSel").value;
+  try {
+    const s = await act(() => api("/sessions/start", { method: "POST", json: { training_id: trId } }));
+    SESSION_ID = s.id;
+    await sessionStarted(s);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+async function sessionStarted(s) {
+  const box = document.getElementById("sessionBox");
+  box.innerHTML = "<div class='panel'>Сессия: <span class='mono'>" + esc(s.id) + "</span> · статус: <b>" + statusLabel(s.status) + "</b></div>";
+  await loadNextTask();
+}
+
+async function loadNextTask() {
+  if (!SESSION_ID) return;
+  const task = await act(() => api("/sessions/" + SESSION_ID + "/next-task"));
+  CURRENT_TASK = task;
+  CARD = null;
+  const box = document.getElementById("sessionBox");
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel'><h3>Входящий вызов</h3>" +
+    "<p><b>АОН:</b> " + esc(task.aon_phone || "не определён") + " · <b>Заявитель:</b> " + esc(task.caller_full_name || "—") + "</p>" +
+    "<p class='muted'><b>Сложность:</b> " + task.difficulty + "</p>" +
+    "<p><b>Сообщение заявителя:</b><br><i>" + esc(task.caller_message) + "</i></p>" +
+    (task.address && Object.keys(task.address).length ? "<details><summary>Адрес (исходные данные)</summary><pre class='json'>" + esc(JSON.stringify(task.address, null, 2)) + "</pre></details>" : "") +
+    "<button class='btn ok' onclick='acceptCall()'>📞 Принять вызов</button></div>");
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+async function acceptCall() {
+  if (!CURRENT_TASK) return;
+  const card = await act(async () => {
+    return api("/sessions/" + SESSION_ID + "/accept-call", { method: "POST", json: { study_task_id: CURRENT_TASK.study_task_id } });
+  }, "Вызов принят, создана карточка");
+  CARD = card;
+  await renderCardForm();
+}
+
+/* ============ Окно 14 ТЗ — карточка происшествия ============
+ * Форма карточки повторяет поля учебного задания (tasks.html, окно 8),
+ * кроме сложности и служебных полей: заявитель, адрес, классификация,
+ * службы, доп. поля. Из учебного задания в карточку автоматически
+ * попадает только сообщение заявителя; остальное обучающийся
+ * заполняет сам. Собранный content сравнивается с эталоном. */
+
+const ADDR_FIELDS = [
+  ["country", "Страна"], ["federal_subject", "Субъект"], ["locality", "Населённый пункт"],
+  ["address_object", "Объект"], ["administrative_district", "Округ"], ["district", "Район"],
+  ["street", "Улица"], ["house", "Дом"], ["building", "Корпус"], ["structure", "Строение"],
+  ["apartment", "Квартира"], ["entrance", "Подъезд"], ["floor", "Этаж"],
+  ["intercom_code", "Код"], ["descriptive_address", "Описательный адрес"],
+];
+const CARD_FLAGS = [
+  ["has_victims", "Пострадавшие"],
+  ["no_scene_refusal", "Нет на месте / отказ от скорой"],
+  ["no_access", "Нет доступа / заблаговременно"],
+  ["no_contact", "Нет контакта"],
+  ["call_dropped", "Срыв звонка"],
+];
+
+/* Значение поля карточки: сначала сохранённый черновик (CARD.content),
+ * затем исходные данные вызова (fallback). */
+function cardInitVal(key, fallback) {
+  const c = (CARD && CARD.content) || {};
+  return (c[key] !== undefined && c[key] !== null) ? c[key] : (fallback === undefined ? "" : fallback);
+}
+
+/* HTML одного доп. поля по схеме задачи (text|number|boolean|select|date) */
+function extraFieldHtml(r) {
+  const id = "f_extra_" + r.code;
+  const saved = cardInitVal("extra." + r.code);
+  const req = r.required ? " *" : "";
+  if (r.field_type === "boolean") {
+    return "<label class='checkline'><input type='checkbox' id='" + id + "'" + (saved === true || saved === "true" ? " checked" : "") + "> " + esc(r.label) + req + "</label>";
+  }
+  if (r.field_type === "select") {
+    const opts = (r.options || []).map(o =>
+      "<option value='" + esc(String(o)) + "'" + (String(saved) === String(o) ? " selected" : "") + ">" + esc(String(o)) + "</option>").join("");
+    return "<label class='field'>" + esc(r.label) + req + "<select id='" + id + "'><option value=''>— не выбрано —</option>" + opts + "</select></label>";
+  }
+  const t = r.field_type === "number" ? "number step='any'" : (r.field_type === "date" ? "date" : "text");
+  return "<label class='field'>" + esc(r.label) + req + "<input type='" + t + "' id='" + id + "' value='" + esc(saved ?? "") + "'></label>";
+}
+
+function extraFieldsHtml(schema) {
+  return (schema || []).length
+    ? schema.map(extraFieldHtml).join("")
+    : "<div class='note'>Дополнительные поля у задачи отсутствуют.</div>";
+}
+
+async function renderCardForm() {
+  const box = document.getElementById("sessionBox");
+  const t = CURRENT_TASK || {};
+
+  const savedSvcs = (CARD && CARD.content && Array.isArray(CARD.content.services)) ? CARD.content.services : [];
+  const svcOpts = DICTS.services.map(s => "<option value='" + esc(s.id) + "'" + (CARD && CARD.main_service_id === s.id ? " selected" : "") + ">" + esc(s.code + " · " + s.name) + "</option>").join("");
+  const appOpts = DICTS.applicantStatuses.map(s => "<option value='" + esc(s.id) + "'>" + esc(s.name) + "</option>").join("");
+  const svcMulti = DICTS.services.map(s =>
+    "<label class='checkline'><input type='checkbox' class='svc-cb' value='" + esc(s.id) + "'" + (savedSvcs.includes(s.name) ? " checked" : "") + "> " + esc(s.code + " · " + s.name) + "</label>").join("");
+  const flags = CARD_FLAGS.map(([k, label]) =>
+    "<label class='checkline'><input type='checkbox' id='f_" + k + "'" + (cardInitVal(k) === true || cardInitVal(k) === "true" ? " checked" : "") + "> " + label + "</label>").join("");
+  const addrRows = ADDR_FIELDS.map(([k, label]) =>
+    "<label class='field'>" + label + "<input type='text' id='f_" + k + "' value='" + esc(cardInitVal(k)) + "'></label>").join("");
+
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel' id='cardPanel'><h3>Карточка происшествия (окно 14)</h3>" +
+    "<div class='note'>Заполните карточку максимально близко к учебному заданию. Данные входящего вызова уже подставлены; классификацию, службы и доп. поля определите самостоятельно. Эталон скрыт до отправки.</div>" +
+    "<div class='row'>" +
+      "<div class='panel'><h3>Заявитель и вызов</h3>" +
+        "<label class='field'>Сообщение заявителя *<textarea id='f_caller_message'>" + esc(cardInitVal("caller_message", t.caller_message)) + "</textarea></label>" +
+        "<div class='row'>" +
+          "<label class='field'>Телефон (АОН)<input type='text' id='f_aon_phone' value=''></label>" +
+          "<label class='field'>Телефон (предоставленный)<input type='text' id='f_provided_phone' value=''></label>" +
+          "<label class='field'>Телефон (на место)<input type='text' id='f_scene_phone' value=''></label>" +
+        "</div>" +
+        "<label class='field'>ФИО заявителя<input type='text' id='f_caller_full_name' value=''></label>" +
+        "<label class='field'>Статус заявителя<select id='f_applicant_status_id'><option value=''>— не выбран —</option>" + appOpts + "</select></label>" +
+        "<label class='field'>Описание со слов заявителя<textarea id='f_incident_description'></textarea></label>" +
+        "<h3 style='margin-top:12px'>Флаги</h3>" + flags +
+      "</div>" +
+      "<div class='panel'><h3>Адрес</h3>" +
+        "<div class='row'>" + addrRows +
+          "<label class='field'>Широта<input type='number' step='any' id='f_latitude' value=''></label>" +
+          "<label class='field'>Долгота<input type='number' step='any' id='f_longitude' value=''></label>" +
+        "</div>" +
+        "<h3 style='margin-top:12px'>Классификация (код Г + признаки 1–3)</h3>" +
+        "<div class='row'>" +
+          "<label class='field'>Группа происшествий (Г)<select id='f_event_type_id' onchange='onClassChange(\"type\")'><option value=''>— не выбрана —</option></select></label>" +
+          "<label class='field'>Признак 1<select id='f_event_feature_1_id' onchange='onClassChange(\"f1\")'><option value=''>— не выбран —</option></select></label>" +
+          "<label class='field'>Признак 2<select id='f_event_feature_2_id' onchange='onClassChange(\"f2\")'><option value=''>— не выбран —</option></select></label>" +
+          "<label class='field'>Признак 3<select id='f_event_feature_3_id' onchange='onClassChange(\"f3\")'><option value=''>— не выбран —</option></select></label>" +
+        "</div>" +
+        "<div id='clsInfo' class='note'></div>" +
+        "<label class='field'>Тип происшествия (класс события)<select id='f_event_class_id' onchange='updateClsInfo()'><option value=''>— не выбран —</option></select></label>" +
+        "<label class='field'>Основная служба<select id='f_main_service_id'><option value=''>— не выбрана —</option>" + svcOpts + "</select></label>" +
+        "<h3 style='margin-top:12px'>Привлекаемые службы</h3>" + svcMulti +
+      "</div>" +
+      "<div class='panel'><h3>Дополнительные поля</h3>" +
+        "<div id='extraBox'>" + extraFieldsHtml(t.extra_field_schemas) + "</div>" +
+        "<p class='muted'>АОН: <b>" + esc(t.aon_phone || "—") + "</b> · предоставленный: <b>" + esc(t.provided_phone || "—") + "</b> · на место: <b>" + esc(t.scene_phone || "—") + "</b>.</p>" +
+        "<div class='form-actions'>" +
+          "<button class='btn ok' onclick='submitCard()'>Сохранить и отправить (сверить с эталоном)</button>" +
+          "<button class='btn' onclick='aiEvalCard()'>🤖 Оценка ИИ</button>" +
+        "</div>" +
+      "</div>" +
+    "</div></div>" +
+    "<div class='panel' style='margin-top:14px'><h3>Диалог с заявителем (ИИ)</h3>" +
+      "<div class='note'>Ведите разговор как оператор-112: уточняйте адрес, происшествие, пострадавших. Реплики заявителя соответствуют содержанию задачи и уровню сложности.</div>" +
+      "<div class='chat' id='callerChat'><div class='msg sys'>Звонок принят. Представьтесь и уточните, что случилось.</div></div>" +
+      "<div class='row' style='align-items:center'>" +
+        "<input type='text' id='callerQ' placeholder='Ваш вопрос заявителю…' style='flex:1 1 100%'>" +
+        "<button class='mic-btn' id='callerMic' title='Голосовой ввод' onclick='callerListen()'>🎤</button>" +
+        "<button class='btn' onclick='callerAsk()'>Спросить</button>" +
+      "</div>" +
+      "<p class='turns-counter' id='callerTurns'>Ходов: 0</p>" +
+    "</div>");
+  rebuildCascade();
+  updateClsInfo();
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+/* ---------- классификация: код Г + признаки 1–3 (каскадные селекты) ---------- */
+function optEl(id, label, selectedId) {
+  return "<option value='" + esc(id) + "'" + (String(id) === String(selectedId) ? " selected" : "") + ">" + esc(label) + "</option>";
+}
+
+function rebuildCascade() {
+  const et = document.getElementById("f_event_type_id");
+  const f1 = document.getElementById("f_event_feature_1_id");
+  const f2 = document.getElementById("f_event_feature_2_id");
+  const f3 = document.getElementById("f_event_feature_3_id");
+  const ec = document.getElementById("f_event_class_id");
+  if (!et || !f1 || !f2 || !f3 || !ec) return;
+
+  const etVal = et.value, f1Val = f1.value, f2Val = f2.value, f3Val = f3.value, ecVal = ec.value;
+
+  et.innerHTML = "<option value=''>— не выбрана —</option>" +
+    (DICTS.eventTypes || []).map(x => optEl(x.id, "Г" + x.code + " · " + x.name, etVal)).join("");
+  const f1s = (DICTS.features1 || []).filter(x => x.event_type_id === etVal);
+  f1.innerHTML = "<option value=''>— не выбран —</option>" +
+    f1s.map(x => optEl(x.id, x.code + " · " + (x.operator_label || x.statistics_name), f1Val)).join("");
+  const f2s = (DICTS.features2 || []).filter(x => x.event_feature_1_id === f1Val);
+  f2.innerHTML = "<option value=''>— не выбран —</option>" +
+    f2s.map(x => optEl(x.id, x.code + " · " + x.name, f2Val)).join("");
+  const f3s = (DICTS.features3 || []).filter(x => x.event_feature_2_id === f2Val);
+  f3.innerHTML = "<option value=''>— не выбран —</option>" +
+    f3s.map(x => optEl(x.id, x.code + " · " + x.name, f3Val)).join("");
+
+  const classes = (DICTS.eventGroups || []).filter(c =>
+    c.event_type_id === etVal && c.event_feature_1_id === f1Val &&
+    c.event_feature_2_id === f2Val && c.event_feature_3_id === f3Val);
+  ec.innerHTML = "<option value=''>— не выбран —</option>" +
+    classes.map(x => optEl(x.id, x.event_number + " · " + x.name, ecVal)).join("");
+  if (!ecVal && classes.length === 1) ec.value = classes[0].id;
+  else ec.value = ecVal;
+}
+
+function onClassChange(level) {
+  const ids = ["f_event_feature_1_id", "f_event_feature_2_id", "f_event_feature_3_id", "f_event_class_id"];
+  const idx = { type: 0, f1: 1, f2: 2, f3: 3 }[level] ?? 0;
+  for (let i = idx; i < ids.length; i++) document.getElementById(ids[i]).value = "";
+  rebuildCascade();
+  updateClsInfo();
+}
+
+function updateClsInfo() {
+  const box = document.getElementById("clsInfo");
+  if (!box) return;
+  const et = (DICTS.eventTypes || []).find(x => x.id === document.getElementById("f_event_type_id").value);
+  const f1 = (DICTS.features1 || []).find(x => x.id === document.getElementById("f_event_feature_1_id").value);
+  const f2 = (DICTS.features2 || []).find(x => x.id === document.getElementById("f_event_feature_2_id").value);
+  const f3 = (DICTS.features3 || []).find(x => x.id === document.getElementById("f_event_feature_3_id").value);
+  const ec = (DICTS.eventGroups || []).find(x => x.id === document.getElementById("f_event_class_id").value);
+  const parts = [];
+  if (et) parts.push("<b>Группа:</b> Г" + et.code + " «" + esc(et.name) + "»");
+  if (f1) parts.push("<b>Признак 1:</b> " + esc(f1.statistics_name || f1.operator_label));
+  if (f2) parts.push("<b>Признак 2:</b> " + esc(f2.name));
+  if (f3) parts.push("<b>Признак 3:</b> " + esc(f3.name));
+  if (ec) parts.push("<b>Класс:</b> №" + ec.event_number + " «" + esc(ec.name) + "»");
+  box.innerHTML = parts.length ? parts.join(" · ") : "Выберите группу и признаки 1–3 — класс определится автоматически.";
+}
+
+/* Сборка content карточки в структуре эталона (как fillEtalonFromTask в tasks.html):
+ * классификация текстом, заявитель, адрес, службы названиями, extra.<code>. */
+function collectCardContent() {
+  const c = {};
+  const pick = id => { const el = document.getElementById(id); return el ? (el.value || "").trim() : ""; };
+
+  const etObj = (DICTS.eventTypes || []).find(x => x.id === document.getElementById("f_event_type_id").value);
+  const f1Obj = (DICTS.features1 || []).find(x => x.id === document.getElementById("f_event_feature_1_id").value);
+  const f2Obj = (DICTS.features2 || []).find(x => x.id === document.getElementById("f_event_feature_2_id").value);
+  const f3Obj = (DICTS.features3 || []).find(x => x.id === document.getElementById("f_event_feature_3_id").value);
+  const ecObj = (DICTS.eventGroups || []).find(x => x.id === document.getElementById("f_event_class_id").value);
+  if (etObj) c.event_type = "Г" + etObj.code + " " + etObj.name;
+  if (f1Obj) c.feature_1 = f1Obj.statistics_name || f1Obj.operator_label;
+  if (f2Obj) c.feature_2 = f2Obj.name;
+  if (f3Obj) c.feature_3 = f3Obj.name;
+  if (ecObj) c.event_class = "№" + ecObj.event_number + " " + ecObj.name;
+
+  c.caller_message = pick("f_caller_message");
+  c.aon_phone = pick("f_aon_phone");
+  c.provided_phone = pick("f_provided_phone");
+  c.scene_phone = pick("f_scene_phone");
+  c.caller_full_name = pick("f_caller_full_name");
+  c.incident_description = pick("f_incident_description");
+  ADDR_FIELDS.forEach(([k]) => { const v = pick("f_" + k); if (v) c[k] = v; });
+  const lat = pick("f_latitude"), lng = pick("f_longitude");
+  if (lat) c.latitude = Number(lat);
+  if (lng) c.longitude = Number(lng);
+
+  const svcIds = Array.from(document.querySelectorAll("#cardPanel input.svc-cb:checked")).map(i => i.value);
+  if (svcIds.length) c.services = svcIds.map(id => { const s = (DICTS.services || []).find(x => x.id === id); return s ? s.name : id; });
+
+  (CURRENT_TASK.extra_field_schemas || []).forEach(r => {
+    const el = document.getElementById("f_extra_" + r.code);
+    if (!el) return;
+    if (r.field_type === "boolean") c["extra." + r.code] = !!el.checked;
+    else if (el.value.trim() !== "") c["extra." + r.code] = r.field_type === "number" ? Number(el.value) : el.value.trim();
+  });
+  return c;
+}
+
+function lockCardForm() {
+  document.querySelectorAll("#cardPanel input, #cardPanel select, #cardPanel textarea, #cardPanel button")
+    .forEach(el => { el.disabled = true; });
+}
+
+async function saveDraft() {
+  if (!CARD) return;
+  CARD = await act(() => api("/cards/" + CARD.id + "/content", { method: "PATCH", json: { content: collectCardContent() } }), "Черновик сохранён");
+}
+
+async function submitCard() {
+  if (!CARD) return;
+  const card = await act(() => api("/cards/" + CARD.id + "/submit", { method: "POST", json: { content: collectCardContent() } }), "Карточка отправлена");
+  CARD = card;
+  lockCardForm();
+  const panel = document.getElementById("cardPanel");
+  panel.insertAdjacentHTML("beforeend",
+    "<h3>Результат машинной оценки</h3>" +
+    "<p><b>Статус:</b> " + statusLabel(card.status) + " · <b>Машинная оценка:</b> " + fmtNum(card.machine_score) + " %</p>" +
+    (card.final_score !== null && card.final_score !== undefined ? "<p><b>Итоговая оценка преподавателя:</b> " + fmtNum(card.final_score) + " %</p>" : "") +
+    "<button class='btn' onclick='loadNextTask()'>Следующая задача (или завершение)</button>");
+}
+
+/* ============ Диспетчеры (Сценарий 4 ТЗ, окно 36) ============ */
+async function renderDispatcher(trId, kind) {
+  const ws = document.getElementById("workspace");
+  ws.innerHTML = "<h2>" + (kind === "dds" ? "Окно 36 — Диспетчер ДДС: контроль карточек" : "Окно 36 — Диспетчер службы: отработка карточек") + "</h2>" +
+    "<div id='dispBox'></div>";
+
+  const cards = await act(() => api("/dispatcher/cards?training_id=" + trId));
+
+  const cols = [
+    { key: "sequence_number", label: "№" },
+    { key: "status", label: "Статус", fmt: v => "<span class='status s-" + esc(v) + "'>" + statusLabel(v) + "</span>" },
+    { key: "study_task_id", label: "Задача", fmt: trunc },
+    { key: "machine_score", label: "Машинная оценка", fmt: fmtNum },
+    { key: "created_at", label: "Создана", fmt: fmtDate },
+    { key: "submitted_at", label: "Отправлена", fmt: fmtDate },
+    { key: "_act", label: "Действие", fmt: (v, r) => {
+        let b = "<button class='btn ghost' onclick='showCardContent(\"" + r.id + "\")'>Содержимое</button>";
+        if (kind === "dds") {
+          if (r.status === "submitted") b += "<button class='btn' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"accept\")'>Принять</button>";
+          if (r.status === "accepted") b += "<button class='btn' style='margin-left:6px' onclick='routeCard(\"" + r.id + "\")'>Направить в службу</button>";
+        }
+        if (kind === "service") {
+          if (r.status === "routed") b += "<button class='btn ok' style='margin-left:6px' onclick='cardAction(\"" + r.id + "\",\"process\")'>Отработать</button>";
+          b += "<button class='btn ghost' style='margin-left:6px' onclick='openServiceCall(\"" + r.id + "\")'>📞 Позвонить в службу</button>";
+        }
+        return b;
+      } },
+  ];
+  const box = document.getElementById("dispBox");
+  box.appendChild(tableEl(cols, cards, "Карточек в работе нет. Оператор-112 ещё не заполнил ни одной карточки."));
+
+  if (kind === "service") {
+    box.insertAdjacentHTML("beforeend",
+      "<div class='panel' style='margin-top:14px'><h3>Исходящий звонок в службу (ИИ)</h3>" +
+      "<div class='note'>Диспетчер ДДС звонит в службу по выбранной карточке: уточните прибытие, силы и средства. Параметр «режим» имитирует состояние канала связи.</div>" +
+      "<div class='chat' id='svcChat'><div class='msg sys'>Выберите карточку кнопкой «Позвонить в службу».</div></div>" +
+      "<div class='row' style='align-items:center'>" +
+        "<label class='field' style='flex:0 0 auto; margin:0'>Канал <select id='svcMode'><option value='clear'>чистый</option><option value='partial'>помехи</option><option value='drop'>обрыв</option><option value='hangup'>сброс</option></select></label>" +
+        "<input type='text' id='svcQ' placeholder='Вопрос службе…' style='flex:1 1 100%'>" +
+        "<button class='btn' onclick='serviceAsk()'>Позвонить</button>" +
+      "</div>" +
+      "<p class='turns-counter' id='svcTurns'>Ходов: 0</p></div>");
+  }
+}
+
+/* ---------- ИИ: оценка карточки (запись ai_score / ai_eval_details) ---------- */
+async function aiEvalCard() {
+  if (!CARD) { toast("Нет активной карточки", "err"); return; }
+  const card = await act(() => aiEval(CARD.id, { history: CALLER_TURNS || [], hints_used: 0 }));
+  CARD = card;
+  const det = card.ai_eval_details || {};
+  const panel = document.getElementById("cardPanel");
+  panel.insertAdjacentHTML("beforeend",
+    "<div class='ai-preview ok'><b>🤖 Предварительная оценка ИИ:</b> " + fmtNum(card.ai_score) + " %" +
+    (det.summary ? "<br>" + esc(det.summary) : "") +
+    (det.score !== undefined && det.score !== null ? "<br>Оценка модели: " + esc(String(det.score)) : "") +
+    "</div>");
+  toast("Оценка ИИ сохранена: " + fmtNum(card.ai_score) + " %", "ok");
+}
+
+/* ---------- ИИ: диалог с заявителем (Сценарий 3 ТЗ, окно 17) ---------- */
+let CALLER_TURNS = [];
+
+function callerAdd(role, text) {
+  const chat = document.getElementById("callerChat");
+  if (!chat) return;
+  chat.insertAdjacentHTML("beforeend",
+    "<div class='msg " + role + "'><span class='who'>" + (role === "me" ? "Вы (оператор-112)" : "Заявитель") + "</span>" + esc(text) + "</div>");
+  chat.scrollTop = chat.scrollHeight;
+  const t = document.getElementById("callerTurns");
+  if (t) t.textContent = "Ходов: " + CALLER_TURNS.length;
+}
+
+async function callerAsk() {
+  if (!CARD) { toast("Сначала примите вызов — карточка ещё не создана", "err"); return; }
+  const q = document.getElementById("callerQ").value.trim();
+  if (!q) { toast("Введите вопрос заявителю", "err"); return; }
+  callerAdd("me", q);
+  CALLER_TURNS.push({ role: "operator", content: q });
+  busy(true);
+  try {
+    const r = await aiCallerReplyCard(CARD.id, { question: q, turns: CALLER_TURNS });
+    CALLER_TURNS.push({ role: "caller", content: r.reply });
+    callerAdd("caller", r.reply + (r.callback_disclosed ? "\n\n[заявитель оставил номер для связи]" : ""));
+    if (speechSupported()) speak(r.reply);
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+  document.getElementById("callerQ").value = "";
+}
+
+function callerListen() {
+  const btn = document.getElementById("callerMic");
+  if (!btn) return;
+  if (!recognitionSupported()) { toast("Голосовой ввод не поддерживается этим браузером (нужен Chrome/Edge)", "info"); return; }
+  if (btn.classList.contains("listening")) { btn.classList.remove("listening"); return; }
+  btn.classList.add("listening");
+  listen(t => {
+    const inp = document.getElementById("callerQ");
+    if (inp) inp.value = t;
+    btn.classList.remove("listening");
+    toast("Распознано: «" + t + "»", "info");
+  }, () => btn.classList.remove("listening"));
+}
+
+/* ---------- ИИ: исходящий звонок в службу ДДС (Сценарий 4 ТЗ) ---------- */
+let ACTIVE_CARD = null;
+let SVC_TURNS = [];
+
+function svcAdd(role, text) {
+  const chat = document.getElementById("svcChat");
+  if (!chat) return;
+  chat.insertAdjacentHTML("beforeend",
+    "<div class='msg " + role + "'><span class='who'>" + (role === "me" ? "Вы (ДДС)" : "Диспетчер службы") + "</span>" + esc(text) + "</div>");
+  chat.scrollTop = chat.scrollHeight;
+  const t = document.getElementById("svcTurns");
+  if (t) t.textContent = "Ходов: " + SVC_TURNS.length;
+}
+
+async function openServiceCall(id) {
+  ACTIVE_CARD = id;
+  SVC_TURNS = [];
+  const chat = document.getElementById("svcChat");
+  if (chat) chat.innerHTML = "<div class='msg sys'>Диспетчер службы на линии · карточка <span class='mono'>" + esc(String(id).slice(0, 8)) + "…</span></div>";
+  toast("Звонок в службу по карточке начат", "info");
+}
+
+async function serviceAsk() {
+  if (!ACTIVE_CARD) { toast("Выберите карточку кнопкой «Позвонить в службу»", "err"); return; }
+  const q = document.getElementById("svcQ").value.trim();
+  if (!q) { toast("Введите вопрос службе", "err"); return; }
+  const mode = document.getElementById("svcMode").value;
+  svcAdd("me", q);
+  SVC_TURNS.push({ role: "dds", content: q });
+  busy(true);
+  try {
+    const r = await aiServiceReply(ACTIVE_CARD, { question: q, history: SVC_TURNS, mode, attempt: SVC_TURNS.length });
+    SVC_TURNS.push({ role: "service", content: r.reply });
+    const shown = r.delivered === "yes" ? r.reply
+      : (r.delivered === "partial" ? r.reply + " [связь с помехами]" : "— связь прервана (сброс) —");
+    svcAdd("caller", shown);
+    if (speechSupported()) speak(r.reply);
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+  document.getElementById("svcQ").value = "";
+}
+
+async function showCardContent(id) {
+  const c = await act(() => api("/cards/" + id));
+  toast("", "info");
+  const box = document.getElementById("dispBox");
+  box.insertAdjacentHTML("beforeend",
+    "<div class='panel'><h3>Карточка " + esc(id) + "</h3>" +
+    "<pre class='json'>" + esc(JSON.stringify(c.content, null, 2)) + "</pre>" +
+    "<p class='muted'>Статус: " + statusLabel(c.status) + " · машинная оценка: " + fmtNum(c.machine_score) + " · итоговая: " + fmtNum(c.final_score) + "</p></div>");
+  box.lastElementChild.scrollIntoView({ behavior: "smooth" });
+}
+
+async function cardAction(id, action) {
+  const label = { accept: "Карточка принята", process: "Карточка отработана" }[action];
+  await act(async () => {
+    await api("/cards/" + id + "/" + action, { method: "POST" });
+  }, label);
+  await renderDispatcher(document.getElementById("trSel").value, ROLE && ROLE.code === "dispatcher_dds" ? "dds" : "service");
+}
+
+async function routeCard(id) {
+  const svc = DICTS.services;
+  if (!svc.length) { toast("Служб нет в справочнике", "err"); return; }
+  const choice = prompt("ID службы для направления:\n" + svc.map(s => s.id + " — " + s.name).join("\n") + "\n\nВведите ID:");
+  if (!choice) return;
+  await act(async () => {
+    await api("/cards/" + id + "/route", { method: "POST", json: { service_id: choice } });
+  }, "Карточка направлена в службу");
+  await renderDispatcher(document.getElementById("trSel").value, "dds");
+}
+
+init().catch(e => {
+  toast(e.message, "err");
+  if (!getToken()) setTimeout(() => location.href = "index.html", 900);
+});
+</script>
+</body>
+</html>

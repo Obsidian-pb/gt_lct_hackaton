@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Система — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <h1>Системное администрирование</h1>
+  <p class="sub">Окна 19–27 ТЗ: мониторинг (19), настройки БД (20), безопасность/RBAC (21), резервное копирование (22), журналирование (23–24), статистика (25), аудит (26), обновление ПО (27).</p>
+
+  <div class="filter-bar">
+    <button class="btn ghost" onclick="showTab('health')">Мониторинг (19)</button>
+    <button class="btn ghost" onclick="showTab('settings')">Настройки (20–23, 30)</button>
+    <button class="btn ghost" onclick="showTab('audit')">Аудит (26)</button>
+    <button class="btn ghost" onclick="showTab('info')">Прочие окна</button>
+  </div>
+
+  <section id="content"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+let tab = "health";
+
+async function showTab(name) {
+  tab = name;
+  const sec = document.getElementById("content");
+  try {
+    if (name === "health") await renderHealth(sec);
+    else if (name === "settings") await renderSettings(sec);
+    else if (name === "audit") await renderAudit(sec);
+    else if (name === "info") renderInfo(sec);
+  } catch (e) { showError(sec, e); }
+}
+
+async function renderHealth(sec) {
+  sec.innerHTML = "<h2>Панель мониторинга системы (окно 19)</h2>";
+  try {
+    const h = await act(() => api("/system/health"));
+    sec.appendChild(cardEl("Состояние компонентов",
+      (() => {
+        const d = document.createElement("div");
+        d.innerHTML =
+          "<p>API: <b>" + (h.status === "ok" ? "✓ работает" : "✗ сбой") + "</b></p>" +
+          "<p>База данных PostgreSQL: <b>" + (h.database === "up" ? "✓ подключена" : "✗ недоступна") + "</b></p>" +
+          "<p class='muted'>Реальные метрики нагрузки (CPU/RAM/диск) будут добавлены при интеграции системного мониторинга.</p>";
+        return d;
+      })()
+    ));
+  } catch (e) { showError(sec, e); }
+
+  /* Мониторинг ИИ (пункт 7 плана №2): статус ИИ-микросервиса и провайдера */
+  const aiCard = cardEl("ИИ-микросервис (окно 30 — параметры ИИ)", document.createElement("div"));
+  sec.appendChild(aiCard);
+  try {
+    const st = await act(() => aiStatus());
+    const dot = st.state === "ok" ? "ok" : (st.state === "degraded" ? "warn" : "err");
+    aiCard.firstElementChild.insertAdjacentHTML("beforeend",
+      "<div class='ai-status'>" +
+        "<span class='dot " + dot + "'></span>" +
+        "<b>" + esc(st.state === "ok" ? "ИИ доступен" : (st.state || "недоступен")) + "</b>" +
+        (st.provider ? "<span class='tag'>" + esc(st.provider) + "</span>" : "") +
+        (st.model && st.model !== "auto" ? "<span class='tag'>модель: " + esc(st.model) + "</span>" : "") +
+        (st.model_selected ? "<span class='tag'>модель подобрана</span>" : "") +
+        (st.scope_detected ? "<span class='tag'>scope определён</span>" : "") +
+      "</div>" +
+      "<p class='muted' style='margin-top:8px'>" + esc(st.message || "") + "</p>" +
+      "<p class='muted'>Провайдер и ключ хранятся в ai_service/.env; backend_new обращается к микросервису по HTTP с Bearer AI_SERVICE_TOKEN.</p>");
+  } catch (e) {
+    aiCard.firstElementChild.insertAdjacentHTML("beforeend",
+      "<div class='ai-status'><span class='dot err'></span><b>ИИ недоступен</b></div>" +
+      "<p class='muted'>" + esc(e.message) + "</p>");
+  }
+}
+
+async function renderSettings(sec) {
+  sec.innerHTML = "<h2>Системные настройки (окна 20–23, 30)</h2>" +
+    "<div class='note'>Key-value настройки: параметры ИИ (30), конфигурация БД/резервирования (20, 22), журналирование (23), безопасность/RBAC (21). Редактирование JSON-значения по ключу.</div>";
+  const items = await act(() => api("/system/settings"));
+  const box = document.createElement("div");
+  box.appendChild(tableEl([
+    { key: "key", label: "Ключ" },
+    { key: "description", label: "Описание" },
+    { key: "_v", label: "Значение (JSON)", fmt: (v, r) => "<pre class='json' style='max-height:120px'>" + esc(JSON.stringify(r.value, null, 2)) + "</pre>" },
+  ], items, "Настроек пока нет"));
+
+  box.insertAdjacentHTML("beforeend",
+    "<h3>Добавить / изменить настройку</h3><div class='panel'>" +
+    "<label class='field'>Ключ<input type='text' id='s_key' placeholder='ai.parameters' style='font-family:Consolas'></label>" +
+    "<label class='field'>Описание<input type='text' id='s_desc'></label>" +
+    "<label class='field'>Значение (JSON)<textarea class='code' id='s_value'>{\n  \"model\": \"gigachat\",\n  \"temperature\": 0.65\n}</textarea></label>" +
+    "<div class='form-actions'><button class='btn ok' onclick='saveSetting()'>Сохранить настройку</button></div></div>");
+  sec.appendChild(box);
+}
+
+async function saveSetting() {
+  const key = document.getElementById("s_key").value.trim();
+  let value;
+  try { value = JSON.parse(document.getElementById("s_value").value || "{}"); }
+  catch (e) { toast("Значение — невалидный JSON", "err"); return; }
+  if (!key) { toast("Укажите ключ", "err"); return; }
+  await act(async () => {
+    await api("/system/settings/" + encodeURIComponent(key), {
+      method: "PUT",
+      json: { value, description: document.getElementById("s_desc").value.trim() || null },
+    });
+  }, "Настройка сохранена");
+  await showTab("settings");
+}
+
+async function renderAudit(sec) {
+  sec.innerHTML = "<h2>Журнал аудита безопасности (окно 26)</h2>";
+  const items = await act(() => api("/audit?limit=100"));
+  sec.appendChild(tableEl([
+    { key: "created_at", label: "Время", fmt: fmtDate },
+    { key: "actor_id", label: "Пользователь", fmt: trunc },
+    { key: "action", label: "Действие" },
+    { key: "entity_type", label: "Сущность" },
+    { key: "entity_id", label: "ID сущности", fmt: trunc },
+    { key: "payload", label: "Данные", fmt: v => "<details><summary>показать</summary><pre class='json'>" + esc(JSON.stringify(v, null, 2)) + "</pre></details>" },
+  ], items, "Записей аудита пока нет"));
+}
+
+function renderInfo(sec) {
+  sec.innerHTML = "<h2>Прочие системные окна</h2><div class='grid'>" +
+    [
+      ["20 · Конфигурация БД", "Настройка подключения PostgreSQL и параметров резервирования. Хранится в системных настройках (вкладка «Настройки»)."],
+      ["21 · Безопасность и RBAC", "Политики доступа по принципу минимальных привилегий реализованы на бэкенде зависимостями require_roles."],
+      ["22 · Резервное копирование", "Реализовано в составе окна 20 (по ТЗ). Ручные копии и расписание — задача системного модуля."],
+      ["23–24 · Журналирование и журналы", "Параметры хранения логов — системные настройки; журнал событий — вкладка «Аудит»."],
+      ["25 · Статистика использования", "Анализ загрузки и отчёты об ошибках — дополнительный системный модуль."],
+      ["27 · Обновление ПО", "Пакетное обновление учебного комплекса — вне рамок прототипа API."],
+    ].map(([t, d]) => "<div class='card'><h3>" + esc(t) + "</h3><p class='sub' style='margin:0'>" + esc(d) + "</p></div>").join("") +
+  "</div>";
+}
+
+async function init() {
+  await renderHeader("system.html");
+  showTab(tab);
+}
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>

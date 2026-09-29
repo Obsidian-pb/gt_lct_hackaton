@@ -1,0 +1,2 @@
+:root{--ui-font:Arial,Helvetica,sans-serif;--ui-bg:#f4f6f8;--ui-panel:#f8fafb;--ui-field:#fff;--ui-line:#d9e0e6;--ui-text:#30383f;--ui-muted:#7b8792;--ui-blue:#1998e5;--ui-blue-soft:#dcecf9;--ui-dark:#22272c;--ui-green:#32975b;--ui-focus:#1479bd;--ui-radius:2px}
+button,a,input,select,textarea{outline-offset:3px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ui-focus)}button:disabled{cursor:not-allowed}

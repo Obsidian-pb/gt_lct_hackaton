@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход — Тренажёр оператора ДДС «Система-112»</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="login-wrap">
+  <div class="login-panel">
+    <h1>Тренажёр оператора ДДС «Система-112»</h1>
+    <p class="sub">Окно 1 ТЗ — вход в систему. Прототип веб-клиента поверх REST API /api/v1.</p>
+
+    <form id="loginForm" onsubmit="return doLogin(event)">
+      <label class="field">Адрес API (бэкенд backend_new)</label>
+      <input type="text" id="apiBase" value="http://127.0.0.1:8000/api/v1">
+      <button class="btn ghost" id="btnPing" type="button" style="margin-top:6px">Проверить доступность</button>
+      <span id="pingResult"></span>
+
+      <label class="field">Логин</label>
+      <input type="text" id="username" autocomplete="username" value="admin">
+
+      <label class="field">Пароль</label>
+      <input type="password" id="password" autocomplete="current-password" value="admin123">
+
+      <div class="form-actions">
+        <button class="btn" id="btnLogin" type="submit">Вход</button>
+      </div>
+    </form>
+
+    <div class="login-meta">
+      Учётная запись по умолчанию (dev): <b>admin</b> / <b>admin123</b>.<br>
+      Интерактивная документация API: <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener">Swagger /docs</a>.
+    </div>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+async function checkServer(show) {
+  const base = document.getElementById("apiBase").value.trim().replace(/\/+$/, "");
+  setApiBase(base);
+  const root = base.replace(/\/api\/v1\/?$/, "");
+  const out = document.getElementById("pingResult");
+  if (show) out.textContent = "Проверка…";
+  try {
+    const r = await fetch(root + "/health", { cache: "no-store" });
+    const data = await r.json().catch(() => ({}));
+    out.textContent = r.ok ? "✓ Сервер доступен (" + (data.status || "ok") + ")" : "✗ Сервер вернул HTTP " + r.status;
+    out.style.color = r.ok ? "#1e7f46" : "#b3362e";
+  } catch (e) {
+    out.textContent = "✗ Сервер недоступен. Запустите бэкенд (uvicorn app.main:app) и повторите.";
+    out.style.color = "#b3362e";
+  }
+}
+document.getElementById("btnPing").onclick = () => checkServer(true);
+async function doLogin(event) {
+  if (event) event.preventDefault();
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  setApiBase(document.getElementById("apiBase").value.trim());
+  if (!getToken()) {
+    await act(async () => {
+      const t = await api("/auth/login", { json: { username, password } });
+      saveTokens(t);
+    }, "Успешный вход");
+  }
+  location.href = "dashboard.html";
+}
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("apiBase").value = getApiBase();
+  if (getToken()) {
+    document.getElementById("btnLogin").textContent = "Войти (токен уже есть)";
+  }
+  checkServer(false);
+});
+</script>
+</body>
+</html>

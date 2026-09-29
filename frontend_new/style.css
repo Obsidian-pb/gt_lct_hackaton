@@ -1,0 +1,276 @@
+/* ============================================================================
+ * Тренажёр оператора ДДС «Система-112» — элементарный веб-клиент (прототип)
+ * Общие стили. Никаких внешних библиотек.
+ * Токены дизайна перенесены из ui/theme.css ИИ-проекта (пункт 5 плана №2):
+ * --ui-* добавлены как переопределяемый слой поверх базовых токенов.
+ * ========================================================================== */
+
+:root {
+  /* базовые токены frontend_new */
+  --bg: #eef2f6;
+  --panel: #ffffff;
+  --line: #d7dfe6;
+  --text: #1c2b36;
+  --muted: #5c7384;
+  --brand: #0f5f7a;
+  --brand-dark: #0b4a61;
+  --accent: #c9a227;
+  --ok: #1e7f46;
+  --bad: #b3362e;
+  --radius: 10px;
+  --shadow: 0 3px 14px rgba(23, 51, 71, 0.10);
+
+  /* токены ui/theme.css ИИ-проекта (перенос, пункт 5 плана №2) */
+  --ui-font: Arial, Helvetica, sans-serif;
+  --ui-bg: #f4f6f8;
+  --ui-panel: #f8fafb;
+  --ui-field: #fff;
+  --ui-line: #d9e0e6;
+  --ui-text: #30383f;
+  --ui-muted: #7b8792;
+  --ui-blue: #1998e5;
+  --ui-blue-soft: #dcecf9;
+  --ui-dark: #22272c;
+  --ui-green: #32975b;
+  --ui-focus: #1479bd;
+  --ui-radius: 2px;
+
+  /* виджеты (карта, баннеры, голос, чат) */
+  --mic-size: 40px;
+}
+
+* { box-sizing: border-box; }
+
+/* Доступность: видимый фокус (правило ui/theme.css) */
+button, a, input, select, textarea { outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--ui-focus); }
+
+body {
+  margin: 0;
+  font: 15px/1.5 "Segoe UI", system-ui, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- шапка и меню ---------- */
+header {
+  background: linear-gradient(90deg, var(--brand-dark), var(--brand));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 20px;
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+header .brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
+#nav { display: flex; flex-wrap: wrap; gap: 4px; }
+#nav a {
+  color: #dcecf3;
+  text-decoration: none;
+  padding: 6px 11px;
+  border-radius: 7px;
+  font-size: 14px;
+}
+#nav a:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+#nav a.active { background: #fff; color: var(--brand-dark); font-weight: 600; }
+#who {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13.5px; color: #eaf4f8;
+}
+#who small { opacity: .75; }
+#who button, button.btn, .btn {
+  background: var(--brand); color: #fff; border: 0; cursor: pointer;
+  font: inherit; padding: 7px 14px; border-radius: 8px;
+}
+#who button { background: rgba(255,255,255,.16); }
+#who button:hover, button.btn:hover, .btn:hover { filter: brightness(1.12); }
+button.btn.danger { background: var(--bad); }
+button.btn.ghost { background: #e2e9ee; color: var(--text); }
+button.btn.ok { background: var(--ok); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------- контейнер ---------- */
+main {
+  max-width: 1240px;
+  margin: 18px auto;
+  padding: 0 16px;
+}
+.page-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 22px; margin: 6px 0 2px; }
+h2 { font-size: 17px; margin: 18px 0 8px; border-bottom: 2px solid var(--line); padding-bottom: 5px; }
+h3 { font-size: 15px; margin: 0 0 10px; }
+.sub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+
+/* ---------- карточки и сетки ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.card, .panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow);
+}
+.panel + .panel { margin-top: 14px; }
+.row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.row > * { flex: 1 1 300px; }
+
+/* ---------- формы ---------- */
+label.field { display: block; margin: 9px 0 2px; font-size: 13px; color: var(--muted); }
+input[type=text], input[type=password], input[type=number], input[type=date],
+input[type=datetime-local], input[type=email], input[type=url], select, textarea {
+  width: 100%; font: inherit; padding: 8px 10px; margin-top: 3px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text);
+}
+textarea { min-height: 74px; font-family: Consolas, monospace; font-size: 13px; resize: vertical; }
+textarea.code { min-height: 120px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #9dc6d6; border-color: var(--brand); }
+.checkline { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 14px; }
+.checkline input { width: auto; }
+.form-actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- таблицы ---------- */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 13.5px; }
+th, td { border-bottom: 1px solid var(--line); padding: 8px 9px; text-align: left; vertical-align: top; }
+th { background: #f4f8fa; color: var(--muted); font-weight: 600; white-space: nowrap; }
+tbody tr:hover { background: #f7fafc; }
+.empty { color: var(--muted); padding: 16px; text-align: center; font-style: italic; }
+
+/* ---------- разное ---------- */
+pre.json {
+  background: #f4f8fa; border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; font-size: 12.5px; overflow: auto; margin: 6px 0; white-space: pre-wrap;
+}
+.tag {
+  display: inline-block; background: #e4eef3; color: var(--brand-dark);
+  border-radius: 20px; padding: 2px 10px; font-size: 12px; margin: 1px 3px 1px 0;
+}
+.tag.big { font-size: 13px; padding: 4px 12px; }
+.status { font-weight: 600; }
+.s-active, .s-submitted { color: var(--ok); }
+.s-prepared { color: #8a6d1a; }
+.s-finished, .s-processed, .s-approved { color: var(--brand-dark); }
+.s-draft { color: var(--muted); }
+.s-accepted, .s-routed { color: #b36b00; }
+
+.err-box {
+  background: #fdeeee; border: 1px solid #eec; color: var(--bad);
+  border-radius: 8px; padding: 12px 14px; margin: 12px 0;
+}
+.note { background: #f3f7f9; border-left: 4px solid var(--brand); padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 13.5px; color: var(--muted); }
+.muted { color: var(--muted); }
+.mono { font-family: Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+details { margin: 8px 0; }
+summary { cursor: pointer; font-weight: 600; color: var(--brand-dark); }
+
+/* фильтры */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #f4f8fa; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 13.5px; }
+.filter-bar select, .filter-bar input { width: auto; min-width: 130px; margin-top: 0; }
+
+/* тосты и busy */
+#toastBox { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 200; max-width: 420px; }
+.toast { padding: 11px 15px; border-radius: 9px; color: #fff; box-shadow: var(--shadow); font-size: 14px; }
+.toast.info { background: var(--brand); }
+.toast.ok { background: var(--ok); }
+.toast.err { background: var(--bad); }
+#busy {
+  position: fixed; inset: 0; background: rgba(28,43,54,.35); z-index: 300;
+  display: none; align-items: center; justify-content: center; color: #fff; font-size: 16px;
+}
+#busy::after { content: "…"; animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* экран входа */
+.login-wrap { max-width: 420px; margin: 10vh auto; }
+.login-panel { background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); padding: 28px; border: 1px solid var(--line); }
+.login-panel h1 { margin-top: 0; font-size: 20px; }
+.login-meta { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+
+@media (max-width: 720px) {
+  header { flex-direction: column; align-items: stretch; }
+  .row > * { flex-basis: 100%; }
+}
+
+/* ============================================================================
+ * Виджеты ИИ-этапа (пункты 5–6 плана №2): диалог, баннер, карта, микрофон.
+ * ========================================================================== */
+
+/* панель ИИ-статуса (system.html, tasks.html) */
+.ai-status { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.ai-status .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.ai-status .dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(30,127,70,.15); }
+.ai-status .dot.warn { background: #c9a227; box-shadow: 0 0 0 4px rgba(201,162,39,.18); }
+.ai-status .dot.err { background: var(--bad); box-shadow: 0 0 0 4px rgba(179,54,46,.15); }
+.ai-status .tag { background: var(--ui-blue-soft); color: var(--ui-focus); }
+
+/* баннер происшествия */
+.banner {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  background: var(--ui-dark); min-height: 120px;
+}
+.banner img { display: block; width: 100%; height: 180px; object-fit: cover; }
+.banner figcaption {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,.72));
+  color: #fff; padding: 22px 14px 8px; font-size: 13px;
+}
+
+/* схематичная карта (виджет адрес/карта) */
+.map-panel {
+  background: var(--ui-panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px;
+}
+.map-panel svg { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.map-panel .muted { margin: 6px 0 0; font-size: 12px; }
+
+/* диалог с заявителем/службой (чат) */
+.chat {
+  display: flex; flex-direction: column; gap: 8px; max-height: 340px;
+  overflow-y: auto; padding: 10px; background: var(--ui-bg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.chat .msg {
+  max-width: 82%; padding: 9px 12px; border-radius: 12px;
+  font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+}
+.chat .msg.caller { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+.chat .msg.me { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 3px; }
+.chat .msg.sys { align-self: center; background: var(--ui-blue-soft); color: var(--ui-focus); font-size: 12.5px; }
+.chat .msg .who { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.chat .empty { border: 0; }
+
+/* микрофон (голосовой ввод) */
+.mic-btn {
+  width: var(--mic-size); height: var(--mic-size); border-radius: 50%;
+  border: 0; cursor: pointer; background: var(--ui-blue); color: #fff;
+  font-size: 17px; display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; transition: transform .15s;
+}
+.mic-btn:hover { filter: brightness(1.1); }
+.mic-btn.listening { background: var(--bad); animation: mic-pulse 1.2s infinite; }
+@keyframes mic-pulse { 50% { transform: scale(1.12); box-shadow: 0 0 0 8px rgba(179,54,46,.15); } }
+.mic-note { font-size: 12px; color: var(--muted); margin-left: 8px; }
+.speak-btn { cursor: pointer; background: none; border: 0; color: var(--ui-focus); font-size: 13px; padding: 2px 6px; }
+
+/* превью эталона / генерации (tasks.html) */
+.ai-preview {
+  background: #f0f8ef; border: 1px solid #bfe0c0; border-radius: 8px;
+  padding: 10px 14px; margin: 10px 0; font-size: 13.5px;
+}
+.ai-preview.err { background: #fdeeee; border-color: #eec; color: var(--bad); }
+.ai-preview.ok { background: #eef6fb; border-color: #bcd9ea; color: var(--brand-dark); }
+.turns-counter { font-size: 12.5px; color: var(--muted); margin: 4px 0 8px; }
+
+/* мастерская зависимого классификатора (reference.html) */
+.ws-tree, .ws-tree ul {
+  margin: 4px 0 4px 18px; padding-left: 12px;
+  border-left: 1px dashed var(--line); list-style: none;
+}
+.ws-group summary { cursor: pointer; font-weight: 600; color: var(--brand-dark); padding: 3px 0; }
+.ws-group[open] > summary { color: var(--ui-focus); }
+.ws-tree li { margin: 3px 0; font-size: 13.5px; }

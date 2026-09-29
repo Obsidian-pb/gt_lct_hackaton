@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Методические материалы — Тренажёр 112</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="nav"></div>
+  <div id="who"></div>
+</header>
+<main>
+  <div class="page-title">
+    <div>
+      <h1>Справочная база (методические материалы)</h1>
+      <p class="sub">Окно 18 ТЗ: инструкции, памятки «Работа на АРМ-112», документы.</p>
+    </div>
+    <button class="btn" onclick="showUpload()">+ Загрузить материал</button>
+  </div>
+
+  <section id="listSection"></section>
+  <section id="uploadSection" style="display:none"></section>
+</main>
+
+<script src="app.js"></script>
+<script>
+async function init() {
+  await renderHeader("materials.html");
+  await renderList();
+}
+
+async function renderList() {
+  const items = await act(() => api("/materials"));
+  const sec = document.getElementById("listSection");
+  sec.innerHTML = "";
+  sec.appendChild(tableEl([
+    { key: "title", label: "Название" },
+    { key: "description", label: "Описание", fmt: trunc },
+    { key: "file_type", label: "Тип файла", fmt: v => v ? esc(v.toUpperCase()) : "—" },
+    { key: "file_size", label: "Размер, КБ", fmt: (v) => v ? Math.round(v / 1024) : "—" },
+    { key: "created_at", label: "Загружен", fmt: fmtDate },
+    { key: "_act", label: "", fmt: (v, r) =>
+        "<button class='btn ghost' onclick='download(\"" + r.id + "\")'>Скачать</button>" +
+        "<button class='btn danger' style='margin-left:6px' onclick='del(\"" + r.id + "\")'>Удалить</button>" },
+  ], items, "Материалов пока нет"));
+}
+
+function showUpload() {
+  const sec = document.getElementById("uploadSection");
+  sec.style.display = "block";
+  sec.innerHTML = "<h2>Загрузка материала</h2><div class='panel'>" +
+    "<label class='field'>Название *<input type='text' id='m_title'></label>" +
+    "<label class='field'>Описание<input type='text' id='m_desc'></label>" +
+    "<label class='field'>Файл *<input type='file' id='m_file'></label>" +
+    "<div class='form-actions'>" +
+      "<button class='btn ok' onclick='upload()'>Загрузить</button>" +
+      "<button class='btn ghost' onclick='document.getElementById(\"uploadSection\").style.display=\"none\"'>Закрыть</button>" +
+    "</div></div>";
+  sec.scrollIntoView({ behavior: "smooth" });
+}
+
+async function upload() {
+  const title = document.getElementById("m_title").value.trim();
+  const file = document.getElementById("m_file").files[0];
+  if (!title || !file) { toast("Укажите название и выберите файл", "err"); return; }
+  const fd = new FormData();
+  fd.append("title", title);
+  fd.append("description", document.getElementById("m_desc").value.trim() || "");
+  fd.append("file", file);
+  busy(true);
+  try {
+    await fetch(getApiBase() + "/materials", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + getToken() },
+      body: fd,
+    }).then(async r => {
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(t ? t.slice(0, 200) : "HTTP " + r.status);
+      }
+    });
+    toast("Материал загружен", "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+  document.getElementById("uploadSection").style.display = "none";
+  await renderList();
+}
+
+async function download(id) {
+  busy(true);
+  try {
+    const res = await fetch(getApiBase() + "/materials/" + id + "/download", {
+      headers: { Authorization: "Bearer " + getToken() },
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    let name = "material_" + id;
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename="?([^";]+)"?/);
+    if (m) name = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    busy(false);
+  }
+}
+
+async function del(id) {
+  if (!confirm("Удалить материал?")) return;
+  await act(() => api("/materials/" + id, { method: "DELETE" }), "Удалён");
+  await renderList();
+}
+
+init().catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>
