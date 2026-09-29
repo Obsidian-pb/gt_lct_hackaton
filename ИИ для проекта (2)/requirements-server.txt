@@ -1,2 +1,0 @@
-# Shared PostgreSQL server dependency. The desktop/local mode does not require it.
-psycopg[binary]>=3.1,<4
