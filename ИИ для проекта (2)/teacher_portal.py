@@ -40,9 +40,13 @@ def overview(engine):
         })
     return {'sessions': rows, 'fields': FIELDS, 'labels': INCIDENT_LABELS | FIELDS | ACTION_LABELS, 'verdicts': VERDICTS,
             'categories': CATEGORIES,
+<<<<<<< HEAD
             'tasks': [{**{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format', 'approved_by', 'approved_at', 'created_at')},
                        'category_ids': sorted({CLASS_CATEGORIES.get(cid, '') for cid in (t.get('incident_source') or {}).get('class_ids', [])} - {''}),
                        **({'incident_source': t.get('incident_source')} if t.get('format') == 'incident-v1' else {})}
+=======
+            'tasks': [{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format')}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                       for t in engine.list_items('t')]}
 
 

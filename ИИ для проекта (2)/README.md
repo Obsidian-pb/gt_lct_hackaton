@@ -18,6 +18,7 @@
 
 Если AI REST физически находится на другом компьютере, `START.cmd` на клиентской машине не может сам запустить удалённый Windows-процесс без отдельно настроенного удалённого управления. Для такой схемы задаются `AI_DIALOGUE_REST_URL` и общий `AI_REST_TOKEN`, а на выделенной машине AI REST запускается отдельно.
 
+<<<<<<< HEAD
 ## Совместная учебная сессия
 
 Для нескольких компьютеров в **одной доверенной учебной сети** преподаватель запускает `START_CLASSROOM.cmd`. Консоль покажет адрес вида `http://192.168.x.x:8878/teacher` и откроет его. Учащиеся заходят на этот же IP с `/student`; при первом запуске Windows может запросить разрешение брандмауэра для локальной сети. Сервер AI REST остаётся на localhost. Для работы на одном компьютере по-прежнему используйте `START.cmd`.
@@ -38,6 +39,8 @@
 
 REST создание тренировки принимает `task_ids` или `categories` (источник выбирается один). REST маршруты: `GET /api/v1/rooms/{room_code}`, `GET /api/v1/trainings/{id}/lobby`, `POST .../lobby/joins`, `PUT/DELETE .../lobby/participants/{participant_id}`, `POST /api/v1/trainings/{id}/cards/{card_id}/calls` (набрать номер), `POST .../callbacks` (вопрос ИИ с `call_id`), `POST .../calls/{call_id}/hangup` (отбой), `POST .../routing`. Контракт в `openapi.json`.
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 ## REST API
 
 Интерфейс переведён на REST API `/api/v1`. Обычный запуск: **START.cmd**. Документация в браузере: **http://127.0.0.1:8878/api/docs**. Для команды: **REST_API.md** и **openapi.json**. Отдельный сервер запускается через **api_server.py** или **START_API.cmd** с отдельным `TRAINING_API_TOKEN`. Ключ AITUNNEL/OpenAI остаётся на Python-сервере. Для генерации черновика карточки и ответа заявителя на вопрос обучающегося без вставки и сохранения используйте **ai_rest_server.py** и инструкцию **AI_REST_API.md**.
@@ -293,6 +296,7 @@ Unit-тесты не обращаются в сеть. `smoke_live.py` дела�
 `START.cmd` now prepares a short ASCII drive-letter alias for Piper/eSpeak (for example `T:\\.runtime\\...\\piper\\espeak-ng-data`). This avoids a Windows eSpeak/Piper failure where a project path containing Cyrillic characters or an unusable data path makes the packaged native module fall back to the build-machine path such as `D:/a/piper1-gpl/.../espeak-ng-data`.
 
 The launcher writes `.runtime/piper-ready.json` only after a real WAV synthesis succeeds. If that marker is absent, the browser is told that local Piper is unavailable instead of repeatedly calling a broken synthesizer. `STOP.cmd` removes the temporary `subst` drive alias after the services stop.
+<<<<<<< HEAD
 
 ## Сброс забытой учётной записи администратора
 
@@ -311,3 +315,5 @@ The launcher writes `.runtime/piper-ready.json` only after a real WAV synthesis 
 ### Серверные логины преподавателей и обучающихся
 
 В PostgreSQL-режиме администратор создаёт учётные записи преподавателей и обучающихся с логином, паролем и системной ролью. Вход выполняется через серверную форму `/login`, а не через локальное имя браузера. См. `AUTH_ROLES.md` и `SHARED_SERVER.md`.
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae

@@ -1673,6 +1673,7 @@
                     "minLength": 1,
                     "maxLength": 160
                   },
+<<<<<<< HEAD
                   "task_ids": {
                     "type": "array",
                     "items": {
@@ -1685,6 +1686,8 @@
                       "type": "string"
                     }
                   },
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                   "scenario_ids": {
                     "type": "array",
                     "items": {
@@ -1723,7 +1726,13 @@
                 },
                 "required": [
                   "title",
+<<<<<<< HEAD
                   "teacher"
+=======
+                  "teacher",
+                  "scenario_ids",
+                  "participants"
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                 ],
                 "additionalProperties": false
               }
@@ -2027,6 +2036,7 @@
                     "minLength": 1,
                     "maxLength": 160
                   },
+<<<<<<< HEAD
                   "task_ids": {
                     "type": "array",
                     "items": {
@@ -2039,6 +2049,8 @@
                       "type": "string"
                     }
                   },
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                   "scenario_ids": {
                     "type": "array",
                     "items": {
@@ -2077,7 +2089,13 @@
                 },
                 "required": [
                   "title",
+<<<<<<< HEAD
                   "teacher"
+=======
+                  "teacher",
+                  "scenario_ids",
+                  "participants"
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                 ],
                 "additionalProperties": false
               }
@@ -2239,6 +2257,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/rooms/{room_code}": {
       "get": {
         "operationId": "training_find_lobby",
@@ -3211,6 +3230,8 @@
         }
       }
     },
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     "/trainings/{resource_id}/activation": {
       "post": {
         "operationId": "training_activate",
@@ -3672,6 +3693,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/trainings/{resource_id}/cards/{card_id}/calls": {
       "post": {
         "operationId": "training_dial_callback",
@@ -5062,6 +5084,8 @@
         }
       }
     },
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     "/trainings/{resource_id}/cards/{card_id}/routing": {
       "post": {
         "operationId": "training_route",
@@ -5231,9 +5255,12 @@
                   },
                   "updates": {
                     "type": "object"
+<<<<<<< HEAD
                   },
                   "main_service": {
                     "type": "string"
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                   }
                 },
                 "required": [
@@ -5247,6 +5274,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/trainings/{resource_id}/cards/{card_id}/callbacks": {
       "post": {
         "operationId": "training_callback",
@@ -5437,6 +5465,8 @@
         }
       }
     },
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     "/trainings/{resource_id}/cards/{card_id}/actions": {
       "post": {
         "operationId": "training_service_action",
@@ -5602,9 +5632,12 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1200
+<<<<<<< HEAD
                   },
                   "status": {
                     "type": "string"
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                   }
                 },
                 "required": [

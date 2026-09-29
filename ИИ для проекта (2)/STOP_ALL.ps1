@@ -38,9 +38,12 @@ if (Test-Path -LiteralPath $substMarker) {
     if ($drive -match '^[A-Z]:$') { & subst.exe $drive /D 2>$null | Out-Null }
     Remove-Item -LiteralPath $substMarker -Force -ErrorAction SilentlyContinue
 }
+<<<<<<< HEAD
 $portableStop = Join-Path $root 'STOP_PORTABLE_POSTGRES.ps1'
 if (Test-Path -LiteralPath $portableStop) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $portableStop 1>$null 2>$null
 }
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 Write-Host '112 services stopped.' -ForegroundColor Green
 exit 0

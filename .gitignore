@@ -45,6 +45,10 @@ postgres_data/
 pgdata/
 docker-compose.override.yml
 
+# AI provider credentials (never commit keys)
+backend_new/app/services/ai/config.local.json
+backend_new/app/services/ai/data/
+
 # Temporary files
 tmp/
 temp/

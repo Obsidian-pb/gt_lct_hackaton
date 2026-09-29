@@ -4,8 +4,13 @@ export default function AddressMap({data,point,kind,label,route}){
  const canvas=useRef(null),drag=useRef(null),[view,setView]=useState({x:0,y:0,scale:.035});
  const origin=useMemo(()=>{const points=data?.boundary||[];if(!points.length)return [0,0];return [points.reduce((sum,p)=>sum+p[0],0)/points.length,points.reduce((sum,p)=>sum+p[1],0)/points.length];},[data]);
  const project=([lon,lat])=>[(lon-origin[0])*111200*Math.cos(origin[1]*Math.PI/180),(origin[1]-lat)*111200];
+<<<<<<< HEAD
  const center=()=>{if(route?.points?.length){const projected=route.points.map(project),xs=projected.map(x=>x[0]),ys=projected.map(x=>x[1]);const width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);setView({x:(Math.min(...xs)+Math.max(...xs))/2,y:(Math.min(...ys)+Math.max(...ys))/2,scale:Math.min(.7,Math.max(.025,Math.min(320/(width||1),210/(height||1))))});return;}const [x,y]=point?project(point):[0,0];setView({x,y,scale:point?(kind==='street'?.18:.65):.035});};
  useEffect(center,[point?.[0],point?.[1],kind,route?.destination?.id]);
+=======
+ const center=()=>{const [x,y]=point?project(point):[0,0];setView({x,y,scale:point?(kind==='street'?.18:.65):.035});};
+ useEffect(center,[point?.[0],point?.[1],kind]);
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  const zoom=factor=>setView(v=>({...v,scale:Math.max(.018,Math.min(3,v.scale*factor))}));
  useEffect(()=>{
   const el=canvas.current;if(!el||!data)return;

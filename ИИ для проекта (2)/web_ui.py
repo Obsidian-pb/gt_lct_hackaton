@@ -532,7 +532,11 @@ def make_server(engine, port=8878, *, host='127.0.0.1', api_token=None, allowed_
                 if not file_path.is_file():
                     self.respond(404, {'error': 'Не найдено'}); return
                 self.respond(200, file_path.read_bytes(), 'image/webp'); return
+<<<<<<< HEAD
             if path in ('/login/', '/student/', '/teacher/', '/admin-login/', '/admin/', '/cards/', '/training/', '/scenarios/'):
+=======
+            if path in ('/student/', '/teacher/', '/admin-login/', '/admin/', '/cards/', '/training/', '/scenarios/'):
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                 self.send_response(302)
                 self.send_header('Location', path.rstrip('/'))
                 self.send_header('Cache-Control', 'no-store')

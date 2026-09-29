@@ -60,6 +60,8 @@ class CardOut(BaseModel):
     machine_score: float | None
     ai_score: float | None
     final_score: float | None
+    machine_eval_details: dict[str, Any] = Field(default_factory=dict)
+    ai_eval_details: dict[str, Any] = Field(default_factory=dict)
     evaluated_by: UUID | None
     evaluated_at: datetime | None
     created_at: datetime

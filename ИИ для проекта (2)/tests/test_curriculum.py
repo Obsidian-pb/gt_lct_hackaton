@@ -1,7 +1,10 @@
 import tempfile
 import threading
 import unittest
+<<<<<<< HEAD
 from unittest.mock import patch
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 
 from ai_core import Engine
 from card_fake import FactoryFake
@@ -38,6 +41,7 @@ class CurriculumFlow(unittest.TestCase):
                 {'student':'Медицина','role':'service','service':'103'}]})
         return curriculum.activate(self.engine, training['id'])
 
+<<<<<<< HEAD
     def test_service_deadlines_call_and_exact_house_route(self):
         active = self.create()
         record = active['cards'][0]
@@ -222,6 +226,8 @@ class CurriculumFlow(unittest.TestCase):
         self.assertEqual(routed['cards'][0]['callback_call']['status'],'ended')
         self.assertEqual(routed['cards'][0]['card']['_main_service'],'101')
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     def test_full_card_lifecycle_and_service_isolation(self):
         training = self.create()
         self.assertEqual(len(training['cards']), 1, 'Shared task appears only once across scenarios')
@@ -252,6 +258,7 @@ class CurriculumFlow(unittest.TestCase):
         curriculum.service_action(self.engine, training['id'],card_id,'Пожарная','Направлен расчёт')
         self.assertEqual(curriculum.get(self.engine,training['id'])['cards'][0]['status'],'done')
 
+<<<<<<< HEAD
     def test_112_call_is_answered_before_dialogue_or_card(self):
         training=self.create([{'student':'Курсант','role':'operator'}])
         session_id=training['cards'][0]['operator_session_id']
@@ -322,6 +329,8 @@ class CurriculumFlow(unittest.TestCase):
             dispatch(self.engine,'student_action',{'student':'Курсант','id':old['id'],
                 'operation':'accept'})
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     def test_http_contract_accept_and_manual_teacher_grade(self):
         training=self.create([{'student':'Курсант','role':'operator'}])
         router=RestAPI(self.engine, threading.Lock())

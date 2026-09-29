@@ -169,10 +169,13 @@ def student_portal_view(engine, identifier, full_form=False):
     if curriculum.expire(engine, session):
         session = engine.load(identifier)
         view = engine.student_view(identifier)
+<<<<<<< HEAD
     if session['status'] in ('awaiting_call', 'queued'):
         view['history'] = []  # The caller speaks after the operator answers.
     view['call_intro'] = session.get('call_intro', 'report')
     view['call_answered_at'] = session.get('call_answered_at')
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     view['training'] = session.get('training')
     view['activated_at'] = session.get('activated_at')
     view['machine_assessment'] = session.get('machine_assessment') if session['status'] == 'reviewed' else None
@@ -225,6 +228,7 @@ def dispatch(engine, action, p):
         return curriculum.list_resources(engine, 'training')
     if action == 'training_get':
         return curriculum.get(engine, p['resource_id'])
+<<<<<<< HEAD
     if action == 'training_find_lobby':
         return curriculum.find_lobby(engine, p['room_code'])
     if action == 'training_lobby':
@@ -237,6 +241,8 @@ def dispatch(engine, action, p):
         return curriculum.assign_role(engine, p['resource_id'], p['participant_id'], p['teacher'], p['role'], p.get('service',''))
     if action == 'training_remove_participant':
         return curriculum.remove_participant(engine, p['resource_id'], p['participant_id'], p['teacher'])
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     if action == 'training_save':
         return curriculum.save_training(engine, p, p.get('resource_id'))
     if action == 'training_activate':
@@ -247,6 +253,7 @@ def dispatch(engine, action, p):
         return curriculum.delete_training(engine, p['resource_id'])
     if action == 'training_desk':
         return curriculum.desk(engine, p['student'])
+<<<<<<< HEAD
     if action == 'training_dial_callback':
         return curriculum.dial_callback(engine, p['resource_id'], p['card_id'], p['student'], p['number'])
     if action == 'training_hangup_callback':
@@ -270,6 +277,12 @@ def dispatch(engine, action, p):
         return curriculum.dds_service_route(engine, p['resource_id'], p['card_id'], p['student'], p['service'])
     if action == 'training_service_action':
         return curriculum.service_action(engine, p['resource_id'], p['card_id'], p['student'], p['text'], p.get('status'))
+=======
+    if action == 'training_route':
+        return curriculum.route_card(engine, p['resource_id'], p['card_id'], p['student'], p['services'], p.get('updates', {}))
+    if action == 'training_service_action':
+        return curriculum.service_action(engine, p['resource_id'], p['card_id'], p['student'], p['text'])
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     if action in ('teacher_dashboard', 'teacher_session', 'teacher_task', 'teacher_note', 'teacher_finish', 'teacher_launch'):
         return teacher_portal.dispatch(engine, action, p)
     if action == 'student_overview':

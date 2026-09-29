@@ -21,11 +21,20 @@ export function TypePicker({entry,meta,store,readonly,onAdded}){
 }
 
 export default function IncidentEditor({card,meta,state,store,reviewing,generating,referencePending,reviewFeedback,reviewError,onChooseServices,onTabChange}){
+<<<<<<< HEAD
  const [adding,setAdding]=useState(false);
  if(!card)return <article id="editor" className="editor incident-editor"><div className="empty"><h2>Создайте или выберите карточку</h2><p>Карточка и её эталон откроются здесь в одинаковой форме.</p></div></article>;
  const isReference=false,approved=card.status==='approved',reference=card.reference,manualReference=reference?.version!==2;
  const referenceReady=!!reference&&referenceCurrent(card),teacherReady=!!state.teacher?.trim(),canApprove=!approved&&!generating&&!reviewing&&referenceReady&&card.reference_checked===true&&teacherReady;
  const approvalBlocker=!teacherReady?'Укажите имя преподавателя.':!card.content.title.trim()?'Укажите название карточки.':!card.content.report.trim()?'Заполните сообщение заявителя.':!card.content.fields.description.trim()?'Заполните описание происшествия.':!card.content.fields.address_text.trim()&&!(card.content.fields.city.trim()&&card.content.fields.street.trim())?'Укажите адрес или явно запишите, что место пока неизвестно.':!card.content.class_ids.length||!card.content.main_service?'Выберите тип происшествия и главную службу.':!reference?'Сначала создайте эталонный ответ.':!referenceReady?'Карточка изменена после создания эталона. Обновите эталон перед утверждением.':card.reference_checked!==true?'Подтвердите проверку карточки перед утверждением.':'';
+=======
+ const [tab,setTab]=useState('card'),[adding,setAdding]=useState(false);
+ const changeTab=value=>{setTab(value);onTabChange(value);};
+ if(!card)return <article id="editor" className="editor incident-editor"><div className="empty"><h2>Создайте или выберите карточку</h2><p>Карточка и её эталон откроются здесь в одинаковой форме.</p></div></article>;
+ const isReference=tab==='reference',approved=card.status==='approved',reference=card.reference;
+ const referenceReady=!!reference&&referenceCurrent(card),teacherReady=!!state.teacher?.trim(),canApprove=!approved&&!generating&&!reviewing&&referenceReady&&card.reference_checked===true&&teacherReady;
+ const approvalBlocker=!teacherReady?'Укажите имя преподавателя.':!card.content.title.trim()?'Укажите название карточки.':!card.content.report.trim()?'Заполните сообщение заявителя.':!card.content.fields.description.trim()?'Заполните описание происшествия.':!card.content.fields.address_text.trim()&&!(card.content.fields.city.trim()&&card.content.fields.street.trim())?'Укажите адрес или явно запишите, что место пока неизвестно.':!card.content.class_ids.length||!card.content.main_service?'Выберите тип происшествия и главную службу.':!reference?'Сначала создайте эталонный ответ.':!referenceReady?'Карточка изменена после создания эталона. Обновите эталон перед утверждением.':card.reference_checked!==true?'Откройте вкладку «Эталонный ответ» и подтвердите, что преподаватель его проверил.':'';
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  const content=isReference&&reference?reference.source_content:card.content;
  const expected=reference?.answer.expected_fields||{};
  const locked=approved||(isReference&&(generating||!!referencePending||!reference));
@@ -60,6 +69,7 @@ export default function IncidentEditor({card,meta,state,store,reviewing,generati
    </div></div>
   </div>
   <section className="incident-panel training-card-settings"><h3>Разговор для обучающегося</h3><p className="source-note">После утверждения карточка появится у обучающегося. Он услышит только первую реплику, остальные сведения получит вопросами к заявителю.</p><p className="source-note">Режим прохождения — «Обучение» или «Тестирование» — преподаватель выбирает при назначении сценария.</p><label>Первая реплика заявителя<textarea id="training-opening" disabled={approved||reviewing} rows={2} maxLength={2000} value={card.training_opening??card.content.report.trim().split(/(?<=[.!?…])\s+/)[0]?.slice(0,500)??''} onChange={e=>store.edit('training','training_opening',e.target.value)}/></label>{approved&&<><p>{card.training_task_id?'Доступна обучающимся · утверждённая версия':'Эта ранее утверждённая карточка ещё не добавлена в тренировки.'}</p><button type="button" disabled={reviewing} onClick={store.publishTraining}>{card.training_task_id?'Проверить доступность тренировки':'Добавить в тренировки обучающегося'}</button></>}</section>
+<<<<<<< HEAD
   {manualReference&&<ReferenceAnswer {...{card,meta,store,generating,referencePending}}/>}
   <section className={'review-box '+(approved?'approved':'')}>
    <h3>{approved?'Карточка утверждена':'Проверка преподавателем'}</h3>
@@ -73,6 +83,9 @@ export default function IncidentEditor({card,meta,state,store,reviewing,generati
    {reviewFeedback&&<p id="approval-feedback" className={'review-feedback '+(reviewError?'error':'')} role={reviewError?'alert':'status'}>{reviewFeedback}</p>}
    <button id="export-one" type="button" onClick={store.exportOne}>Скачать карточку</button>
   </section>
+=======
+  <section className={'review-box '+(approved?'approved':'')}><h3>{approved?'Карточка и эталон утверждены':'Проверка преподавателем'}</h3>{approved?<><p>{card.review.teacher} · {date(card.review.at)}</p><p>{card.review.note||'Без замечаний'}</p>{card.training_publish_error&&<p role="alert">Карточка утверждена, но не опубликована в тренировки: {card.training_publish_error}</p>}<button id="reopen" type="button" onClick={store.reopen}>Вернуть на доработку</button></>:<><div className="field-grid"><label>Преподаватель<input id="teacher" maxLength={160} value={state.teacher} onChange={e=>store.edit('teacher',null,e.target.value)}/></label><label>Комментарий<input id="review-note" maxLength={3000} value={card.review_note||''} onChange={e=>store.edit('note',null,e.target.value)}/></label></div><p>{card.reference_checked&&referenceReady?'Эталон проверен преподавателем.':'Перед утверждением откройте вкладку «Эталонный ответ» и подтвердите проверку.'}</p><p className="source-note">Готовность: преподаватель — {teacherReady?'да':'нет'}; актуальный эталон — {referenceReady?'да':'нет'}; подтверждение проверки — {card.reference_checked===true?'да':'нет'}.</p><p id="approval-requirement" className="review-requirement" hidden={!approvalBlocker}>{approvalBlocker}</p><div className="review-actions"><button id="validate" type="button" disabled={generating||reviewing} onClick={()=>store.review('validate')}>Проверить поля</button><button id="approve" type="button" className="primary" disabled={generating||reviewing} aria-describedby="approval-requirement approval-feedback" onClick={()=>canApprove?store.review('approve'):store.notify(approvalBlocker,true,true)}>{reviewing?'Проверяем…':'Утвердить карточку и эталон'}</button></div></>}{reviewFeedback&&<p id="approval-feedback" className={'review-feedback '+(reviewError?'error':'')} role={reviewError?'alert':'status'}>{reviewFeedback}</p>}<button id="export-one" type="button" onClick={store.exportOne}>Скачать карточку</button></section>
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
   <details className="incident-history"><summary>История карточки · {card.history.length}</summary>{card.history.slice().reverse().map((h,i)=><p key={i}>{date(h.at)} · {h.text}</p>)}</details>
  </article>;
 }

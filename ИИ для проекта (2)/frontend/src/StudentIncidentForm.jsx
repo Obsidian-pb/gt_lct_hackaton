@@ -21,6 +21,7 @@ export function StudentDialogue({session,values,busy,act}){
  useEffect(()=>{busyRef.current=busy;},[busy]);
  useEffect(()=>{if(log.current)log.current.scrollTop=log.current.scrollHeight;},[session.history,open]);
  useEffect(()=>{if(!active||session.training?.mode!=='training')return;const timer=setTimeout(()=>{if(!busyRef.current)actRef.current('nudge',{card:valuesRef.current});},delay);return()=>clearTimeout(timer);},[session.id,active,session.training?.mode,session.training?.coaching_delay_seconds,session.history.length,session.training_reveals?.length,values,question,delay]);
+<<<<<<< HEAD
  const elapsed=session.activated_at?Math.max(0,Math.floor((clock-new Date(session.activated_at).getTime())/1000)):0;
  const time=`${String(Math.floor(elapsed/60)).padStart(2,'0')}:${String(elapsed%60).padStart(2,'0')}`;
  const quick=['Служба 112, слушаю вас.','Служба 112, что у вас случилось?','Назовите точный адрес.','Уточните номер дома и ориентиры.','Как вас зовут?','Есть пострадавшие?','Помощь выезжает, ожидайте.'];
@@ -35,6 +36,23 @@ export function StudentDialogue({session,values,busy,act}){
    </>}
   </aside>
  </div>;
+=======
+ return <details className="incident-dialogue-fold" open>
+  <summary>Разговор с заявителем <span>{Math.max(1,session.history.filter(x=>x.role==='caller').length)} реплик</span></summary>
+  <section className="incident-panel caller-dialogue student-caller-dialogue">
+   <h3>Разговор с заявителем</h3>
+   <p className="source-note">Получайте сведения вопросами и переносите их в карточку самостоятельно.</p>
+   <div ref={log} className="student-chat" role="log" aria-label="Разговор с заявителем">{session.history.map(turn=><p key={turn.id}><strong>{({caller:'Заявитель',dispatcher:'Оператор 112',system:'Система'})[turn.role]||'Собеседник'}: </strong>{turn.text}</p>)}</div>
+   <VoiceControls history={session.history} setQuestion={setQuestion} disabled={busy||!active}/>
+   {session.training?.mode==='training'&&!!session.training_reveals?.length&&<div className="student-coach incident-training-coach" aria-live="polite"><strong>Учебная подсказка</strong><p>Эталонное поле «{session.training_reveals.at(-1).label}»: <b>{session.training_reveals.at(-1).value}</b></p><small>Подсказка появилась после паузы в работе. Продолжайте диалог и заполнение карточки.</small></div>}
+   {active&&<form onSubmit={async e=>{e.preventDefault();if(await act('ask',{question,source:'text',card:values}))setQuestion('');}}>
+    <label htmlFor="student-question">Ваш вопрос заявителю</label>
+    <textarea id="student-question" rows={2} maxLength={2000} value={question} disabled={busy} onChange={e=>setQuestion(e.target.value)} placeholder="Задайте уточняющий вопрос"/>
+    <div className="student-buttons"><button className="student-blue" disabled={busy||!question.trim()}>{busy?'Заявитель отвечает…':'Отправить'}</button></div>
+   </form>}
+  </section>
+ </details>;
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 }
 
 function ServicePicker({meta,content,open,onClose,onApply,disabled}){

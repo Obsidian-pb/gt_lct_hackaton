@@ -31,7 +31,12 @@ export default function StudentSession({session,fields,values,setValues,dirty,bu
   const timer=setTimeout(()=>{if(!busyRef.current)actRef.current('nudge',{card:valuesRef.current});},delay);
   return()=>clearTimeout(timer);
  },[session.id,active,session.training?.mode,session.training?.coaching_delay_seconds,session.history.length,session.training_reveals?.length,values,question,full,dds,delay]);
+<<<<<<< HEAD
  return <><div className="student-session-heading"><button onClick={back} disabled={busy}>← Мои тренировки</button><h1>{needsIntroduction?'Вызов 112':session.title}</h1><span>{session.status==='awaiting_call'?'Входящий вызов':active?'В процессе':session.result?'Проверена':'На проверке'}</span></div>
+=======
+ return <><div className="student-session-heading"><button onClick={back} disabled={busy}>← Мои тренировки</button><h1>{session.title}</h1><span>{session.status==='awaiting_call'?'Входящий вызов':active?'В процессе':session.result?'Проверена':'На проверке'}</span></div>
+ {session.status==='awaiting_call'&&<section className="student-panel" role="status"><h2>Входящий учебный вызов</h2><p>Номер по АОН: {session.card.phone_aon||'Не определён'}</p><button className="student-dark" disabled={busy} onClick={()=>act('accept')}>Принять вызов и начать карточку</button></section>}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  {active&&session.training?.seconds>0&&session.activated_at&&<p role="timer" className="student-message">До конца карточки: {Math.max(0,Math.ceil(session.training.seconds-(clock-new Date(session.activated_at).getTime())/1000))} с</p>}
  {!full&&<TrainingReveal session={session}/>} 
  {session.result&&<section className="student-panel student-result"><h2>Результат: {session.result.grade} / 5</h2><p>{session.result.conclusion}</p><small>Проверил: {session.result.teacher}</small><details><summary>Комментарии преподавателя</summary>{Object.entries(session.result.fields).map(([key,row])=><p key={key}><strong>{fields[key]||'Действия диспетчера'}: </strong>{row.comment}</p>)}</details></section>}

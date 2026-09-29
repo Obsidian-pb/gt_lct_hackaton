@@ -14,7 +14,11 @@ from pathlib import Path
 
 from ai_core import now, require_text
 
+<<<<<<< HEAD
 ROLES = {'waiting', 'operator', 'dds', 'service'}
+=======
+ROLES = {'operator', 'dds', 'service'}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 STATES = {'prepared', 'active', 'completed'}
 SCENARIO_STATES = {'draft', 'approved'}
 ID_PATTERN = re.compile(r'(scenario|training)-[a-f0-9]{12}$')
@@ -29,11 +33,16 @@ def _path(engine, identifier):
 
 
 def _write(engine, item):
+<<<<<<< HEAD
     item['updated_at'] = now()
     if getattr(engine, 'store', None) is not None:
         engine.store.save_curriculum(item)
         return copy.deepcopy(item)
     path = _path(engine, item['id'])
+=======
+    path = _path(engine, item['id'])
+    item['updated_at'] = now()
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding='utf-8')
     temp.replace(path)
@@ -41,12 +50,16 @@ def _write(engine, item):
 
 
 def get(engine, identifier):
+<<<<<<< HEAD
     if not isinstance(identifier, str) or not ID_PATTERN.fullmatch(identifier):
         raise ValueError('Неверный идентификатор учебного ресурса.')
     if getattr(engine, 'store', None) is not None:
         value = engine.store.load_curriculum(identifier)
     else:
         value = json.loads(_path(engine, identifier).read_text(encoding='utf-8'))
+=======
+    value = json.loads(_path(engine, identifier).read_text(encoding='utf-8'))
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     if value.get('id') != identifier:
         raise ValueError('Учебный ресурс повреждён.')
     return value
@@ -55,8 +68,11 @@ def get(engine, identifier):
 def list_resources(engine, kind):
     if kind not in ('scenario', 'training'):
         raise ValueError('Неизвестный учебный ресурс.')
+<<<<<<< HEAD
     if getattr(engine, 'store', None) is not None:
         return engine.store.list_curriculum(kind)
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     root = Path(engine.directory) / 'curriculum'
     if not root.exists():
         return []
@@ -103,6 +119,7 @@ def delete_scenario(engine, identifier):
     item = get(engine, identifier)
     if item['status'] != 'draft' or any(identifier in t['scenario_ids'] for t in list_resources(engine, 'training')):
         raise ValueError('Удалить можно только черновик, не включённый в тренировки.')
+<<<<<<< HEAD
     if getattr(engine, 'store', None) is not None:
         engine.store.delete_curriculum(identifier)
     else:
@@ -114,10 +131,22 @@ def _participants(values, previous=()):
     if not isinstance(values, list) or len(values) > 100:
         raise ValueError('Допустимо не более 100 участников.')
     participants, names = [], set()
+=======
+    _path(engine, identifier).unlink()
+    return {'deleted': True}
+
+
+def _participants(values):
+    if not isinstance(values, list) or not 1 <= len(values) <= 100:
+        raise ValueError('Укажите участников тренировки.')
+    participants = []
+    names = set()
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     for row in values:
         if not isinstance(row, dict) or row.get('role') not in ROLES:
             raise ValueError('Для каждого участника укажите учебную роль.')
         student = require_text(row.get('student'), 'Обучающийся', 160)
+<<<<<<< HEAD
         if student.casefold() in names:
             raise ValueError('Имя участника в одной тренировке должно быть уникальным.')
         names.add(student.casefold())
@@ -147,10 +176,31 @@ def _approved_card_categories(task):
     return set(groups.get(class_id) for class_id in source.get('class_ids', [])) - {''}
 
 
+=======
+        if student in names:
+            raise ValueError('Роль обучающегося в одной тренировке должна быть однозначной.')
+        names.add(student)
+        service = str(row.get('service') or '').strip()
+        if row['role'] == 'service' and not service:
+            raise ValueError('Диспетчеру службы назначьте службу.')
+        if row['role'] == 'service':
+            from card_factory import SERVICES
+            if service not in SERVICES:
+                raise ValueError('Код службы отсутствует в классификаторе.')
+        participants.append({'student': student, 'role': row['role'], 'service': service if row['role'] == 'service' else ''})
+    if not any(row['role'] == 'operator' for row in participants):
+        raise ValueError('В тренировке нужен хотя бы один оператор 112.')
+    if any(row['role'] == 'dds' for row in participants) and not any(row['role'] == 'service' for row in participants):
+        raise ValueError('Для передачи карточек диспетчеру ДДС назначьте хотя бы одну службу.')
+    return participants
+
+
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 def save_training(engine, data, identifier=None):
     previous = get(engine, identifier) if identifier else None
     if previous and previous['status'] != 'prepared':
         raise ValueError('Активную или завершённую тренировку менять нельзя.')
+<<<<<<< HEAD
     scenarios = data.get('scenario_ids') or []
     direct_ids = data.get('task_ids') or []
     category_ids = data.get('categories') or []
@@ -184,10 +234,19 @@ def save_training(engine, data, identifier=None):
             task = engine.load(task_id)
             if not isinstance(task_id,str) or not task_id.startswith('t-') or task.get('status') != 'approved' or task.get('format') != 'incident-v1':
                 raise ValueError('Выберите только утверждённые полные карточки.')
+=======
+    scenarios = data.get('scenario_ids')
+    if not isinstance(scenarios, list) or not 1 <= len(scenarios) <= 20 or len(set(scenarios)) != len(scenarios):
+        raise ValueError('В тренировку входит от 1 до 20 разных сценариев.')
+    for scenario_id in scenarios:
+        if get(engine, scenario_id)['status'] != 'approved':
+            raise ValueError('В тренировку входят только утверждённые сценарии.')
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     seconds = data.get('seconds', 30)
     if type(seconds) is not int or not 0 <= seconds <= 86400:
         raise ValueError('Время на карточку: от 0 до 86400 секунд.')
     mode = data.get('mode', 'training')
+<<<<<<< HEAD
     if mode not in ('training', 'practice', 'testing'):
         raise ValueError('Режим: обучение, тренировка или тестирование.')
     item = previous or {'id': 'training-' + uuid.uuid4().hex[:12], 'status': 'prepared', 'created_at': now(), 'cards': [], 'room_code': uuid.uuid4().hex[:8].upper()}
@@ -195,6 +254,14 @@ def save_training(engine, data, identifier=None):
                 description=str(data.get('description') or '')[:2000], mode=mode, seconds=seconds,
                 scenario_ids=scenarios, task_ids=selected_ids, category_ids=category_ids, selection_mode=selection_mode,
                 participants=_participants(data.get('participants') or [], item.get('participants', [])),
+=======
+    if mode not in ('training', 'testing'):
+        raise ValueError('Режим: обучение или тестирование.')
+    item = previous or {'id': 'training-' + uuid.uuid4().hex[:12], 'status': 'prepared', 'created_at': now(), 'cards': []}
+    item.update(title=require_text(data.get('title'), 'Название тренировки', 100),
+                description=str(data.get('description') or '')[:2000], mode=mode, seconds=seconds,
+                scenario_ids=scenarios, participants=_participants(data.get('participants')),
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                 teacher=require_text(data.get('teacher'), 'Преподаватель', 160),
                 group=str(data.get('group') or '')[:160],
                 difficulty=data.get('difficulty', 'medium'))
@@ -203,6 +270,7 @@ def save_training(engine, data, identifier=None):
     return _write(engine, item)
 
 
+<<<<<<< HEAD
 def lobby(engine, identifier):
     item = get(engine, identifier)
     if not item.get('room_code') or any(not p.get('id') for p in item.get('participants', [])):
@@ -284,10 +352,13 @@ def remove_participant(engine, identifier, participant_id, teacher):
     return lobby(engine, identifier)
 
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 def activate(engine, identifier):
     item = get(engine, identifier)
     if item['status'] != 'prepared':
         raise ValueError('Тренировка уже запущена или завершена.')
+<<<<<<< HEAD
     if not any(p['role'] == 'operator' for p in item['participants']) or any(p['role'] == 'waiting' for p in item['participants']):
         raise ValueError('Перед запуском назначьте оператора и роли всем участникам.')
     tasks = _training_task_ids(engine,item)
@@ -296,6 +367,13 @@ def activate(engine, identifier):
         random.shuffle(tasks)
         target={'easy':1,'medium':3,'hard':5,'adaptive':3}[item['difficulty']]
         tasks.sort(key=lambda tid:abs(task_levels.get(tid,3)-target))
+=======
+    tasks = list(dict.fromkeys(tid for sid in item['scenario_ids'] for tid in get(engine, sid)['task_ids']))
+    task_levels = {tid: get(engine,sid).get('task_difficulties',{}).get(tid,3) for sid in item['scenario_ids'] for tid in get(engine,sid)['task_ids']}
+    random.shuffle(tasks)
+    target={'easy':1,'medium':3,'hard':5,'adaptive':3}[item['difficulty']]
+    tasks.sort(key=lambda tid:abs(task_levels[tid]-target))
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     operators = [row for row in item['participants'] if row['role'] == 'operator']
     if len(tasks) * len(operators) > 5000:
         raise ValueError('Слишком много карточек для одного запуска.')
@@ -304,6 +382,7 @@ def activate(engine, identifier):
             session = engine.start(task_id, operator['student'], training={
                 'plan_id': item['id'], 'training_id': item['id'], 'scenario_ids': item['scenario_ids'],
                 'title': item['title'], 'group': item['group'], 'teacher': item['teacher'],
+<<<<<<< HEAD
                 'seconds': item['seconds'], 'mode': item['mode'], 'role': 'operator', 'handoff_to_dds': any(p['role'] == 'dds' for p in item['participants']),
                 'difficulty': item['difficulty'], 'task_difficulty': task_levels.get(task_id,3),
                 'coaching_delay_seconds': 10 if item['mode'] == 'training' else 0,
@@ -313,18 +392,29 @@ def activate(engine, identifier):
                 session['call_intro'] = 'greeting' if int(session['id'][-1], 16) % 2 else 'report'
                 if session['call_intro'] == 'greeting':
                     session['history'][0]['text'] = 'Алло, алло, это 112?'
+=======
+                'seconds': item['seconds'], 'mode': item['mode'], 'role': 'operator',
+                'difficulty': item['difficulty'], 'task_difficulty': task_levels[task_id],
+                'coaching_delay_seconds': 10 if item['mode'] == 'training' else 0,
+                'card_index': index, 'card_total': len(tasks)})
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
             session['status'] = 'awaiting_call' if index == 1 else 'queued'
             session['effective_level'] = {'easy':'easy','medium':'medium','hard':'hard','adaptive':'medium'}[item['difficulty']]
             session['activated_at'] = None
             engine.save(session)
             item['cards'].append({'id': 'card-' + uuid.uuid4().hex[:12], 'operator_session_id': session['id'],
                                   'task_id': task_id, 'student': operator['student'], 'status': 'awaiting_call',
+<<<<<<< HEAD
                                   'service_actions': {}, 'services': [], 'callback_turns': [], 'card': None})
+=======
+                                  'service_actions': {}, 'services': [], 'card': None})
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     item.update(status='active', started_at=now())
     return _write(engine, item)
 
 
 def accept_call(engine, session):
+<<<<<<< HEAD
     legacy_waiting = (session['status'] == 'active' and session['task'].get('workflow', 'caller') == 'caller'
                       and len(session.get('history', [])) == 1 and not session.get('activated_at')
                       and not session.get('call_answered_at'))
@@ -334,12 +424,20 @@ def accept_call(engine, session):
         session['call_intro'] = 'greeting' if int(session['id'][-1], 16) % 2 else 'report'
         if session['call_intro'] == 'greeting':
             session['history'][0]['text'] = 'Алло, алло, это 112?'
+=======
+    if session['status'] != 'awaiting_call':
+        raise ValueError('Нет ожидающего входящего вызова.')
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     training = session.get('training') or {}
     if training.get('training_id'):
         item = get(engine, training['training_id'])
         if item['status'] != 'active':
             raise ValueError('Тренировка не активна.')
+<<<<<<< HEAD
     session.update(status='active', activated_at=now(), call_answered_at=now())
+=======
+    session.update(status='active', activated_at=now())
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     engine.save(session)
     return session
 
@@ -396,6 +494,7 @@ def _services(card):
         return []
 
 
+<<<<<<< HEAD
 def _callback_number(card):
     return (card.get('phone_callback') or card.get('phone_aon') or '').strip()
 
@@ -560,6 +659,8 @@ def generate_dispatcher_examples(engine, training_id, student, count=4, topic=''
         'message': f'Создано ИИ-карточек: {len(generated)}. Они добавлены в очередь Диспетчера 112.',
     }
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 def desk(engine, student):
     student = require_text(student, 'Обучающийся', 160)
     result = []
@@ -569,6 +670,7 @@ def desk(engine, student):
             continue
         role, service = participant['role'], participant['service']
         cards = []
+<<<<<<< HEAD
         routed_cards = []
         for record in item['cards']:
             pending = role == 'dds' and record['status'] == 'dds_review'
@@ -592,17 +694,29 @@ def desk(engine, student):
                 (routed_cards if routed else cards).append(public)
         result.append({'id': item['id'], 'title': item['title'], 'status': item['status'],
                        'role': role, 'service': service, 'cards': cards, 'routed_cards': routed_cards, 'total': len(item['cards']),
+=======
+        for record in item['cards']:
+            if role == 'dds' and record['status'] == 'dds_review' or role == 'service' and record['status'] == 'service_review' and service in record['services']:
+                cards.append({**copy.deepcopy(record), 'field_labels': engine.load(record['operator_session_id'])['task'].get('field_labels', {})})
+        result.append({'id': item['id'], 'title': item['title'], 'status': item['status'],
+                       'role': role, 'service': service, 'cards': cards, 'total': len(item['cards']),
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
                        'completed': sum(c['status'] in ('done', 'service_review') for c in item['cards'])})
     return result
 
 
+<<<<<<< HEAD
 def route_card(engine, training_id, card_id, student, services, updates, main_service=''):
+=======
+def route_card(engine, training_id, card_id, student, services, updates):
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     item = get(engine, training_id)
     if item['status'] != 'active' or not any(p['student'] == student and p['role'] == 'dds' for p in item['participants']):
         raise ValueError('Карточку может направить назначенный диспетчер ДДС.')
     record = next((c for c in item['cards'] if c['id'] == card_id), None)
     if not record or record['status'] != 'dds_review':
         raise ValueError('Карточка уже обработана или недоступна.')
+<<<<<<< HEAD
     protected = {'phone_aon', 'external_number', 'registered_by', '_services', '_main_service'}
     if not isinstance(updates, dict) or not isinstance(record['card'], dict) or any(k not in record['card'] or k in protected or not isinstance(v, str) or len(v) > 3000 for k,v in updates.items()):
         raise ValueError('Некорректные исправления карточки.')
@@ -651,11 +765,27 @@ def dds_service_route(engine, training_id, card_id, student, service):
 
 
 def open_service_card(engine, training_id, card_id, student):
+=======
+    if not isinstance(updates, dict) or not isinstance(record['card'], dict) or any(k not in record['card'] or not isinstance(v, str) or len(v) > 3000 for k,v in updates.items()):
+        raise ValueError('Некорректные исправления карточки.')
+    if not isinstance(services, list) or len(services) != len(set(services)) or not services or any(not isinstance(v, str) for v in services):
+        raise ValueError('Выберите службу для направления карточки.')
+    available = {p['service'] for p in item['participants'] if p['role'] == 'service'}
+    if not set(services) <= available:
+        raise ValueError('Выбранной службы нет среди участников тренировки.')
+    record['card'].update(updates)
+    record.update(status='service_review', services=services, dds_by=student, routed_at=now())
+    return _write(engine, item)
+
+
+def service_action(engine, training_id, card_id, student, text):
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     item = get(engine, training_id)
     participant = next((p for p in item['participants'] if p['student'] == student and p['role'] == 'service'), None)
     record = next((c for c in item['cards'] if c['id'] == card_id), None)
     if not participant or not record or item['status'] != 'active' or record['status'] != 'service_review' or participant['service'] not in record['services']:
         raise ValueError('Карточка не направлена вашей службе.')
+<<<<<<< HEAD
     detail = record.setdefault('service_progress', {}).setdefault(participant['service'], {})
     if not detail.get('opened_at'):
         detail['opened_at'] = now()
@@ -720,10 +850,15 @@ def service_action(engine, training_id, card_id, student, text, status=None):
     record['service_actions'][participant['service']] = {'student': student, 'text': text, 'at': now()}
     staffed = {p['service'] for p in item['participants'] if p['role'] == 'service'}
     if all(s in record['service_actions'] for s in record['services'] if s in staffed):
+=======
+    record['service_actions'][participant['service']] = {'student': student, 'text': require_text(text, 'Действия службы', 2000), 'at': now()}
+    if all(s in record['service_actions'] for s in record['services']):
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
         record['status'] = 'done'
     return _write(engine, item)
 
 
+<<<<<<< HEAD
 def callback(engine, training_id, card_id, student, question, source='text', call_id=None, lock=None):
     from contextlib import nullcontext
     from dialogue_gateway import ask
@@ -771,15 +906,20 @@ def callback(engine, training_id, card_id, student, question, source='text', cal
         return {'reply':result['reply'], 'turns':copy.deepcopy(record['callback_turns'])}
 
 
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 def complete(engine, training_id, teacher):
     item = get(engine, training_id)
     if item['status'] != 'active' or item['teacher'] != teacher:
         raise ValueError('Тренировка не активна или назначена другому преподавателю.')
     for record in item['cards']:
+<<<<<<< HEAD
         if not record.get('operator_session_id'):
             if record.get('ai_demo') and record['status'] == 'dds_review':
                 record['status'] = 'stopped'
             continue
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
         s = engine.load(record['operator_session_id'])
         if s['status'] in ('active', 'awaiting_call', 'queued'):
             s.update(status='submitted', submitted_at=now(), forced_finish={'teacher': teacher, 'reason': 'Тренировка завершена', 'at': now()})
@@ -794,8 +934,12 @@ def delete_training(engine, identifier):
     item = get(engine, identifier)
     if item['status'] != 'prepared':
         raise ValueError('Удалить можно только подготовленную тренировку.')
+<<<<<<< HEAD
     if getattr(engine, 'store', None) is not None:
         engine.store.delete_curriculum(identifier)
     else:
         _path(engine, identifier).unlink()
+=======
+    _path(engine, identifier).unlink()
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     return {'deleted': True}

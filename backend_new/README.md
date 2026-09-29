@@ -18,8 +18,17 @@ app/
 ├── repositories/ # доступ к данным, маппинг БД -> домен
 ├── schemas/      # Pydantic DTO — контракт API
 └── services/     # бизнес-логика
+    └── ai/       # HTTP-клиент к ИИ-микросервису (client.py) + маппинг форматов
 alembic/          # миграции БД
 ```
+
+## ИИ-микросервис (ai_service)
+
+ИИ-ядро вынесено в отдельный stateless-сервис [`../ai_service`](../ai_service):
+ключ ИИ-провайдера хранится только там. backend_new обращается к нему по HTTP
+(`AI_SERVICE_URL`, токен `AI_SERVICE_TOKEN` в `.env`). Контракт `/api/v1`
+backend_new для клиентов не изменился. Порядок запуска: `ai_service` → backend_new.
+Подробности: [`plans/plan3_ai_microservice.md`](../plans/plan3_ai_microservice.md).
 
 ## Быстрый старт
 
@@ -34,15 +43,34 @@ docker compose up -d backend
 
 ### Вариант 2: локально
 
+#### Настройка PostgreSQL
+
+```{sql}
+CREATE ROLE system112 LOGIN PASSWORD 'system112';
+CREATE DATABASE system112_trainer OWNER system112;
+```
+
+
+#### Настройка окружения
+
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,scripts]"   # scripts — openpyxl для импорта классификатора
 copy .env.example .env        # Windows
 docker compose up -d db       # или использовать свой PostgreSQL
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
+
+Группы зависимостей (см. `pyproject.toml`):
+
+| Extra | Состав | Когда нужен |
+|---|---|---|
+| `dev` | `pytest`, `pytest-asyncio`, `ruff` | тесты и линтер локально |
+| `scripts` | `openpyxl` | импорт классификатора из `.xlsx` (`scripts/import_classifier_xlsx.py`) |
+
+В образ Docker (`pip install .`) extras не попадают — они нужны только локально.
 
 ## Конфигурация
 
@@ -77,7 +105,8 @@ alembic upgrade head
 | users | `GET/POST /api/v1/users`, `GET/PATCH/DELETE /users/{id}`, `PUT /users/{id}/roles`, `GET /users/roles` |
 | reference | `/scenario-statuses`, `/applicant-statuses`, `/training-roles` (CRUD) |
 | catalog | `/services`, `/classifier/event-types`, `/classifier/features-1..3`, `/classifier/versions`, `/event-groups` |
-| study-tasks | `GET/POST /study-tasks`, `GET/PATCH/DELETE /study-tasks/{id}`, `POST /study-tasks/{id}/approve`, `POST /study-tasks/{id}/generate` (ИИ-заглушка 501) |
+| study-tasks | `GET/POST /study-tasks`, `GET/PATCH/DELETE /study-tasks/{id}`, `POST /study-tasks/{id}/approve`, `POST /study-tasks/{id}/generate` (генерация ИИ через ai_service) |
+| ai | `GET /system/ai/status`, `POST /study-tasks/{id}/reference-preview`, `POST /study-tasks/{id}/caller-reply`, `POST /study-tasks/{id}/validate-fields`, `POST /cards/{id}/caller-reply`, `POST /cards/{id}/service-reply`, `POST /cards/{id}/ai-eval` |
 | scenarios | `GET/POST /scenarios`, `GET/PATCH/DELETE /scenarios/{id}`, `POST /scenarios/{id}/approve`, `POST/DELETE /scenarios/{id}/tasks...` |
 | trainings | `GET/POST /trainings`, `GET/PATCH/DELETE /trainings/{id}`, `POST /trainings/{id}/activate|finish`, `POST/DELETE /trainings/{id}/participants...`, `GET /trainings/{id}/progress` |
 | runtime | `POST /sessions/start`, `POST /sessions/{id}/finish`, `GET /sessions/{id}/next-task`, `POST /sessions/{id}/accept-call`, `PATCH /cards/{id}/content`, `POST /cards/{id}/submit` |
@@ -100,6 +129,11 @@ pytest                              # контрактные тесты OpenAPI 
 .venv\Scripts\python.exe scripts\smoke_content.py    # задачи и сценарии
 .venv\Scripts\python.exe scripts\smoke_training.py   # полный учебный цикл (сценар. 3-4 ТЗ)
 .venv\Scripts\python.exe scripts\smoke_system.py     # отчёты, материалы, настройки, аудит
+```
+
+```bash
+# импорт классификатора из ../TZ/datasets/клссы событий.xlsx (нужен extra "scripts")
+.venv\Scripts\python.exe scripts\import_classifier_xlsx.py
 ```
 
 Администратор по умолчанию: `admin` / `admin123` (создаётся при старте в dev-режиме).

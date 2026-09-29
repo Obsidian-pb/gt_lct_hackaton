@@ -16,17 +16,43 @@ services:
       timeout: 5s
       retries: 10
 
+  ai_service:
+    build: ../ai_service
+    container_name: system112-ai-service
+    environment:
+      # Токен, который backend_new отправляет в Authorization: Bearer
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-change-me-ai-service-token}
+      # Ключ ИИ-провайдера живёт ТОЛЬКО в этом сервисе
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-auto}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_SCOPE: ${AI_SCOPE:-auto}
+      AI_OAUTH_URL: ${AI_OAUTH_URL:-}
+      AI_CA_BUNDLE: ${AI_CA_BUNDLE:-}
+      AI_VERIFY_SSL: ${AI_VERIFY_SSL:-true}
+      CORS_ORIGINS: '["http://127.0.0.1:8000","http://localhost:8000"]'
+    ports:
+      - "8890:8890"
+    volumes:
+      - ../ai_service/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8890 --reload
+
   backend:
     build: .
     container_name: system112-backend
     environment:
       DATABASE_URL: postgresql+asyncpg://system112:system112@db:5432/system112_trainer
       JWT_SECRET_KEY: dev-secret-change-me
+      AI_SERVICE_URL: http://ai_service:8890
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-change-me-ai-service-token}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      ai_service:
+        condition: service_started
     volumes:
       - ./app:/app/app
       - ./alembic:/app/alembic

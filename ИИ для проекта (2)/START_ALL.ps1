@@ -160,9 +160,14 @@ try {
     $uiOut = Join-Path $runtime 'web-ui.out.log'
     $uiErr = Join-Path $runtime 'web-ui.err.log'
     Remove-Item $uiOut,$uiErr -Force -ErrorAction SilentlyContinue
+<<<<<<< HEAD
     $uiHost = if ($env:TRAINING_LAN -eq '1') { '0.0.0.0' } else { '127.0.0.1' }
     Step "Starting main backend + frontend on $uiHost`:8878 ..."
     $uiProcess = Start-Process -FilePath $python -ArgumentList @('web_ui.py','--host',$uiHost,'--port','8878','--no-browser') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $uiOut -RedirectStandardError $uiErr -PassThru
+=======
+    Step 'Starting main backend + frontend on http://127.0.0.1:8878 ...'
+    $uiProcess = Start-Process -FilePath $python -ArgumentList @('web_ui.py','--port','8878','--no-browser') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $uiOut -RedirectStandardError $uiErr -PassThru
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     Set-Content -Path (Join-Path $runtime 'web-ui.pid') -Value $uiProcess.Id -NoNewline
     Wait-Health 'http://127.0.0.1:8878/health' $uiProcess $uiErr 'app' 'ai-project-ui' | Out-Null
 
@@ -173,11 +178,15 @@ try {
     Set-Content -Path (Join-Path $runtime 'server-console.pid') -Value $consoleProcess.Id -NoNewline
 
     Step 'Everything is ready. Opening the interface...'
+<<<<<<< HEAD
     if ($env:TRAINING_LAN -eq '1') {
         $lanAddress = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1 -ExpandProperty IPAddress
         if ($lanAddress) { Write-Host "Classroom address: http://$($lanAddress):8878/teacher" -ForegroundColor Green; Write-Host "Open that address yourself before copying the invite link. Learners must be on the same network." -ForegroundColor Yellow }
     }
     if ($env:TRAINING_LAN -eq '1' -and $lanAddress) { Start-Process ("http://$($lanAddress):8878/teacher") } else { Start-Process 'http://127.0.0.1:8878' }
+=======
+    Start-Process 'http://127.0.0.1:8878'
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray

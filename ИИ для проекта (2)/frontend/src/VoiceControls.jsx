@@ -1,6 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
 import {api} from './api.js';
 
+<<<<<<< HEAD
+=======
+const VOICE_STORAGE='giik.caller.voice.v1';
+const voiceName=id=>({'ru_RU-irina-medium':'Ирина','ru_RU-denis-medium':'Денис','ru_RU-dmitri-medium':'Дмитрий'})[id]||id;
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 const chunks=text=>{
  const result=[];let rest=text.trim();
  while(rest.length>1150){let end=rest.lastIndexOf(' ',1150);if(end<600)end=1150;result.push(rest.slice(0,end));rest=rest.slice(end).trimStart();}
@@ -8,9 +13,16 @@ const chunks=text=>{
  return result;
 };
 
+<<<<<<< HEAD
 export default function VoiceControls({history,setQuestion,disabled,voiceId='ru_RU-irina-medium'}){
  const [listening,setListening]=useState(false),[message,setMessage]=useState(''),[speak,setSpeak]=useState(true);
  const [tts,setTts]=useState({available:false,engine:'browser',voices:[],message:''}),[ttsReady,setTtsReady]=useState(false);
+=======
+export default function VoiceControls({history,setQuestion,disabled}){
+ const [listening,setListening]=useState(false),[message,setMessage]=useState(''),[speak,setSpeak]=useState(true);
+ const [tts,setTts]=useState({available:false,engine:'browser',voices:[],message:''}),[ttsReady,setTtsReady]=useState(false);
+ const [voice,setVoice]=useState(()=>{try{return localStorage.getItem(VOICE_STORAGE)||'ru_RU-irina-medium';}catch{return 'ru_RU-irina-medium';}});
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  const [audioSrc,setAudioSrc]=useState('');
  const recognizer=useRef(null),player=useRef(null),seen=useRef(null),generation=useRef(0),finishPlayback=useRef(null);
  useEffect(()=>{let live=true;api('tts_status').then(x=>{if(live){setTts(x);setTtsReady(true);}}).catch(e=>{if(live){setTts(x=>({...x,message:e.message}));setTtsReady(true);}});return()=>{live=false;};},[]);
@@ -41,8 +53,12 @@ export default function VoiceControls({history,setQuestion,disabled,voiceId='ru_
   if(tts.available){
    try{
     for(const part of chunks(text)){
+<<<<<<< HEAD
      if(!tts.voices.includes(voiceId))throw Error('Выбранный преподавателем голос не установлен');
      const result=await api('tts_synthesize',{text:part,voice:voiceId});
+=======
+     const result=await api('tts_synthesize',{text:part,voice:tts.voices.includes(voice)?voice:tts.voices[0]});
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
      if(request!==generation.current)return;
      const played=await playPrepared(result.audio,request);
      if(!played)return;
@@ -72,5 +88,9 @@ export default function VoiceControls({history,setQuestion,disabled,voiceId='ru_
   }catch{setListening(false);setMessage('Нет доступа к микрофону. Разрешите его для этого сайта в настройках браузера.');}
  };
  const last=[...history].reverse().find(x=>['caller','service'].includes(x.role));
+<<<<<<< HEAD
  return <div className="student-voice"><div className="student-buttons"><button type="button" id="student-microphone" disabled={disabled} aria-pressed={listening} onClick={microphone}>{listening?'■ Остановить запись':'🎙 Задать вопрос голосом'}</button><button type="button" id="student-play-voice" disabled={!last} onClick={()=>say(last.text)}>▶ Послушать {last?.role==='service'?'сотрудника службы':'очевидца'}</button><button type="button" onClick={()=>{stopSound(false);setMessage('Звук остановлен.');}}>Остановить звук</button></div><label><input type="checkbox" checked={speak} onChange={e=>{setSpeak(e.target.checked);if(e.target.checked)seen.current=null;else stopSound(false);}}/> Автоматически озвучивать реплики</label><small className="student-tts-engine">Озвучивание: {!ttsReady?'проверяем…':tts.available?'Piper (локально)':'голос браузера'}</small>{audioSrc&&<div className="student-audio-player"><small>Аудио последней реплики</small><audio ref={player} controls preload="auto" src={audioSrc}/></div>}{(message||listening)&&<p role="status">{listening?'Слушаю…':message}</p>}</div>;
+=======
+ return <div className="student-voice"><div className="student-buttons"><button type="button" id="student-microphone" disabled={disabled} aria-pressed={listening} onClick={microphone}>{listening?'■ Остановить запись':'🎙 Задать вопрос голосом'}</button><button type="button" id="student-play-voice" disabled={!last} onClick={()=>say(last.text)}>▶ Послушать {last?.role==='service'?'сотрудника службы':'очевидца'}</button><button type="button" onClick={()=>{stopSound(false);setMessage('Звук остановлен.');}}>Остановить звук</button></div><label><input type="checkbox" checked={speak} onChange={e=>{setSpeak(e.target.checked);if(e.target.checked)seen.current=null;else stopSound(false);}}/> Автоматически озвучивать реплики</label>{tts.voices.length>0&&<label>Голос очевидца<select aria-label="Голос очевидца" value={tts.voices.includes(voice)?voice:tts.voices[0]} onChange={e=>{setVoice(e.target.value);try{localStorage.setItem(VOICE_STORAGE,e.target.value);}catch{}}}>{tts.voices.map(id=><option key={id} value={id}>{voiceName(id)}</option>)}</select></label>}<small className="student-tts-engine">Озвучивание: {!ttsReady?'проверяем…':tts.available?'Piper (локально)':'голос браузера'}</small>{audioSrc&&<div className="student-audio-player"><small>Аудио последней реплики</small><audio ref={player} controls preload="auto" src={audioSrc}/></div>}{(message||listening)&&<p role="status">{listening?'Слушаю…':message}</p>}</div>;
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
 }

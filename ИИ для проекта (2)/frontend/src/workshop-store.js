@@ -9,6 +9,7 @@ const teacherProfile=()=>{try{return JSON.parse(localStorage.getItem('giik.teach
 // Keep the existing version-1 browser format, including approved historical snapshots.
 export function createWorkshopStore(){
  let state={version:1,cards:[],selected:null,batch:null,teacher:''},meta=null,ready=false;
+<<<<<<< HEAD
  let generating=false,reviewing=false,referencePending=null,stopRequested=false,storageOK=true,serverMode=false,serverSaveTimer=null,warning='',notice='',error=false,reviewFeedback='';
  const listeners=new Set();let snapshot;
  const emit=()=>{snapshot={state,meta,ready,generating,reviewing,referencePending,stopRequested,storageOK,serverMode,warning,notice,error,reviewFeedback};listeners.forEach(fn=>fn());};
@@ -17,6 +18,15 @@ export function createWorkshopStore(){
  const persist=()=>{let localSaved=false;if(storageOK){try{localStorage.setItem(STORAGE,JSON.stringify(state));localSaved=true;}catch{storageOK=false;warning=serverMode?'Локальный кэш недоступен, но данные продолжают сохраняться на сервере.':'Браузер не смог сохранить изменения. Скачайте JSON до закрытия вкладки.';}}queueServerSave();return localSaved||serverMode;};
  const selected=()=>state.cards.find(c=>c.id===state.selected);
  const touch=card=>{if(card.reference?.version===2)card.reference=generatedReference(card,meta);card.updated_at=new Date().toISOString();card.revision++;card.reference_checked=false;reviewFeedback='';persist();emit();};
+=======
+ let generating=false,reviewing=false,referencePending=null,stopRequested=false,storageOK=true,warning='',notice='',error=false,reviewFeedback='';
+ const listeners=new Set();let snapshot;
+ const emit=()=>{snapshot={state,meta,ready,generating,reviewing,referencePending,stopRequested,warning,notice,error,reviewFeedback};listeners.forEach(fn=>fn());};
+ const notify=(text,isError=false,atReview=false)=>{notice=text;error=isError;if(atReview)reviewFeedback=text;emit();};
+ const persist=()=>{if(!storageOK)return false;try{localStorage.setItem(STORAGE,JSON.stringify(state));return true;}catch{warning='Браузер не смог сохранить изменения. Скачайте JSON до закрытия вкладки.';return false;}};
+ const selected=()=>state.cards.find(c=>c.id===state.selected);
+ const touch=card=>{card.updated_at=new Date().toISOString();card.revision++;card.reference_checked=false;reviewFeedback='';persist();emit();};
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  const empty=()=>({title:'Новая карточка',report:'',fields:Object.fromEntries(Object.values(meta.groups).flatMap(([,fields])=>Object.keys(fields).map(k=>[k,'']))),class_ids:[],services:[],main_service:'',flags:{}});
  function add(content,provenance){const at=new Date().toISOString(),id=crypto.randomUUID();const card={id,number:'К-'+id.slice(0,8).toUpperCase(),status:'draft',created_at:at,updated_at:at,revision:1,content,provenance,review:null,history:[{at,action:'created',text:['ai','gigachat'].includes(provenance.source)?'Создано ИИ':'Создано вручную'}]};ensureCallerId(card,true);prepareCaller(card);card.content.fields.phone_callback='';syncServices(meta,card);state.cards.unshift(card);if(!state.selected)state.selected=id;return card;}
  async function init(){try{
@@ -30,7 +40,11 @@ export function createWorkshopStore(){
   }}catch{storageOK=false;warning='Не удалось прочитать сохранённую подборку. Она не перезаписана. Новые карточки можно скачать в JSON; автосохранение отключено.';}
   if(!state.teacher?.trim())state.teacher=teacherProfile();
   if(storageOK){const before=JSON.stringify(state.cards);state.cards.forEach(card=>{let changed=false;const at=new Date().toISOString();if(ensureCallerId(card)){changed=true;card.history.push({at,action:'caller_id_simulated',text:'Добавлен условный номер входящего звонка (АОН)'});}if(card.status==='draft'&&!card.caller_scenario){prepareCaller(card);changed=true;card.history.push({at,action:'caller_scenario_migrated',text:'Подготовлен сценарий заявителя для выделенного REST-диалога; эталон требуется обновить'});}if(changed){card.updated_at=at;card.revision=(card.revision||0)+1;card.reference_checked=false;}syncServices(meta,card);});if(before!==JSON.stringify(state.cards))persist();}
+<<<<<<< HEAD
   if(storageOK||serverMode){for(const card of state.cards.filter(c=>c.status==='approved'&&!c.training_task_id&&c.caller_scenario&&c.reference)){try{const published=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:'medium',opening:card.training_opening||undefined,voice_id:card.voice_id||'ru_RU-irina-medium'});card.training_task_id=published.task_id;}catch{warning='Некоторые ранее утверждённые карточки не добавлены в тренировки. Откройте карточку и нажмите «Добавить в тренировки обучающегося».';}}persist();}
+=======
+  if(storageOK){for(const card of state.cards.filter(c=>c.status==='approved'&&!c.training_task_id&&c.caller_scenario&&c.reference)){try{const published=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:'medium',opening:card.training_opening||undefined});card.training_task_id=published.task_id;}catch{warning='Некоторые ранее утверждённые карточки не добавлены в тренировки. Откройте карточку и нажмите «Добавить в тренировки обучающегося».';}}persist();}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
   ready=true;emit();
  }catch(e){notify(e.message,true);}}
  async function buildReference(card){
@@ -49,7 +63,11 @@ export function createWorkshopStore(){
  }
  async function review(action){const card=selected();if(!card||reviewing||generating||card.status!=='draft')return;reviewing=true;error=false;reviewFeedback=action==='validate'?'Проверяю поля…':'Утверждаю карточку и эталон…';emit();try{
   if(action==='validate'){await api('card_validate',{content:card.content});notify('Формат полей корректен. Смысл и полноту сведений проверяет преподаватель.',false,true);}
+<<<<<<< HEAD
   else{const approval={content:card.content,caller_scenario:card.caller_scenario,reference:card.reference,reference_checked:card.reference_checked===true,teacher:state.teacher||teacherProfile(),note:card.review_note||'',level:'medium',opening:card.training_opening||undefined,voice_id:card.voice_id||'ru_RU-irina-medium'};const result=await api('card_approve',approval);card.content=result.content;card.reference=result.reference;card.review=result.review;card.status='approved';card.updated_at=result.review.at;card.history.push({at:result.review.at,action:'approved',text:`Утверждено: ${result.review.teacher}`,review:structuredClone(result.review),content:structuredClone(card.content),reference:structuredClone(card.reference)});persist();try{const published=await api('card_publish',{...approval,content:result.content,reference:result.reference,reference_checked:true,teacher:result.review.teacher,note:result.review.note||''});card.training_task_id=published.task_id;delete card.training_publish_error;persist();notify('Карточка и эталон утверждены и добавлены в тренировки.',false,true);}catch(publishError){card.training_publish_error=publishError.message;warning='Карточка утверждена, но пока не добавлена в тренировки: '+publishError.message;persist();notify('Карточка и эталон утверждены. Публикацию можно повторить отдельной кнопкой.',false,true);}}
+=======
+  else{const approval={content:card.content,caller_scenario:card.caller_scenario,reference:card.reference,reference_checked:card.reference_checked===true,teacher:state.teacher||teacherProfile(),note:card.review_note||'',level:'medium',opening:card.training_opening||undefined};const result=await api('card_approve',approval);card.content=result.content;card.reference=result.reference;card.review=result.review;card.status='approved';card.updated_at=result.review.at;card.history.push({at:result.review.at,action:'approved',text:`Утверждено: ${result.review.teacher}`,review:structuredClone(result.review),content:structuredClone(card.content),reference:structuredClone(card.reference)});persist();try{const published=await api('card_publish',{...approval,content:result.content,reference:result.reference,reference_checked:true,teacher:result.review.teacher,note:result.review.note||''});card.training_task_id=published.task_id;delete card.training_publish_error;persist();notify('Карточка и эталон утверждены и добавлены в тренировки.',false,true);}catch(publishError){card.training_publish_error=publishError.message;warning='Карточка утверждена, но пока не добавлена в тренировки: '+publishError.message;persist();notify('Карточка и эталон утверждены. Публикацию можно повторить отдельной кнопкой.',false,true);}}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  }catch(e){notify(e.message,true,true);}finally{reviewing=false;emit();}}
  function edit(kind,key,value){const card=selected();if(!card||card.status==='approved'||reviewing)return;
   if(kind==='reference_checked'){card.reference_checked=value&&referenceCurrent(card);reviewFeedback='';persist();emit();return;}
@@ -81,7 +99,11 @@ export function createWorkshopStore(){
  emit();return {
   subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getSnapshot:()=>snapshot,
   init,edit,review,notify,generateReference,askCaller,
+<<<<<<< HEAD
   async publishTraining(){const card=selected();if(!card||card.status!=='approved'||reviewing)return;reviewing=true;emit();try{const result=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:'medium',opening:card.training_opening||undefined,voice_id:card.voice_id||'ru_RU-irina-medium'});card.training_task_id=result.task_id;delete card.training_publish_error;persist();notify('Карточка доступна обучающемуся в списке тренировок.');}catch(e){card.training_publish_error=e.message;persist();notify('Карточка утверждена, но публикация в тренировки не выполнена: '+e.message,true);}finally{reviewing=false;emit();}},
+=======
+  async publishTraining(){const card=selected();if(!card||card.status!=='approved'||reviewing)return;reviewing=true;emit();try{const result=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:'medium',opening:card.training_opening||undefined});card.training_task_id=result.task_id;delete card.training_publish_error;persist();notify('Карточка доступна обучающемуся в списке тренировок.');}catch(e){card.training_publish_error=e.message;persist();notify('Карточка утверждена, но публикация в тренировки не выполнена: '+e.message,true);}finally{reviewing=false;emit();}},
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
   selectAddress(record,context){const card=selected();if(!card||card.status==='approved'||reviewing)return;Object.assign(card.content.fields,Object.fromEntries(ADDRESS_KEYS.map(k=>[k,''])),addressFields(record,context));card.geocoding={source:'OpenStreetMap',id:record.id,kind:record.kind,point:record.point,selected_at:new Date().toISOString()};card.history.push({at:new Date().toISOString(),action:'address_selected',text:'Выбран адрес OSM: '+record.street+' '+record.house});touch(card);},
   clearAddress(){const card=selected();if(!card||card.status==='approved'||reviewing)return;Object.assign(card.content.fields,Object.fromEntries([...ADDRESS_KEYS,'latitude','longitude'].map(k=>[k,''])));card.geocoding=null;touch(card);},
   prepareCaller(){const card=selected();if(!card||card.status==='approved'||reviewing||generating||card.caller_scenario)return;prepareCaller(card);touch(card);notify(card.reference?.version===2?'Разговор подготовлен. Карточка обновлена.':'Разговор подготовлен. Обновите эталон: в нём появится телефон заявителя.');},

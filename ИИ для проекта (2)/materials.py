@@ -13,8 +13,11 @@ def _path(engine):
 
 
 def items(engine):
+<<<<<<< HEAD
     if getattr(engine, 'store', None) is not None:
         return engine.store.list_materials()
+=======
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     path = _path(engine)
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
 
@@ -24,6 +27,7 @@ def add(engine, request):
     parsed = urlsplit(url)
     if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('Нужна доступная ссылка http(s) на документ.')
+<<<<<<< HEAD
     entry = {'id':'material-' + uuid.uuid4().hex[:12], 'title':require_text(request.get('title'), 'Название материала', 160),
              'url':url, 'description':str(request.get('description') or '')[:1000],
              'teacher':require_text(request.get('teacher'), 'Преподаватель', 160), 'created_at':now()}
@@ -31,6 +35,12 @@ def add(engine, request):
         engine.store.add_material(entry)
         return entry
     rows = items(engine)
+=======
+    rows = items(engine)
+    entry = {'id':'material-' + uuid.uuid4().hex[:12], 'title':require_text(request.get('title'), 'Название материала', 160),
+             'url':url, 'description':str(request.get('description') or '')[:1000],
+             'teacher':require_text(request.get('teacher'), 'Преподаватель', 160), 'created_at':now()}
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
     rows.append(entry)
     temp = _path(engine).with_suffix('.tmp')
     temp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')

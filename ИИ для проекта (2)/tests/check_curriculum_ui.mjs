@@ -14,7 +14,11 @@ try{
  const base=out.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];assert.ok(base,err);
  const page=await browser.newPage({viewport:{width:1550,height:1050}}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+<<<<<<< HEAD
  await page.goto(base+'/teacher#create-training');await page.locator('.classroom-builder').waitFor();
+=======
+ await page.goto(base+'/teacher#create-training');await page.locator('.curriculum').waitFor();
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  const task=await page.evaluate(async()=>{const api=globalThis.TrainingAPI.api;
   const content=(await api('card_generate',{topic:'Учебный пожар',category:'1',index:1,total:1})).content;
   content.fields.phone_aon='+7 (000) 111-22-33';
@@ -23,6 +27,7 @@ try{
   return api('card_approve',{content,reference,caller_scenario,teacher:'Преподаватель',reference_checked:true,publish_training:true});
  });
  assert.ok(task.task_id);
+<<<<<<< HEAD
  await page.reload();await page.locator('.classroom-builder').waitFor();
  await page.locator('.classroom-settings input[required]').fill('Занятие');
  await page.locator('.classroom-choices input[type=checkbox]').first().check();
@@ -52,6 +57,30 @@ try{
  const card={...session.card,_report:'Горит дом',_services:'["101"]',_main_service:'101'};
  await page.evaluate(async({id,card})=>globalThis.TrainingAPI.api('student_action',{student:'Алексей Иванов',id,operation:'submit',full_form:true,card}),{id:session.id,card});
  await page.evaluate(()=>localStorage.setItem('giik.student.profile.v1',JSON.stringify({name:'Мария Петрова'})));await page.reload();
+=======
+ await page.reload();await page.locator('.curriculum').waitFor();
+ const panels=page.locator('.curriculum-columns .tw-panel');
+ await panels.first().locator('input').first().fill('Пожары');
+ await panels.first().locator('input[type=checkbox]').first().check();
+ await panels.first().getByRole('button',{name:'Сохранить и утвердить'}).click();
+ await page.waitForFunction(()=>document.querySelector('.curriculum .tw-note')?.textContent.includes('утверждён'));
+ await panels.nth(1).locator('input').first().fill('Занятие');
+ await panels.nth(1).locator('input[type=checkbox]').first().check();
+ await panels.nth(1).locator('textarea').fill('Оператор; оператор\nДДС; ДДС\nПожарная; служба; 101');
+ await panels.nth(1).getByRole('button',{name:'Подготовить тренировку'}).click();
+ await page.getByRole('button',{name:'Активировать'}).click();
+ const training=await page.evaluate(async()=>{const rows=await globalThis.TrainingAPI.api('training_list');return rows[0];});
+ assert.equal(training.status,'active');
+ await page.goto(base+'/student');await page.evaluate(()=>localStorage.setItem('giik.student.profile.v1',JSON.stringify({name:'Оператор'})));await page.reload();
+ await page.locator('[data-student-row]').first().waitFor();
+ await page.getByRole('button',{name:'Принять вызов'}).first().click();
+ await page.locator('.student-incident-form').waitFor();
+ const session=await page.evaluate(async(id)=>globalThis.TrainingAPI.api('student_action',{student:'Оператор',id,operation:'student',full_form:true}),training.cards[0].operator_session_id);
+ assert.equal(session.status,'active');
+ const card={...session.card,_report:'Горит дом',_services:'["101"]',_main_service:'101'};
+ await page.evaluate(async({id,card})=>globalThis.TrainingAPI.api('student_action',{student:'Оператор',id,operation:'submit',full_form:true,card}),{id:session.id,card});
+ await page.evaluate(()=>localStorage.setItem('giik.student.profile.v1',JSON.stringify({name:'ДДС'})));await page.reload();
+>>>>>>> ec5491b6745f1dd11607901b6ecc81befa475fae
  await page.getByText('Карточки в работе').waitFor();
  await page.getByText('Карточка '+training.cards[0].id.slice(-6)).waitFor();
  assert.deepEqual(errors,[]);
