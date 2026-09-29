@@ -5,29 +5,39 @@ the auth/catalog/training-data repository patterns. Every public method opens
 its own connection; multi-table writes run inside one transaction. Documents
 (the Engine JSON format) are converted to/from rows by storage_documents.py.
 
-Schema version 2.4.0 only extends workshop_card with the exact `content` jsonb
-column (for a faithful master-workshop round trip); all other tables were
-created by Этапы 2.1-2.3 and are reused as-is.
+Schema version 2.5.0 scopes cached insight reports to their owner and group,
+while retaining the workshop-card content snapshot introduced in version 2.4.0.
 """
 from __future__ import annotations
 
 import json
-import secrets
 import uuid
 from typing import Callable, Dict, List, Optional
 
-import auth_crypto
 import db_config
 import db_connection
 from db_connection import quote_literal as q
 
 import storage_documents as docs
-import training_data_service as service
 from training_data_repository import TrainingDataRepository
 
-SCHEMA_VERSION = '2.4.0'
+SCHEMA_VERSION = '2.5.0'
 
 SCHEMA_STATEMENTS = [
+    "CREATE TABLE IF NOT EXISTS insight_report ("
+    "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, group_name text, "
+    "period text, report jsonb, created_at timestamptz NOT NULL DEFAULT now())",
+    'ALTER TABLE insight_report ADD COLUMN IF NOT EXISTS source_updated_at timestamptz',
+    'ALTER TABLE insight_report ADD COLUMN IF NOT EXISTS owner_id bigint',
+    'DELETE FROM insight_report older USING insight_report newer'
+    ' WHERE COALESCE(older.owner_id, 0) = COALESCE(newer.owner_id, 0)'
+    " AND COALESCE(older.group_name, '') = COALESCE(newer.group_name, '')"
+    ' AND older.period = newer.period AND older.id < newer.id',
+    'DROP INDEX IF EXISTS idx_insight_report_group_period',
+    'CREATE UNIQUE INDEX idx_insight_report_group_period'
+    " ON insight_report (COALESCE(owner_id, 0), COALESCE(group_name, ''), period)",
+    'CREATE INDEX IF NOT EXISTS idx_insight_report_created_at'
+    ' ON insight_report(created_at)',
     # Exact browser content snapshot for master-workshop round trips.
     'ALTER TABLE workshop_card ADD COLUMN IF NOT EXISTS content jsonb',
     # Browser-side card UUID kept as an additional unique handle.
@@ -46,8 +56,17 @@ def sql_value(value) -> str:
     if value is True or value is False:
         return 'TRUE' if value else 'FALSE'
     if isinstance(value, (dict, list)):
-        return q(__import__('json').dumps(value, ensure_ascii=False))
+        return q(json.dumps(value, ensure_ascii=False))
     return q(value)
+
+
+def _execute_params(connection, sql: str, params):
+    execute_params = getattr(connection, 'execute_params', None)
+    if callable(execute_params):
+        return execute_params(sql, params)
+    for index, value in enumerate(params, 1):
+        sql = sql.replace(f'${index}', sql_value(value), 1)
+    return connection.execute(sql)
 
 
 def upsert_row(connection, table: str, columns, row, pk: str = 'id') -> None:
@@ -152,12 +171,12 @@ class StorageRepository:
         self._config = config or db_config.get_db_config()
 
     def _connect(self) -> db_connection.PostgresConnection:
-        return db_connection.connect_from_config(self._config)
+        return db_connection.connection_from_config(self._config)
 
     # ----------------------------------------------------------------- schema
 
     def ensure_schema(self) -> None:
-        """Apply 2.4.0 statements and record the migration version."""
+        """Apply schema statements and record the current migration version."""
         with self._connect() as connection:
             with connection.transaction():
                 for statement in SCHEMA_STATEMENTS:
@@ -177,8 +196,9 @@ class StorageRepository:
 
     @staticmethod
     def _find_legacy_user(connection, name: str) -> Optional[int]:
-        row = connection.fetchone(
-            'SELECT user_id FROM legacy_name_map WHERE name = ' + q(name))
+        row = _execute_params(connection,
+                              'SELECT user_id FROM legacy_name_map WHERE name = $1',
+                              (name,))
         return int(row[0]) if row else None
 
     @staticmethod
@@ -189,33 +209,24 @@ class StorageRepository:
             + ') ON CONFLICT (name) DO NOTHING')
 
     def _resolve_name(self, connection, name, kind: str) -> Optional[int]:
-        """Legacy string name -> user_id (create user on demand, like Этап 3)."""
+        """Resolve legacy identity names without creating new accounts."""
         if name is None:
             return None
         key = str(name).strip()
         if not key:
             return None
+        rows = _execute_params(
+            connection,
+            'SELECT id FROM "user" WHERE display_name = $1 OR login = $2'
+            ' OR full_name = $3 ORDER BY CASE WHEN display_name = $1 THEN 0'
+            ' WHEN login = $2 THEN 1 ELSE 2 END LIMIT 2',
+            (key, key, key))
+        if len(rows) > 1:
+            raise ValueError('Имя неоднозначно; выберите уникальный логин пользователя.')
         existing = self._find_legacy_user(connection, key)
-        if existing is not None:
-            return existing
-        user = TrainingDataRepository.find_user_by_display_name(connection, key)
-        if user is not None:
-            if kind == 'teacher' and user['role'] == 'student':
-                TrainingDataRepository.promote_user_to_teacher(connection, user['id'])
-            self._insert_legacy_name(connection, key, user['id'], kind)
-            return user['id']
-        base = service.translit(key) or ('teacher' if kind == 'teacher' else 'student')
-        base = (base + 'xxx')[:40] if len(base) < 3 else base[:40]
-        login, suffix = base, 2
-        while TrainingDataRepository.user_by_login(connection, login) is not None:
-            login = f'{base[:37]}{suffix}'
-            suffix += 1
-        password = secrets.token_urlsafe(9)
-        user_id = TrainingDataRepository.create_user(
-            connection, login, auth_crypto.hash_password(password), key,
-            kind, display_name=key)
-        self._insert_legacy_name(connection, key, user_id, kind)
-        return user_id
+        if rows and existing is not None and existing != int(rows[0][0]):
+            raise ValueError('Имя неоднозначно; выберите уникальный логин пользователя.')
+        return int(rows[0][0]) if rows else existing
 
     def _name_of(self, connection) -> Callable:
         cache: Dict[int, Optional[str]] = {}
@@ -238,6 +249,24 @@ class StorageRepository:
             return self._resolve_name(connection, name, kind)
 
         return resolve
+
+    def resolve_student(self, name: str) -> int:
+        with self._connect() as connection:
+            return self._resolve_student_in_connection(connection, name)
+
+    def resolve_students(self, names: List[str]) -> List[int]:
+        with self._connect() as connection:
+            return [self._resolve_student_in_connection(connection, name) for name in names]
+
+    @staticmethod
+    def _resolve_student_in_connection(connection, name: str) -> int:
+        rows = _execute_params(connection,
+            'SELECT id FROM "user" WHERE (login = $1 OR display_name = $2'
+            ' OR full_name = $3) AND role = $4 AND is_active = TRUE LIMIT 2',
+            (name, name, name, 'student'))
+        if len(rows) != 1:
+            raise ValueError('Укажите уникальный логин действующего обучающегося.')
+        return int(rows[0][0])
 
     # ------------------------------------------------------------------ tasks
 
@@ -303,11 +332,23 @@ class StorageRepository:
                 row, dds_map.get(identifier), inc_map.get(identifier),
                 self._name_of(connection))
 
-    def list_tasks(self) -> List[dict]:
+    def list_tasks(self, owner: Optional[int] = None,
+                   teacher: Optional[int] = None) -> List[dict]:
         with self._connect() as connection:
+            filters = []
+            if owner is not None:
+                filters.append('approved_by_id = ' + q(int(owner)))
+            if teacher is not None:
+                teacher_id = q(int(teacher))
+                filters.append('(approved_by_id = ' + teacher_id
+                               + ' OR id IN (SELECT task_id FROM scenario_task'
+                               + ' WHERE scenario_id IN (SELECT id FROM scenario'
+                               + ' WHERE created_by_id = ' + teacher_id
+                               + ' OR approved_by_id = ' + teacher_id + ')))')
+            where = (' WHERE ' + ' AND '.join(filters)) if filters else ''
             rows = row_dicts(connection.execute(
                 'SELECT ' + ', '.join(TASK_COLUMNS)
-                + ' FROM task ORDER BY updated_at DESC, created_at DESC'),
+                + ' FROM task' + where + ' ORDER BY updated_at DESC, created_at DESC'),
                 TASK_COLUMNS)
             if not rows:
                 return []
@@ -322,6 +363,41 @@ class StorageRepository:
         with self._connect() as connection:
             row = connection.fetchone(
                 'SELECT 1 FROM task WHERE id = ' + q(identifier))
+        return row is not None
+
+    def task_belongs_to(self, identifier: str, user_id: int) -> bool:
+        teacher_id = q(int(user_id))
+        with self._connect() as connection:
+            sql = ('SELECT 1 FROM task WHERE id = ' + q(identifier)
+                   + ' AND (approved_by_id = ' + teacher_id
+                   + ' OR id IN (SELECT st.task_id FROM scenario_task st'
+                   + ' JOIN scenario sc ON sc.id = st.scenario_id'
+                   + ' WHERE sc.created_by_id = ' + teacher_id
+                   + ' OR sc.approved_by_id = ' + teacher_id + '))')
+            row = connection.fetchone(sql)
+        return row is not None
+
+    def session_belongs_to_teacher(self, identifier: str, user_id: int) -> bool:
+        teacher_id = q(int(user_id))
+        with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM "session" s WHERE s.id = ' + q(identifier)
+                + ' AND (s.task_id IN (SELECT id FROM task WHERE approved_by_id = '
+                + teacher_id + ') OR s.id IN (SELECT tc.operator_session_id'
+                ' FROM training_card tc JOIN training tr ON tr.id = tc.training_id'
+                ' WHERE tr.teacher_id = ' + teacher_id + ') OR s.student_id IN ('
+                'SELECT gm.user_id FROM group_member gm JOIN student_group sg'
+                ' ON sg.id = gm.group_id WHERE sg.teacher_id = ' + teacher_id + '))')
+        return row is not None
+
+    def session_belongs_to_task_owner(self, identifier: str, task_id: str,
+                                      user_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM "session" WHERE id = ' + q(identifier)
+                + ' AND task_id = ' + q(task_id)
+                + ' AND task_id IN (SELECT id FROM task WHERE approved_by_id = '
+                + q(int(user_id)) + ')')
         return row is not None
 
     # ---------------------------------------------------------------- sessions
@@ -452,11 +528,31 @@ class StorageRepository:
             return docs.session_from_row(row, name_of=self._name_of(connection),
                                          **children)
 
-    def list_sessions(self) -> List[dict]:
+    def session_belongs_to(self, identifier: str, user_id: int) -> bool:
         with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM "session" WHERE id = ' + q(identifier)
+                + ' AND student_id = ' + q(int(user_id)))
+        return row is not None
+
+    def list_sessions(self, owner: Optional[int] = None,
+                      teacher: Optional[int] = None) -> List[dict]:
+        with self._connect() as connection:
+            filters = []
+            if owner is not None:
+                filters.append('student_id = ' + q(int(owner)))
+            if teacher is not None:
+                teacher_id = q(int(teacher))
+                filters.append('(task_id IN (SELECT id FROM task WHERE approved_by_id = '
+                               + teacher_id + ') OR id IN (SELECT tc.operator_session_id'
+                               ' FROM training_card tc JOIN training tr ON tr.id = tc.training_id'
+                               ' WHERE tr.teacher_id = ' + teacher_id + ') OR student_id IN ('
+                               'SELECT gm.user_id FROM group_member gm JOIN student_group sg'
+                               ' ON sg.id = gm.group_id WHERE sg.teacher_id = ' + teacher_id + '))')
+            where = (' WHERE ' + ' AND '.join(filters)) if filters else ''
             rows = row_dicts(connection.execute(
                 'SELECT ' + ', '.join(SESSION_COLUMNS) + ' FROM "session"'
-                ' ORDER BY created_at DESC, id'), SESSION_COLUMNS)
+                + where + ' ORDER BY created_at DESC, id'), SESSION_COLUMNS)
             name_of = self._name_of(connection)
             result = []
             for row in rows:
@@ -464,6 +560,78 @@ class StorageRepository:
                 result.append(docs.session_from_row(
                     row, name_of=name_of, **children))
             return result
+
+    def list_sessions_summary(self, teacher: Optional[int] = None) -> List[dict]:
+        """Return teacher-dashboard rows without loading session/task documents.
+
+        In particular, ``task_snapshot`` and ``card`` stay inside PostgreSQL:
+        only their needed metadata (task fields and card counts) is projected.
+        """
+        filters = []
+        if teacher is not None:
+            teacher_id = q(int(teacher))
+            filters.append(
+                '(s.task_id IN (SELECT id FROM task WHERE approved_by_id = '
+                + teacher_id + ') OR s.id IN (SELECT tc.operator_session_id'
+                ' FROM training_card tc JOIN training tr ON tr.id = tc.training_id'
+                ' WHERE tr.teacher_id = ' + teacher_id + ') OR s.student_id IN ('
+                'SELECT gm.user_id FROM group_member gm JOIN student_group sg'
+                ' ON sg.id = gm.group_id WHERE sg.teacher_id = ' + teacher_id + '))')
+        where = (' WHERE ' + ' AND '.join(filters)) if filters else ''
+        columns = (
+            'id', 'student', 'title', 'task_id', 'status', 'level', 'workflow',
+            'created_at', 'updated_at', 'duration_seconds', 'filled',
+            'total_fields', 'grade', 'machine_percent', 'ai_percent',
+            'final_percent', 'ai_remarks', 'training', 'comment',
+            'category_class_ids')
+        sql = (
+            'SELECT s.id, COALESCE(u.display_name, u.full_name, u.login, \'\') AS student,'
+            " COALESCE(s.task_snapshot->>'title', t.title) AS title, s.task_id, s.status,"
+            " COALESCE(s.effective_level, s.task_snapshot->>'level', t.level) AS level,"
+            " COALESCE(s.task_snapshot->>'workflow', t.workflow, 'caller') AS workflow,"
+            ' s.created_at, s.updated_at,'
+            " CASE WHEN s.status = 'queued' THEN 0 ELSE GREATEST(0,"
+            ' FLOOR(EXTRACT(EPOCH FROM (COALESCE(s.submitted_at, now()) -'
+            ' COALESCE(s.activated_at, s.created_at))))::int) END AS duration_seconds,'
+            " (SELECT COUNT(*) FROM jsonb_each_text(CASE WHEN jsonb_typeof(s.card) = 'object'"
+            " THEN s.card ELSE '{}'::jsonb END) AS card_field(key, value)"
+            " WHERE btrim(card_field.value) <> '') AS filled,"
+            " (SELECT COUNT(*) FROM jsonb_object_keys(CASE WHEN jsonb_typeof(s.card) = 'object'"
+            " THEN s.card ELSE '{}'::jsonb END)) AS total_fields,"
+            ' decision.grade, machine.percent AS machine_percent,'
+            ' ai.percent AS ai_percent, decision.percent AS final_percent, ai.remarks AS ai_remarks,'
+            ' s.training_meta AS training, COALESCE(s.teacher_note, \'\') AS comment,'
+            " COALESCE(tis.content->'class_ids', s.task_snapshot->'incident_source'->'class_ids',"
+            " '[]'::jsonb) AS category_class_ids"
+            ' FROM "session" s JOIN "user" u ON u.id = s.student_id'
+            ' LEFT JOIN task t ON t.id = s.task_id'
+            ' LEFT JOIN task_incident_source tis ON tis.task_id = s.task_id'
+            ' LEFT JOIN LATERAL (SELECT d.grade, d.percent FROM teacher_decision d'
+            ' WHERE d.session_id = s.id ORDER BY d.created_at DESC, d.id DESC LIMIT 1) decision ON TRUE'
+            ' LEFT JOIN LATERAL (SELECT m.percent FROM machine_assessment m'
+            ' WHERE m.session_id = s.id ORDER BY m.at DESC, m.id DESC LIMIT 1) machine ON TRUE'
+            ' LEFT JOIN LATERAL (SELECT a.percent,'
+            ' (SELECT COUNT(*) FROM ai_assessment_field f WHERE f.assessment_id = a.id'
+            " AND f.verdict IN ('partial', 'incorrect', 'missing')) AS remarks"
+            ' FROM ai_assessment a WHERE a.session_id = s.id'
+            ' ORDER BY a.created_at DESC, a.id DESC LIMIT 1) ai ON TRUE'
+            + where + ' ORDER BY s.created_at DESC, s.id')
+        with self._connect() as connection:
+            rows = row_dicts(connection.execute(sql), columns)
+        result = []
+        for row in rows:
+            row['created_at'] = docs.load_ts(row.get('created_at'))
+            row['updated_at'] = docs.load_ts(row.get('updated_at'))
+            row['duration_seconds'] = int(row.get('duration_seconds') or 0)
+            row['filled'] = int(row.get('filled') or 0)
+            row['total_fields'] = int(row.get('total_fields') or 0)
+            row['category_class_ids'] = docs._list(row.get('category_class_ids'))
+            row['training'] = docs._dict(row.get('training')) or None
+            row['grade'] = int(row['grade']) if row.get('grade') is not None else None
+            for key in ('machine_percent', 'ai_percent', 'final_percent', 'ai_remarks'):
+                row[key] = int(row[key]) if row.get(key) is not None else None
+            result.append(row)
+        return result
 
     # -------------------------------------------------------------- scenarios
 
@@ -477,6 +645,21 @@ class StorageRepository:
                     connection, 'scenario_task', SCENARIO_TASK_COLUMNS,
                     [(doc['id'], task_id, difficulty)
                      for task_id, difficulty in rows['tasks']])
+
+    def scenario_belongs_to(self, identifier: str, user_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM scenario WHERE id = ' + q(identifier)
+                + ' AND (created_by_id = ' + q(int(user_id))
+                + ' OR approved_by_id = ' + q(int(user_id)) + ')')
+        return row is not None
+
+    def training_belongs_to(self, identifier: str, user_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM training WHERE id = ' + q(identifier)
+                + ' AND teacher_id = ' + q(int(user_id)))
+        return row is not None
 
     def load_scenario(self, identifier: str) -> dict:
         with self._connect() as connection:
@@ -492,11 +675,13 @@ class StorageRepository:
             return docs.scenario_from_row(row, tasks,
                                           self._name_of(connection))
 
-    def list_scenarios(self) -> List[dict]:
+    def list_scenarios(self, owner: Optional[int] = None) -> List[dict]:
         with self._connect() as connection:
+            where = (' WHERE created_by_id = ' + q(int(owner))
+                     + ' OR approved_by_id = ' + q(int(owner))) if owner is not None else ''
             rows = row_dicts(connection.execute(
                 'SELECT ' + ', '.join(SCENARIO_COLUMNS) + ' FROM scenario'
-                ' ORDER BY created_at DESC, id'), SCENARIO_COLUMNS)
+                + where + ' ORDER BY created_at DESC, id'), SCENARIO_COLUMNS)
             name_of = self._name_of(connection)
             result = []
             for row in rows:
@@ -518,6 +703,8 @@ class StorageRepository:
         with self._connect() as connection:
             with connection.transaction():
                 rows = docs.training_to_rows(doc, self._resolver(connection))
+                if any(row[1] is None for row in rows['participants']):
+                    raise ValueError('Участник тренировки не найден среди пользователей.')
                 upsert_row(connection, 'training', TRAINING_COLUMNS, rows['training'])
                 training_id = doc['id']
                 delete_where(connection, 'training_scenario', 'training_id', training_id)
@@ -564,6 +751,26 @@ class StorageRepository:
         return {'scenarios': scenarios, 'participants': participants,
                 'cards': cards, 'actions': actions}
 
+    def training_participant_belongs_to(self, identifier: str, user_id: int,
+                                        role: str) -> bool:
+        with self._connect() as connection:
+            row = connection.fetchone(
+                'SELECT 1 FROM training_participant WHERE training_id = ' + q(identifier)
+                + ' AND user_id = ' + q(int(user_id)) + ' AND role = ' + q(role))
+        return row is not None
+
+    def list_training_desks(self, user_id: int) -> List[dict]:
+        with self._connect() as connection:
+            rows = row_dicts(connection.execute(
+                'SELECT ' + ', '.join('tr.' + column for column in TRAINING_COLUMNS)
+                + ' FROM training tr JOIN training_participant tp ON tp.training_id = tr.id'
+                + ' WHERE tp.user_id = ' + q(int(user_id))
+                + ' ORDER BY tr.created_at DESC, tr.id'), TRAINING_COLUMNS)
+            name_of = self._name_of(connection)
+            return [docs.training_from_row(row, name_of=name_of,
+                                            **self._training_children(connection, row['id']))
+                    for row in rows]
+
     def load_training(self, identifier: str) -> dict:
         with self._connect() as connection:
             row = first_row(connection.execute(
@@ -576,11 +783,12 @@ class StorageRepository:
                                           name_of=self._name_of(connection),
                                           **children)
 
-    def list_trainings(self) -> List[dict]:
+    def list_trainings(self, owner: Optional[int] = None) -> List[dict]:
         with self._connect() as connection:
+            where = (' WHERE teacher_id = ' + q(int(owner))) if owner is not None else ''
             rows = row_dicts(connection.execute(
                 'SELECT ' + ', '.join(TRAINING_COLUMNS) + ' FROM training'
-                ' ORDER BY created_at DESC, id'), TRAINING_COLUMNS)
+                + where + ' ORDER BY created_at DESC, id'), TRAINING_COLUMNS)
             name_of = self._name_of(connection)
             result = []
             for row in rows:
@@ -602,11 +810,12 @@ class StorageRepository:
                 upsert_row(connection, 'material', MATERIAL_COLUMNS,
                            docs.material_to_rows(doc, self._resolver(connection)))
 
-    def list_materials(self) -> List[dict]:
+    def list_materials(self, owner: Optional[int] = None) -> List[dict]:
         with self._connect() as connection:
+            where = (' WHERE teacher_id = ' + q(int(owner))) if owner is not None else ''
             rows = row_dicts(connection.execute(
                 'SELECT ' + ', '.join(MATERIAL_COLUMNS) + ' FROM material'
-                ' ORDER BY created_at DESC, id'), MATERIAL_COLUMNS)
+                + where + ' ORDER BY created_at DESC, id'), MATERIAL_COLUMNS)
             name_of = self._name_of(connection)
             return [docs.material_from_row(row, name_of) for row in rows]
 
@@ -883,6 +1092,86 @@ class StorageRepository:
         if row is None:
             raise FileNotFoundError(number)
         return self._merge_workshop_doc(row)
+
+    # -------------------------------------------------------------- analytics
+
+    def insight_source(self, group: Optional[str] = None,
+                       owner: Optional[int] = None):
+        """Return assessment freshness and anonymized error aggregates."""
+        group_join = (' LEFT JOIN training tr ON tr.id = s.training_meta->>\'plan_id\''
+                      if group or owner is not None else '')
+        filters = ["s.status IN ('submitted', 'pending_teacher', 'reviewed')"]
+        if group:
+            filters.append('COALESCE(tr.group_name, s.training_meta->>\'group\') = '
+                           + q(group))
+        if owner is not None:
+            teacher_id = q(int(owner))
+            filters.append('(tr.teacher_id = ' + teacher_id
+                           + ' OR s.task_id IN (SELECT id FROM task WHERE approved_by_id = '
+                           + teacher_id + ') OR s.student_id IN ('
+                           'SELECT gm.user_id FROM group_member gm JOIN student_group sg'
+                           ' ON sg.id = gm.group_id WHERE sg.teacher_id = '
+                           + teacher_id + '))')
+        where = ' WHERE ' + ' AND '.join(filters)
+        source_sql = (
+            'WITH latest AS (SELECT DISTINCT ON (s.id) s.id, s.updated_at, '
+            's.task_snapshot, s.task_id, aa.id AS assessment_id '
+            'FROM "session" s JOIN ai_assessment aa ON aa.session_id = s.id'
+            + group_join + where + ' ORDER BY s.id, aa.created_at DESC, aa.id DESC) '
+            'SELECT COUNT(*), MAX(updated_at) FROM latest')
+        count_sql = (
+            'WITH latest AS (SELECT DISTINCT ON (s.id) s.id, s.task_snapshot, '
+            's.task_id, aa.id AS assessment_id FROM "session" s '
+            'JOIN ai_assessment aa ON aa.session_id = s.id'
+            + group_join + where + ' ORDER BY s.id, aa.created_at DESC, aa.id DESC) '
+            'SELECT COALESCE(l.task_snapshot->\'field_labels\'->>f.field, '
+            't.field_labels->>f.field, f.field) AS label, COUNT(*) '
+            'FROM latest l JOIN ai_assessment_field f '
+            'ON f.assessment_id = l.assessment_id '
+            'LEFT JOIN task t ON t.id = l.task_id '
+            "WHERE f.verdict IN ('incorrect', 'missing', 'partial') "
+            'GROUP BY 1')
+        with self._connect() as connection:
+            source = connection.fetchone(source_sql)
+            rows = row_dicts(connection.execute(count_sql), ('label', 'count'))
+        works = int(source[0]) if source else 0
+        updated_at = docs.load_ts(source[1]) if source and source[1] else None
+        source_updated_at = updated_at.isoformat() if hasattr(updated_at, 'isoformat') else updated_at
+        return source_updated_at, works, {row['label']: int(row['count']) for row in rows}
+
+    def get_insight_report(self, group: Optional[str], period: str,
+                           owner: Optional[int] = None) -> Optional[dict]:
+        group_clause = ('group_name IS NULL' if group is None
+                        else 'group_name = ' + q(group))
+        owner_clause = ('owner_id IS NULL' if owner is None
+                        else 'owner_id = ' + q(int(owner)))
+        with self._connect() as connection:
+            row = first_row(connection.execute(
+                'SELECT report, source_updated_at FROM insight_report WHERE '
+                + group_clause + ' AND ' + owner_clause + ' AND period = ' + q(period)
+                + ' ORDER BY created_at DESC LIMIT 1'),
+                ('report', 'source_updated_at'))
+        if row is None:
+            return None
+        report = row.get('report')
+        if isinstance(report, str):
+            report = json.loads(report)
+        source_updated_at = docs.load_ts(row.get('source_updated_at'))
+        return {'report': report, 'source_updated_at': source_updated_at}
+
+    def save_insight_report(self, group: Optional[str], period: str, report: dict,
+                            source_updated_at, owner: Optional[int] = None) -> None:
+        owner_value = 'NULL' if owner is None else q(int(owner))
+        with self._connect() as connection:
+            connection.execute(
+                'INSERT INTO insight_report(owner_id, group_name, period, report, '
+                'source_updated_at, created_at) VALUES ('
+                + owner_value + ', ' + sql_value(group) + ', ' + q(period) + ', '
+                + sql_value(report) + ', ' + sql_value(source_updated_at)
+                + ', now()) ON CONFLICT ((COALESCE(owner_id, 0)), '
+                '(COALESCE(group_name, \'\')), period) '
+                'DO UPDATE SET report = EXCLUDED.report, '
+                'source_updated_at = EXCLUDED.source_updated_at, created_at = now()')
 
     # ---------------------------------------------------- integrity / counts
 

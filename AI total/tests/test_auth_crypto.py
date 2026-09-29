@@ -4,9 +4,24 @@ import hashlib
 import json
 import time
 import unittest
+from unittest.mock import patch
 
 import auth_crypto
 from auth_crypto import _b64, _unb64
+
+
+class AuthConfigTests(unittest.TestCase):
+    def test_roles_required_by_default_and_explicit_override(self):
+        with patch.dict(auth_crypto.os.environ, {}, clear=True):
+            with patch('auth_crypto._load_auth_section', return_value={}):
+                self.assertTrue(auth_crypto.get_auth_config()['require_roles'])
+            with patch('auth_crypto._load_auth_section', return_value={'require_roles': False}):
+                self.assertFalse(auth_crypto.get_auth_config()['require_roles'])
+                with patch.dict(auth_crypto.os.environ, {'REQUIRE_ROLES': 'true'}):
+                    self.assertTrue(auth_crypto.get_auth_config()['require_roles'])
+            with patch.dict(auth_crypto.os.environ, {'REQUIRE_ROLES': 'false'}):
+                with patch('auth_crypto._load_auth_section', return_value={}):
+                    self.assertFalse(auth_crypto.get_auth_config()['require_roles'])
 
 
 class PasswordHashTests(unittest.TestCase):

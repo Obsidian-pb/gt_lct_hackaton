@@ -104,6 +104,40 @@ try {
     }
     $env:AI_DIALOGUE_REST_URL = $dialogueUrl
 
+    function Invoke-RequiredStep([string]$label, [string]$script, [string[]]$arguments, [string]$logName) {
+        Step $label
+        try {
+            $output = (& $python $script @arguments 2>&1 | Out-String).Trim()
+            $code = $LASTEXITCODE
+        } catch {
+            $output = $_.Exception.Message
+            $code = 1
+        }
+        Set-Content -Path (Join-Path $runtime $logName) -Value $output -Encoding UTF8
+        if ($output) { Write-Host $output -ForegroundColor $(if ($code -eq 0) { 'Green' } else { 'Red' }) }
+        if ($code -ne 0) { throw "$label failed (exit $code). See .runtime\\$logName" }
+    }
+
+    Invoke-RequiredStep 'Checking PostgreSQL connectivity...' 'data_layer.py' @() 'data-layer.log'
+    Invoke-RequiredStep 'Initializing the users/auth schema...' 'init_auth.py' @('--init') 'auth-init.log'
+    Invoke-RequiredStep 'Initializing the catalog schema...' 'init_catalog.py' @('--init') 'catalog-init.log'
+    Invoke-RequiredStep 'Initializing the storage schema...' 'init_storage.py' @('--init') 'storage-schema.log'
+    Invoke-RequiredStep 'Checking the storage layer...' 'init_storage.py' @('--check') 'storage-init.log'
+
+    Step 'Checking the training data layer (non-critical)...'
+    $trainingDataOutput = (& $python 'init_training_data.py' '--check' 2>&1 | Out-String).Trim()
+    $trainingDataCode = $LASTEXITCODE
+    Set-Content -Path (Join-Path $runtime 'training-data-init.log') -Value $trainingDataOutput -Encoding UTF8
+    if ($trainingDataCode -eq 0) { Write-Host $trainingDataOutput -ForegroundColor Green }
+    else { Write-Host $trainingDataOutput -ForegroundColor Yellow }
+
+    Step 'Checking the insights layer (non-critical)...'
+    $insightsOutput = (& $python 'init_insights.py' '--check' 2>&1 | Out-String).Trim()
+    $insightsCode = $LASTEXITCODE
+    Set-Content -Path (Join-Path $runtime 'insights-init.log') -Value $insightsOutput -Encoding UTF8
+    if ($insightsCode -eq 0) { Write-Host $insightsOutput -ForegroundColor Green }
+    else { Write-Host $insightsOutput -ForegroundColor Yellow }
+
     Stop-Listener 8878
 
     if ($useLocalAi) {
@@ -137,86 +171,6 @@ try {
 
     Step 'Everything is ready. Opening the interface...'
     Start-Process 'http://127.0.0.1:8878'
-
-    Step 'Checking the data layer (PostgreSQL)...'
-    try {
-        $dataLayerOutput = (& $python 'data_layer.py' 2>&1 | Out-String).Trim()
-        $dataLayerCode = $LASTEXITCODE
-    } catch {
-        $dataLayerOutput = $_.Exception.Message
-        $dataLayerCode = 1
-    }
-    Set-Content -Path (Join-Path $runtime 'data-layer.log') -Value $dataLayerOutput -Encoding UTF8
-    Write-Host ''
-    if ($dataLayerCode -eq 0) {
-        Write-Host $dataLayerOutput -ForegroundColor Green
-    } else {
-        Write-Host $dataLayerOutput -ForegroundColor Yellow
-    }
-
-    Step 'Initializing the users/auth layer (PostgreSQL)...'
-    try {
-        $authInitOutput = (& $python 'init_auth.py' '--init' 2>&1 | Out-String).Trim()
-        $authInitCode = $LASTEXITCODE
-    } catch {
-        $authInitOutput = $_.Exception.Message
-        $authInitCode = 1
-    }
-    Set-Content -Path (Join-Path $runtime 'auth-init.log') -Value $authInitOutput -Encoding UTF8
-    Write-Host ''
-    if ($authInitCode -eq 0) {
-        Write-Host $authInitOutput -ForegroundColor Green
-    } else {
-        Write-Host $authInitOutput -ForegroundColor Yellow
-    }
-
-    Step 'Initializing the catalog layer (PostgreSQL)...'
-    try {
-        $catalogInitOutput = (& $python 'init_catalog.py' '--init' 2>&1 | Out-String).Trim()
-        $catalogInitCode = $LASTEXITCODE
-    } catch {
-        $catalogInitOutput = $_.Exception.Message
-        $catalogInitCode = 1
-    }
-    Set-Content -Path (Join-Path $runtime 'catalog-init.log') -Value $catalogInitOutput -Encoding UTF8
-    Write-Host ''
-    if ($catalogInitCode -eq 0) {
-        Write-Host $catalogInitOutput -ForegroundColor Green
-    } else {
-        Write-Host $catalogInitOutput -ForegroundColor Yellow
-    }
-
-    Step 'Checking the training data layer (PostgreSQL)...'
-    try {
-        $dataInitOutput = (& $python 'init_training_data.py' '--check' 2>&1 | Out-String).Trim()
-        $dataInitCode = $LASTEXITCODE
-    } catch {
-        $dataInitOutput = $_.Exception.Message
-        $dataInitCode = 1
-    }
-    Set-Content -Path (Join-Path $runtime 'training-data-init.log') -Value $dataInitOutput -Encoding UTF8
-    Write-Host ''
-    if ($dataInitCode -eq 0) {
-        Write-Host $dataInitOutput -ForegroundColor Green
-    } else {
-        Write-Host $dataInitOutput -ForegroundColor Yellow
-    }
-
-    Step 'Checking the storage layer (PostgreSQL)...'
-    try {
-        $storageInitOutput = (& $python 'init_storage.py' '--check' 2>&1 | Out-String).Trim()
-        $storageInitCode = $LASTEXITCODE
-    } catch {
-        $storageInitOutput = $_.Exception.Message
-        $storageInitCode = 1
-    }
-    Set-Content -Path (Join-Path $runtime 'storage-init.log') -Value $storageInitOutput -Encoding UTF8
-    Write-Host ''
-    if ($storageInitCode -eq 0) {
-        Write-Host $storageInitOutput -ForegroundColor Green
-    } else {
-        Write-Host $storageInitOutput -ForegroundColor Yellow
-    }
 
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green

@@ -36,6 +36,9 @@ def publish(engine, request):
     identity = json.dumps([content, ref, scenario, opening, level], ensure_ascii=False, sort_keys=True)
     identifier = 't-' + hashlib.sha256(identity.encode()).hexdigest()[:12]
     if engine.exists(identifier):
+        if request.get('_owner_id') is not None and engine.load(identifier).get('owner_id') != request['_owner_id']:
+            from auth_service import AuthError
+            raise AuthError(403, 'wrong_owner', 'Этот ресурс принадлежит другому пользователю.')
         return {'task_id': identifier}
     expected = {key: row['value'] for key, row in ref['answer']['expected_fields'].items()}
     expected.update(_class_ids=json.dumps(content['class_ids'], ensure_ascii=False),
@@ -51,6 +54,8 @@ def publish(engine, request):
                        for k, value in expected.items()},
             'incident_source': copy.deepcopy(content), 'incident_reference': copy.deepcopy(ref),
             'caller_scenario': scenario}
+    if request.get('_owner_id') is not None:
+        task['owner_id'] = request['_owner_id']
     engine.save(task)
     return {'task_id': identifier}
 

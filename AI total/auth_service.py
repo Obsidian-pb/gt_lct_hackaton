@@ -74,6 +74,26 @@ def require_role(user: dict, roles) -> None:
         raise AuthError(403, 'forbidden', 'Недостаточно прав для этой операции.')
 
 
+def owner_key(user: Optional[dict]) -> Optional[str]:
+    """Return the stable legacy identity represented by an authenticated user."""
+    if not user:
+        return None
+    for key in ('display_name', 'login', 'full_name'):
+        value = user.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def require_owner(user: dict, owner) -> None:
+    """Reject access to a legacy-owned record unless its owner is the caller."""
+    if user and user.get('role') == 'admin':
+        return
+    identity = owner_key(user)
+    if not identity or not isinstance(owner, str) or identity.casefold() != owner.strip().casefold():
+        raise AuthError(403, 'wrong_owner', 'Этот ресурс принадлежит другому пользователю.')
+
+
 def roles_required() -> bool:
     """Этап 5: enforce JWT roles on every REST route (config auth.require_roles)."""
     return bool(auth_crypto.get_auth_config().get('require_roles'))
@@ -219,6 +239,33 @@ def delete_user(user_id: int) -> None:
     if existing['role'] == 'admin' and repository.count_users() <= 1:
         raise AuthError(409, 'last_admin', 'Нельзя удалить последнего администратора.')
     repository.delete_user(user_id)
+
+
+def reset_passwords(*, user_ids: Optional[List[int]] = None,
+                    group_id: Optional[int] = None,
+                    password: Optional[str] = None) -> List[dict]:
+    if bool(user_ids) == (group_id is not None):
+        raise AuthError(422, 'invalid_selection',
+                        'Укажите список user_ids или group_id.')
+    if password is not None and (not isinstance(password, str) or len(password) < 6):
+        raise AuthError(422, 'invalid_password', 'Пароль должен содержать не менее 6 символов.')
+    repository = auth_repository.AuthRepository()
+    users = (repository.list_students_by_ids(user_ids) if user_ids is not None
+             else repository.list_students_in_group(group_id))
+    expected = set(int(value) for value in user_ids) if user_ids is not None else None
+    if expected is not None and {int(user['id']) for user in users} != expected:
+        raise AuthError(422, 'invalid_selection',
+                        'Список должен содержать только существующих обучающихся.')
+    if not users:
+        raise AuthError(422, 'empty_selection', 'В выборке нет обучающихся.')
+    credentials = []
+    for user in users:
+        temporary_password = password or __import__('secrets').token_urlsafe(9)
+        repository.set_password(user['id'], hash_password(temporary_password))
+        credentials.append({'user_id': user['id'], 'login': user['login'],
+                            'display_name': user.get('display_name') or user['full_name'],
+                            'password': temporary_password})
+    return credentials
 
 
 # ------------------------------------------------------------------ groups CRUD

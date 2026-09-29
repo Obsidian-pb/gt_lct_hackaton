@@ -16,9 +16,30 @@ def session(engine, identifier):
     return value
 
 
-def overview(engine):
+def overview(engine, teacher=None):
+    repository = getattr(getattr(engine, 'storage', None), '_repo', None)
+    if repository is not None and hasattr(repository, 'list_sessions_summary'):
+        rows = []
+        for summary in repository.list_sessions_summary(teacher=teacher):
+            row = {key: summary.get(key) for key in (
+                'id', 'student', 'title', 'task_id', 'status', 'level', 'workflow',
+                'created_at', 'updated_at', 'duration_seconds', 'filled', 'total_fields',
+                'grade', 'machine_percent', 'ai_percent', 'final_percent', 'ai_remarks',
+                'training', 'comment')}
+            class_ids = summary.get('category_class_ids') or []
+            row['category'] = next(
+                (CLASS_CATEGORIES.get(cid, '') for cid in class_ids
+                 if CLASS_CATEGORIES.get(cid)), '')
+            rows.append(row)
+        return {'sessions': rows, 'fields': FIELDS,
+                'labels': INCIDENT_LABELS | FIELDS | ACTION_LABELS,
+                'verdicts': VERDICTS, 'categories': CATEGORIES,
+                'tasks': [{'id': t['id'], 'title': t['title'], 'status': t['status'],
+                           'level': t['level'], 'workflow': t['workflow'],
+                           'format': t.get('format')}
+                          for t in engine.list_items('t', teacher=teacher)]}
     rows = []
-    for s in engine.list_items('s'):
+    for s in engine.list_items('s', teacher=teacher):
         end = datetime.fromisoformat(s['submitted_at']) if s.get('submitted_at') else datetime.now(timezone.utc)
         start = datetime.fromisoformat(s.get('activated_at') or s['created_at'])
         seconds = 0 if s.get('status') == 'queued' else max(0, int((end - start).total_seconds()))
@@ -41,12 +62,16 @@ def overview(engine):
     return {'sessions': rows, 'fields': FIELDS, 'labels': INCIDENT_LABELS | FIELDS | ACTION_LABELS, 'verdicts': VERDICTS,
             'categories': CATEGORIES,
             'tasks': [{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format')}
-                      for t in engine.list_items('t')]}
+                      for t in engine.list_items('t', teacher=teacher)]}
 
 
 def dispatch(engine, action, p):
     if action == 'teacher_dashboard':
-        return overview(engine)
+        auth_user = p.get('_auth_user')
+        teacher_id = (p.get('_owner_id') or (auth_user.get('id') if auth_user
+                                             and auth_user.get('role') == 'teacher'
+                                             else None))
+        return overview(engine, teacher=teacher_id)
     if action == 'teacher_session':
         return session(engine, p['id'])
     if action == 'teacher_task':
@@ -61,6 +86,8 @@ def dispatch(engine, action, p):
             raise ValueError('Комментарий: не более 1999 символов.')
         s.update(teacher_note=note, teacher_note_by=require_text(p.get('teacher'), 'Преподаватель', 160),
                  teacher_note_at=now())
+        if p.get('_owner_id') is not None:
+            s['teacher_note_by_id'] = p['_owner_id']
         engine.save(s)
         return {'saved': True}
     if action == 'teacher_finish':
@@ -101,6 +128,16 @@ def dispatch(engine, action, p):
         students = list(dict.fromkeys(require_text(x, 'Обучающийся', 160) for x in students))
         if len(ids) * len(students) > 5000:
             raise ValueError('За одно назначение можно создать не более 5000 работ.')
+        teacher_id = p.get('_owner_id')
+        repository = getattr(getattr(engine, 'storage', None), '_repo', None)
+        if teacher_id is not None:
+            if repository is None or not hasattr(repository, 'resolve_students'):
+                raise ValueError('Для назначения по JWT требуется база пользователей.')
+            assigned = list(zip(students, repository.resolve_students(students)))
+            if len({user_id for _, user_id in assigned}) != len(assigned):
+                raise ValueError('Обучающийся указан повторно.')
+        else:
+            assigned = [(student, None) for student in students]
         tasks = [engine.load(i) for i in ids]
         if any(not t['id'].startswith('t-') or t['status'] != 'approved' for t in tasks):
             raise ValueError('Сначала утвердите каждую карточку и её эталон.')
@@ -111,20 +148,21 @@ def dispatch(engine, action, p):
         # training (automatic inactivity nudges) and testing (no hints).
         # Validate the complete request before starting any session. Retrying a launch
         # reuses its sessions, even if the first response was lost.
-        existing = {(s['task']['id'], s['student']): s['id'] for s in engine.list_items('s')
+        existing = {(s['task']['id'], s.get('student_id') if teacher_id is not None else s['student']): s['id']
+                    for s in engine.list_items('s', teacher=teacher_id)
                     if (s.get('training') or {}).get('plan_id') == key}
         result = []
         for index, task in enumerate(tasks, 1):
-            for student in students:
-                pair = (task['id'], student)
+            for student, student_id in assigned:
+                pair = (task['id'], student_id if teacher_id is not None else student)
                 if pair in existing:
                     result.append(existing[pair])
                     continue
                 s = engine.start(task['id'], student, training={
                     'plan_id': key, 'scenario_id': scenario_id, 'title': title, 'group': group,
-                    'seconds': limit, 'teacher': teacher, 'mode': mode,
+                    'seconds': limit, 'teacher': teacher, 'teacher_id': teacher_id, 'mode': mode,
                     'coaching_delay_seconds': 10 if mode == 'training' else 0,
-                    'card_index': index, 'card_total': len(tasks)})
+                    'card_index': index, 'card_total': len(tasks)}, student_id=student_id)
                 s['effective_level'] = 'medium'
                 s['training_reveals'] = []
                 if index > 1:

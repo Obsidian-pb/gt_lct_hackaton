@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 from urllib.parse import quote
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ai_core import Engine, FIELDS
 from api_contract import ROUTES, openapi
@@ -19,6 +19,9 @@ TOKEN = 'integration-test-token-only-123456789'
 
 class RestTests(unittest.TestCase):
     def setUp(self):
+        self.auth_config = patch.dict('os.environ', {'REQUIRE_ROLES': 'false'})
+        self.auth_config.start()
+        self.addCleanup(self.auth_config.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.provider = Fake()
         self.engine = Engine(self.provider, self.temp.name)
@@ -99,6 +102,201 @@ class RestTests(unittest.TestCase):
         _,s,_=self.session()
         body,_=self.call('GET','/students/'+quote('Другой',safe='')+'/sessions/'+s['id'],status=403)
         self.assertEqual(body['error']['code'],'wrong_student')
+
+    def test_jwt_identity_rejects_forged_student_name_before_loading_session(self):
+        _, session, path = self.session()
+        user = {'id': 901, 'role': 'student', 'display_name': 'Другой обучающийся',
+                'login': 'student901', 'full_name': 'Другой обучающийся'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                body, _ = self.call('GET', path, status=403)
+        self.assertEqual(body['error']['code'], 'wrong_owner')
+
+    def test_jwt_student_requires_id_even_for_matching_legacy_name(self):
+        _, session, path = self.session()
+        user = {'id': 902, 'role': 'student', 'display_name': 'Иванов А. А.',
+                'login': 'student902', 'full_name': 'Иванов Алексей Андреевич'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                body, _ = self.call('GET', path, status=403)
+                self.assertEqual(body['error']['code'], 'wrong_owner')
+                owned = self.engine.load(session['id'])
+                owned['student_id'] = user['id']
+                self.engine.save(owned)
+                response, _ = self.call('GET', path)
+        self.assertEqual(response['data']['id'], session['id'])
+        task = self.task()
+        self.call('POST', '/tasks/' + task['id'] + '/approvals', {'teacher': 'Преподаватель'})
+        foreign_session = self.engine.start(task['id'], 'Чужой обучающийся')
+        foreign = '/students/' + quote('Иванов А. А.', safe='') + '/sessions/' + foreign_session['id']
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                body, _ = self.call('GET', foreign, status=403)
+        self.assertEqual(body['error']['code'], 'wrong_owner')
+
+    def test_jwt_same_display_name_does_not_grant_foreign_session(self):
+        task = self.task()
+        self.call('POST', '/tasks/' + task['id'] + '/approvals', {'teacher': 'Тест'})
+        first = self.engine.start(task['id'], 'Одно имя', student_id=111)
+        second = self.engine.start(task['id'], 'Одно имя', student_id=112)
+        user = {'id': 111, 'role': 'student', 'display_name': 'Одно имя',
+                'login': 'first111', 'full_name': 'Одно имя'}
+        base = '/students/' + quote('Одно имя', safe='') + '/sessions/'
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                result, _ = self.call('GET', base + first['id'])
+                self.assertEqual(result['data']['id'], first['id'])
+                denied, _ = self.call('GET', base + second['id'], status=403)
+                self.assertEqual(denied['error']['code'], 'wrong_owner')
+                denied, _ = self.call('GET', '/students/forged/sessions/' + first['id'], status=403)
+                self.assertEqual(denied['error']['code'], 'wrong_owner')
+                denied, _ = self.call('GET', '/teacher/sessions/' + first['id'], status=403)
+                self.assertEqual(denied['error']['code'], 'forbidden')
+
+    def test_jwt_training_participants_are_resolved_by_unique_login(self):
+        import curriculum
+        user = {'id': 903, 'role': 'teacher', 'display_name': 'Тест',
+                'login': 'teacher903', 'full_name': 'Тест'}
+        repository = Mock()
+        repository.resolve_students.return_value = [111, 112]
+        self.engine.storage = Mock()
+        self.engine.storage._repo = repository
+        first = {'student': 'student111', 'role': 'operator', 'user_id': 999}
+        second = {'student': 'student112', 'role': 'operator', 'user_id': 999}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                with patch('rest_api.dispatch', return_value={}) as dispatched:
+                    self.call('POST', '/trainings', {
+                        'title': 'Учебная тренировка', 'teacher': 'Тест',
+                        'scenario_ids': ['scenario-123456abcdef'],
+                        'participants': [first, second]}, status=201)
+        payload = dispatched.call_args.args[2]
+        self.assertEqual([p['user_id'] for p in payload['participants']], [111, 112])
+        self.assertEqual(repository.resolve_students.call_args.args[0], ['student111', 'student112'])
+        self.assertEqual([p['user_id'] for p in curriculum._participants(payload['participants'])], [111, 112])
+
+    def test_admin_can_read_student_and_teacher_resources(self):
+        task, session, path = self.session()
+        admin = {'id': 1, 'role': 'admin', 'display_name': 'Администратор',
+                 'login': 'admin', 'full_name': 'Администратор'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=admin):
+                result, _ = self.call('GET', path)
+                self.assertEqual(result['data']['id'], session['id'])
+                result, _ = self.call('GET', '/teacher/sessions/' + session['id'])
+                self.assertEqual(result['data']['id'], session['id'])
+                result, _ = self.call('GET', '/tasks/' + task['id'])
+                self.assertEqual(result['data']['id'], task['id'])
+
+    def test_jwt_launch_requires_identity_repository(self):
+        task = self.task()
+        task['owner_id'] = 903
+        task['status'] = 'approved'
+        self.engine.save(task)
+        user = {'id': 903, 'role': 'teacher', 'display_name': 'Тест',
+                'login': 'teacher903', 'full_name': 'Тест'}
+        payload = {'plan_id': 'test-plan-0001', 'title': 'Пожары', 'teacher': 'Тест',
+                   'students': ['Одно имя'], 'task_ids': [task['id']]}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                denied, _ = self.call('POST', '/training-plans', payload, status=422)
+        self.assertEqual(denied['error']['code'], 'validation_error')
+        self.assertEqual(self.engine.list_items('s'), [])
+
+    def test_teacher_note_and_decision_record_authenticated_user_id(self):
+        task = self.task()
+        task['owner_id'] = 903
+        task['status'] = 'approved'
+        self.engine.save(task)
+        session = self.engine.start(task['id'], 'Студент')
+        user = {'id': 903, 'role': 'teacher', 'display_name': 'Одно имя',
+                'login': 'teacher903', 'full_name': 'Одно имя'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                self.call('PUT', '/teacher/sessions/' + session['id'] + '/note',
+                          {'teacher': 'Одно имя', 'comment': 'Проверено'})
+                self.assertEqual(self.engine.load(session['id'])['teacher_note_by_id'], 903)
+                current = self.engine.load(session['id'])
+                current['status'] = 'submitted'
+                self.engine.save(current)
+                self.call('PUT', '/works/' + session['id'] + '/percentage-decision',
+                          {'teacher': 'Одно имя', 'percent': 75, 'conclusion': 'Зачтено',
+                           'decisions': {key: 'Проверено' for key in FIELDS}})
+        self.assertEqual(self.engine.load(session['id'])['teacher_decision']['teacher_id'], 903)
+
+    def test_teacher_cannot_access_foreign_session_with_same_display_name(self):
+        task = self.task()
+        task['owner_id'] = 904
+        task['approved_by'] = 'Одно имя'
+        task['status'] = 'approved'
+        self.engine.save(task)
+        session = self.engine.start(task['id'], 'Ученик')
+        user = {'id': 903, 'role': 'teacher', 'display_name': 'Одно имя',
+                'login': 'teacher903', 'full_name': 'Одно имя'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                denied, _ = self.call('GET', '/teacher/sessions/' + session['id'], status=403)
+                self.assertEqual(denied['error']['code'], 'wrong_owner')
+                denied, _ = self.call('GET', '/tasks/' + task['id'], status=403)
+                self.assertEqual(denied['error']['code'], 'wrong_owner')
+                listed, _ = self.call('GET', '/teacher/overview')
+                self.assertEqual(listed['data']['tasks'], [])
+                self.assertEqual(listed['data']['sessions'], [])
+
+    def test_teacher_cannot_access_foreign_session(self):
+        task, session, _ = self.session()
+        user = {'id': 903, 'role': 'teacher', 'display_name': 'Другой преподаватель',
+                'login': 'teacher903', 'full_name': 'Другой преподаватель'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                body, _ = self.call('GET', '/teacher/sessions/' + session['id'], status=403)
+        self.assertEqual(body['error']['code'], 'wrong_owner')
+
+    def test_teacher_materials_list_is_scoped_and_add_rejects_forged_owner(self):
+        user = {'id': 905, 'role': 'teacher', 'display_name': 'Свой преподаватель',
+                'login': 'teacher905', 'full_name': 'Свой преподаватель'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                with patch('rest_api.dispatch', return_value=[]) as dispatch_mock:
+                    result, _ = self.call('GET', '/materials')
+                    self.assertEqual(result['data'], [])
+                    args = dispatch_mock.call_args.args
+                    self.assertEqual(args[1], 'materials_list')
+                    self.assertEqual(args[2]['_owner_id'], 905)
+                with patch('rest_api.dispatch', return_value={}) as dispatch_mock:
+                    self.call('POST', '/reports/insights', {'group': 'Группа А'})
+                    args = dispatch_mock.call_args.args
+                    self.assertEqual(args[1], 'reports_insights')
+                    self.assertEqual(args[2]['_owner_id'], 905)
+                    self.assertEqual(args[2]['_auth_user'], user)
+                body, _ = self.call('POST', '/materials', {
+                    'title': 'Чужая инструкция', 'url': 'https://example.org/manual.pdf',
+                    'teacher': 'Другой преподаватель'}, status=403)
+        self.assertEqual(body['error']['code'], 'wrong_owner')
+
+    def test_teacher_cannot_read_or_modify_foreign_scenario(self):
+        scenario_id = 'scenario-123456abcdef'
+        self.engine.resource_save({'id': scenario_id, 'title': 'Чужой сценарий',
+                                   'status': 'draft', 'created_by': 'Владелец',
+                                   'task_ids': [], 'created_at': '2026-01-01T00:00:00+00:00'})
+        user = {'id': 904, 'role': 'teacher', 'display_name': 'Другой преподаватель',
+                'login': 'teacher904', 'full_name': 'Другой преподаватель'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=user):
+                body, _ = self.call('GET', '/scenarios/' + scenario_id, status=403)
+                self.assertEqual(body['error']['code'], 'wrong_owner')
+                body, _ = self.call('DELETE', '/scenarios/' + scenario_id, status=403)
+                self.assertEqual(body['error']['code'], 'wrong_owner')
+
+    def test_required_roles_reject_ui_token_and_wrong_role(self):
+        student = {'id': 11, 'role': 'student', 'display_name': 'Курсант',
+                   'login': 'student11', 'full_name': 'Курсант'}
+        with patch('rest_api.auth_service.roles_required', return_value=True):
+            denied, _ = self.call('GET', '/tasks', status=401)
+            self.assertEqual(denied['error']['code'], 'unauthorized')
+            with patch('rest_api.auth_service.authenticate_access_token', return_value=student):
+                denied, _ = self.call('GET', '/tasks', status=403)
+                self.assertEqual(denied['error']['code'], 'forbidden')
 
     def test_authentication_and_bearer_are_separate_from_ai_key(self):
         code,_,raw=self.raw('GET','/api/v1/tasks')
@@ -181,7 +379,7 @@ class RestTests(unittest.TestCase):
         self.assertEqual(code,200)
         spec=json.loads(raw)
         self.assertEqual(spec,openapi())
-        self.assertEqual(spec,json.loads((Path(__file__).resolve().parents[1]/'openapi.json').read_text()))
+        self.assertEqual(spec,json.loads((Path(__file__).resolve().parents[1]/'openapi.json').read_text(encoding='utf-8')))
         operations=[v for path in spec['paths'].values() for v in path.values()]
         self.assertEqual(len(operations),len(ROUTES)+2)
         self.assertEqual(len({x['operationId'] for x in operations}),len(ROUTES)+2)

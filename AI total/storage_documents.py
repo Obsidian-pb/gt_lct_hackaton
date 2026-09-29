@@ -117,7 +117,7 @@ def task_to_rows(doc: dict, resolve_name: Callable) -> dict:
         parsed['level'], parsed['format'], parsed['opening'], parsed['persona'],
         jsonb(parsed['fields']), jsonb(parsed['field_labels']), parsed['source'],
         parsed['identity_hash'],
-        resolve_name(parsed['approved_by'], 'teacher'),
+        doc.get('owner_id') or resolve_name(parsed['approved_by'], 'teacher'),
         parsed['approved_at'],
         parsed['created_at'] or _now(), parsed['updated_at'] or _now(),
     )
@@ -162,6 +162,7 @@ def task_from_row(row: dict, dds_row: Optional[dict] = None,
         'updated_at': load_ts(row.get('updated_at')),
     }
     if row.get('approved_by_id') is not None:
+        doc['owner_id'] = int(row['approved_by_id'])
         doc['approved_by'] = name_of(row['approved_by_id']) if name_of else None
         doc['approved_at'] = load_ts(row.get('approved_at'))
     if dds_row and doc['workflow'] == 'dds':
@@ -203,13 +204,14 @@ def session_to_rows(doc: dict, resolve_name: Callable) -> dict:
 
     session = (
         parsed['id'], parsed['task_id'], jsonb(parsed['task_snapshot']),
-        parsed['reference_hash'], resolve_name(parsed['student'], 'student'),
+        parsed['reference_hash'], doc.get('student_id') or resolve_name(parsed['student'], 'student'),
         parsed['status'], parsed['effective_level'], jsonb(parsed['card']),
         jsonb(parsed['training_meta']), parsed['callback_disclosed'],
         parsed['connection'], parsed['call_attempts'], parsed['next_channel'],
         parsed['timed_out'], jsonb(parsed['forced_finish']),
         parsed['teacher_note'],
-        resolve_name(parsed['teacher_note_by'], 'teacher'),
+        (doc.get('teacher_note_by_id') or resolve_name(parsed['teacher_note_by'], 'teacher'))
+        if parsed['teacher_note_by'] else None,
         parsed['teacher_note_at'], created,
         parsed['activated_at'], parsed['submitted_at'],
         parsed['updated_at'] or _now(),
@@ -243,7 +245,8 @@ def session_to_rows(doc: dict, resolve_name: Callable) -> dict:
         if not isinstance(grade, int) or not 2 <= grade <= 5:
             grade = None
         decision = {
-            'row': (parsed['id'], resolve_name(d['teacher'], 'teacher'),
+            'row': (parsed['id'], doc['teacher_decision'].get('teacher_id') or
+                    resolve_name(d['teacher'], 'teacher'),
                     grade, d['percent'], d['conclusion'],
                     d['created_at'] or _now()),
             'fields': d['fields'],
@@ -285,6 +288,7 @@ def session_from_row(row: dict, turns: Optional[List[dict]] = None,
     doc = {
         'id': row['id'],
         'student': student or '',
+        'student_id': int(row['student_id']) if row.get('student_id') is not None else None,
         'task': _dict(row.get('task_snapshot')),
         'reference_hash': row.get('reference_hash'),
         'status': row.get('status', 'active'),
@@ -310,6 +314,8 @@ def session_from_row(row: dict, turns: Optional[List[dict]] = None,
         'forced_finish': _dict(row.get('forced_finish')),
         'teacher_note': row.get('teacher_note'),
         'teacher_note_by': name_of(row.get('teacher_note_by_id')) if name_of else None,
+        'teacher_note_by_id': (int(row['teacher_note_by_id'])
+                               if row.get('teacher_note_by_id') is not None else None),
         'teacher_note_at': load_ts(row.get('teacher_note_at')),
         'created_at': load_ts(row.get('created_at')),
         'activated_at': load_ts(row.get('activated_at')),
@@ -354,6 +360,8 @@ def session_from_row(row: dict, turns: Optional[List[dict]] = None,
             }
         doc['teacher_decision'] = {
             'teacher': name_of(decision.get('teacher_id')) if name_of else None,
+            'teacher_id': (int(decision['teacher_id'])
+                           if decision.get('teacher_id') is not None else None),
             'grade': decision.get('grade'),
             'percent': decision.get('percent'),
             'conclusion': decision.get('conclusion'),
@@ -373,8 +381,8 @@ def scenario_to_rows(doc: dict, resolve_name: Callable) -> dict:
         raise ValueError('Неверный формат сценария.')
     row = (
         parsed['id'], parsed['title'], parsed['description'], parsed['status'],
-        resolve_name(parsed['created_by'], 'teacher'),
-        resolve_name(parsed['approved_by'], 'teacher'),
+        doc.get('owner_id') or resolve_name(parsed['created_by'], 'teacher'),
+        (doc.get('owner_id') or resolve_name(parsed['approved_by'], 'teacher')) if parsed['approved_by'] else None,
         parsed['approved_at'],
         parsed['created_at'] or _now(), parsed['updated_at'] or _now(),
     )
@@ -397,6 +405,7 @@ def scenario_from_row(row: dict, tasks: Optional[List[dict]] = None,
         'updated_at': load_ts(row.get('updated_at')),
     }
     if row.get('created_by_id') is not None:
+        doc['owner_id'] = int(row['created_by_id'])
         doc['created_by'] = name_of(row['created_by_id']) if name_of else None
     if row.get('approved_by_id') is not None:
         doc['approved_by'] = name_of(row['approved_by_id']) if name_of else None
@@ -415,21 +424,25 @@ def training_to_rows(doc: dict, resolve_name: Callable) -> dict:
     row = (
         parsed['id'], parsed['title'], parsed['description'], parsed['status'],
         parsed['mode'], parsed['seconds'], parsed['difficulty'],
-        resolve_name(parsed['teacher'], 'teacher'), parsed['group_name'],
+        doc.get('teacher_id') or resolve_name(parsed['teacher'], 'teacher'), parsed['group_name'],
         parsed['created_at'] or _now(), parsed['started_at'],
         parsed['completed_at'], parsed['updated_at'] or _now(),
     )
+    sources = [source for source in doc.get('participants') or []
+               if isinstance(source, dict) and source.get('role') in ('operator', 'dds', 'service')]
     participants = [
-        (parsed['id'], resolve_name(name, 'student'), role, service)
-        for name, role, service in parsed['participants']]
+        (parsed['id'], source.get('user_id') or resolve_name(name, 'student'), role, service)
+        for source, (name, role, service) in zip(sources, parsed['participants'])]
     cards = []
+    source_cards = {card['id']: card for card in doc.get('cards') or []
+                    if isinstance(card, dict) and isinstance(card.get('id'), str)}
     for card in parsed['cards']:
         cards.append({
             'row': (card['id'], parsed['id'], card['task_id'],
                     card['operator_session_id'], card['status'],
                     jsonb(card['card_snapshot']), jsonb(card['services']),
                     card['submitted_at'],
-                    resolve_name(card['dds_by'], 'student'), card['routed_at']),
+                    source_cards[card['id']].get('dds_by_id') or resolve_name(card['dds_by'], 'student'), card['routed_at']),
             'actions': [(card['id'], code, text, at or _now())
                         for code, text, at in card['service_actions']],
         })
@@ -468,6 +481,7 @@ def training_from_row(row: dict, scenarios: Optional[List[dict]] = None,
             'service_actions': service_actions,
         }
         if card.get('dds_by_id') is not None:
+            item['dds_by_id'] = int(card['dds_by_id'])
             item['dds_by'] = name_of(card['dds_by_id']) if name_of else None
         card_docs.append(item)
 
@@ -480,10 +494,12 @@ def training_from_row(row: dict, scenarios: Optional[List[dict]] = None,
         'seconds': _as_int(row.get('seconds')),
         'difficulty': row.get('difficulty', 'easy'),
         'teacher': name_of(row.get('teacher_id')) if name_of else None,
+        'teacher_id': int(row['teacher_id']) if row.get('teacher_id') is not None else None,
         'group': row.get('group_name'),
         'scenario_ids': [s['scenario_id'] for s in (scenarios or [])],
         'participants': [
             {'student': name_of(p.get('user_id')) if name_of else None,
+             'user_id': int(p['user_id']) if p.get('user_id') is not None else None,
              'role': p.get('role', 'operator'),
              'service': p.get('service_code') or ''}
             for p in participant_rows],
@@ -506,13 +522,13 @@ def material_to_rows(doc: dict, resolve_name: Callable) -> tuple:
         raise ValueError('Неверный идентификатор материала.')
     return (identifier, str(doc.get('title') or ''),
             str(doc.get('url') or ''), str(doc.get('description') or ''),
-            resolve_name(doc.get('teacher'), 'teacher'),
+            doc.get('teacher_id') or resolve_name(doc.get('teacher'), 'teacher'),
             doc.get('created_at') or _now())
 
 
 def material_from_row(row: dict, name_of: Optional[Callable] = None) -> dict:
     """material row -> material document."""
-    return {
+    doc = {
         'id': row['id'],
         'title': row.get('title') or '',
         'url': row.get('url') or '',
@@ -520,3 +536,6 @@ def material_from_row(row: dict, name_of: Optional[Callable] = None) -> dict:
         'teacher': name_of(row.get('teacher_id')) if name_of else None,
         'created_at': load_ts(row.get('created_at')),
     }
+    if row.get('teacher_id') is not None:
+        doc['teacher_id'] = int(row['teacher_id'])
+    return doc

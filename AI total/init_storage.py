@@ -2,7 +2,7 @@
 
 Modes:
   python init_storage.py --check           read-only state (mode, schema, counts)
-  python init_storage.py --init            apply schema 2.4.0
+  python init_storage.py --init            apply schema 2.5.0
   python init_storage.py --mirror          one-time sync: JSON files -> DB
                                            (delegates to training-data import)
   python init_storage.py --self-test       live round-trip against PostgreSQL
@@ -33,8 +33,8 @@ def cmd_check() -> int:
     config = get_storage_config()
     _log(f'Режим хранилища: «{config["mode"]}».')
     if config['mode'] == 'files':
-        _log('БД не используется (легаси-режим файлов).')
-        return EXIT_OK
+        _log('ОШИБКА: режим files отключён; для запуска требуется PostgreSQL.')
+        return EXIT_FAIL
     repo = StorageRepository()
     version = repo.migration_version()
     if not version:
@@ -122,7 +122,7 @@ def cmd_self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Слой хранилища PostgreSQL (Этап 5)')
-    parser.add_argument('--init', action='store_true', help='Установить схему 2.4.0')
+    parser.add_argument('--init', action='store_true', help='Установить схему 2.5.0')
     parser.add_argument('--check', action='store_true', help='Состояние хранилища')
     parser.add_argument('--mirror', action='store_true',
                         help='Первичная синхронизация файлы → БД')

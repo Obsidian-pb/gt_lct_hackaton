@@ -41,10 +41,10 @@ def get(engine, identifier):
     return engine.resource_get(identifier)
 
 
-def list_resources(engine, kind):
+def list_resources(engine, kind, owner=None):
     if kind not in ('scenario', 'training'):
         raise ValueError('Неизвестный учебный ресурс.')
-    return engine.resource_list(kind)
+    return engine.resource_list(kind, owner=owner)
 
 
 def _task_ids(engine, values):
@@ -70,6 +70,8 @@ def save_scenario(engine, data, identifier=None):
                 description=str(data.get('description') or '')[:2000], task_ids=task_ids,
                 task_difficulties={task_id:levels.get(task_id,3) for task_id in task_ids},
                 created_by=require_text(data.get('teacher'), 'Преподаватель', 160))
+    if data.get('_owner_id') is not None:
+        item['owner_id'] = data['_owner_id']
     return engine.resource_save(item)
 
 
@@ -98,9 +100,10 @@ def _participants(values):
         if not isinstance(row, dict) or row.get('role') not in ROLES:
             raise ValueError('Для каждого участника укажите учебную роль.')
         student = require_text(row.get('student'), 'Обучающийся', 160)
-        if student in names:
+        identity = row.get('user_id') if row.get('user_id') is not None else student
+        if identity in names:
             raise ValueError('Роль обучающегося в одной тренировке должна быть однозначной.')
-        names.add(student)
+        names.add(identity)
         service = str(row.get('service') or '').strip()
         if row['role'] == 'service' and not service:
             raise ValueError('Диспетчеру службы назначьте службу.')
@@ -108,7 +111,10 @@ def _participants(values):
             from card_factory import SERVICES
             if service not in SERVICES:
                 raise ValueError('Код службы отсутствует в классификаторе.')
-        participants.append({'student': student, 'role': row['role'], 'service': service if row['role'] == 'service' else ''})
+        participant = {'student': student, 'role': row['role'], 'service': service if row['role'] == 'service' else ''}
+        if row.get('user_id') is not None:
+            participant['user_id'] = row['user_id']
+        participants.append(participant)
     if not any(row['role'] == 'operator' for row in participants):
         raise ValueError('В тренировке нужен хотя бы один оператор 112.')
     if any(row['role'] == 'dds' for row in participants) and not any(row['role'] == 'service' for row in participants):
@@ -116,7 +122,7 @@ def _participants(values):
     return participants
 
 
-def save_training(engine, data, identifier=None):
+def save_training(engine, data, identifier=None, teacher_id=None):
     previous = get(engine, identifier) if identifier else None
     if previous and previous['status'] != 'prepared':
         raise ValueError('Активную или завершённую тренировку менять нельзя.')
@@ -141,6 +147,8 @@ def save_training(engine, data, identifier=None):
                 difficulty=data.get('difficulty', 'medium'))
     if item['difficulty'] not in ('easy', 'medium', 'hard', 'adaptive'):
         raise ValueError('Неизвестная сложность тренировки.')
+    if teacher_id is not None:
+        item['teacher_id'] = teacher_id
     return engine.resource_save(item)
 
 
@@ -161,10 +169,11 @@ def activate(engine, identifier):
             session = engine.start(task_id, operator['student'], training={
                 'plan_id': item['id'], 'training_id': item['id'], 'scenario_ids': item['scenario_ids'],
                 'title': item['title'], 'group': item['group'], 'teacher': item['teacher'],
+                'teacher_id': item.get('teacher_id'),
                 'seconds': item['seconds'], 'mode': item['mode'], 'role': 'operator',
                 'difficulty': item['difficulty'], 'task_difficulty': task_levels[task_id],
                 'coaching_delay_seconds': 10 if item['mode'] == 'training' else 0,
-                'card_index': index, 'card_total': len(tasks)})
+                'card_index': index, 'card_total': len(tasks)}, student_id=operator.get('user_id'))
             session['status'] = 'awaiting_call' if index == 1 else 'queued'
             session['effective_level'] = {'easy':'easy','medium':'medium','hard':'hard','adaptive':'medium'}[item['difficulty']]
             session['activated_at'] = None
@@ -241,11 +250,18 @@ def _services(card):
         return []
 
 
-def desk(engine, student):
+def desk(engine, student, user_id=None):
     student = require_text(student, 'Обучающийся', 160)
     result = []
-    for item in list_resources(engine, 'training'):
-        participant = next((p for p in item['participants'] if p['student'] == student), None)
+    storage = getattr(engine, 'storage', None)
+    repository = getattr(storage, '_repo', None)
+    trainings = (repository.list_training_desks(user_id)
+                 if user_id is not None and repository is not None
+                 else list_resources(engine, 'training'))
+    for item in trainings:
+        participant = (next((p for p in item['participants'] if p.get('user_id') == user_id), None)
+                       if user_id is not None else
+                       next((p for p in item['participants'] if p['student'] == student), None))
         if not participant:
             continue
         role, service = participant['role'], participant['service']
@@ -259,9 +275,11 @@ def desk(engine, student):
     return result
 
 
-def route_card(engine, training_id, card_id, student, services, updates):
+def route_card(engine, training_id, card_id, student, services, updates, user_id=None):
     item = get(engine, training_id)
-    if item['status'] != 'active' or not any(p['student'] == student and p['role'] == 'dds' for p in item['participants']):
+    if item['status'] != 'active' or not any(p['role'] == 'dds' and
+        (p.get('user_id') == user_id if user_id is not None else p['student'] == student)
+        for p in item['participants']):
         raise ValueError('Карточку может направить назначенный диспетчер ДДС.')
     record = next((c for c in item['cards'] if c['id'] == card_id), None)
     if not record or record['status'] != 'dds_review':
@@ -275,12 +293,15 @@ def route_card(engine, training_id, card_id, student, services, updates):
         raise ValueError('Выбранной службы нет среди участников тренировки.')
     record['card'].update(updates)
     record.update(status='service_review', services=services, dds_by=student, routed_at=now())
+    if user_id is not None:
+        record['dds_by_id'] = user_id
     return engine.resource_save(item)
 
 
-def service_action(engine, training_id, card_id, student, text):
+def service_action(engine, training_id, card_id, student, text, user_id=None):
     item = get(engine, training_id)
-    participant = next((p for p in item['participants'] if p['student'] == student and p['role'] == 'service'), None)
+    participant = next((p for p in item['participants'] if p['role'] == 'service' and
+                        (p.get('user_id') == user_id if user_id is not None else p['student'] == student)), None)
     record = next((c for c in item['cards'] if c['id'] == card_id), None)
     if not participant or not record or item['status'] != 'active' or record['status'] != 'service_review' or participant['service'] not in record['services']:
         raise ValueError('Карточка не направлена вашей службе.')
@@ -290,9 +311,11 @@ def service_action(engine, training_id, card_id, student, text):
     return engine.resource_save(item)
 
 
-def complete(engine, training_id, teacher):
+def complete(engine, training_id, teacher, teacher_id=None):
     item = get(engine, training_id)
-    if item['status'] != 'active' or item['teacher'] != teacher:
+    owned = (item.get('teacher_id') == teacher_id if teacher_id is not None
+             else item['teacher'] == teacher)
+    if item['status'] != 'active' or not owned:
         raise ValueError('Тренировка не активна или назначена другому преподавателю.')
     for record in item['cards']:
         s = engine.load(record['operator_session_id'])

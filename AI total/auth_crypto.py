@@ -166,7 +166,7 @@ def get_auth_config() -> Dict[str, object]:
     enforce JWT roles on every REST route instead of the legacy UI token).
     """
     config = {'access_ttl': DEFAULT_ACCESS_TTL, 'refresh_ttl': DEFAULT_REFRESH_TTL,
-              'require_roles': False}
+              'require_roles': True}
     for key in ('access_ttl', 'refresh_ttl'):
         env_value = os.environ.get('JWT_' + key.upper())
         if env_value:
@@ -186,8 +186,9 @@ def get_auth_config() -> Dict[str, object]:
         config['require_roles'] = env_roles in ('1', 'true', 'yes', 'да')
     else:
         value = _load_auth_section().get('require_roles')
-        config['require_roles'] = (bool(value) if isinstance(value, bool)
-                                   else str(value).strip().lower() in ('1', 'true', 'yes', 'да'))
+        if value is not None:
+            config['require_roles'] = (bool(value) if isinstance(value, bool)
+                                       else str(value).strip().lower() in ('1', 'true', 'yes', 'да'))
     return config
 
 

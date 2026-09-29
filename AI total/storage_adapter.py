@@ -58,7 +58,7 @@ class StorageAdapter:
         return self._repo is not None
 
     def ensure_schema(self) -> None:
-        """Apply schema 2.4.0; propagate failures as StorageUnavailable."""
+        """Apply the current schema; propagate failures as StorageUnavailable."""
         try:
             self._repo.ensure_schema()
             self._db_ready = True
@@ -118,17 +118,23 @@ class StorageAdapter:
             self.save(dict(doc))
         return doc
 
-    def list_items(self, kind: str) -> List[dict]:
+    def list_items(self, kind: str, owner: Optional[int] = None,
+                   teacher: Optional[int] = None) -> List[dict]:
         """List documents of kind 't' or 's', newest first."""
         if self.db:
-            items = (self._repo.list_tasks() if kind == 't'
-                     else self._repo.list_sessions())
-            if items or self.mode == 'db-only':
+            items = (self._repo.list_tasks(owner=owner, teacher=teacher) if kind == 't'
+                     else self._repo.list_sessions(owner=owner, teacher=teacher))
+            if owner is not None or teacher is not None or items or self.mode == 'db-only':
                 return items
         docs = self._file_list(kind)
         if self.db and self.mode == 'files-to-db':
             for doc in docs:
                 self.save(dict(doc))
+        if owner is not None:
+            docs = [doc for doc in docs if doc.get('student_id' if kind == 's' else 'owner_id') == owner]
+        if teacher is not None:
+            docs = [doc for doc in docs if (doc.get('owner_id') if kind == 't' else
+                    (doc.get('training') or {}).get('teacher_id') or (doc.get('task') or {}).get('owner_id')) == teacher]
         return docs
 
     def exists(self, identifier: str) -> bool:
@@ -185,11 +191,11 @@ class StorageAdapter:
                 self._repo.delete_training(identifier)
         return {'deleted': True}
 
-    def resource_list(self, kind: str) -> List[dict]:
+    def resource_list(self, kind: str, owner: Optional[int] = None) -> List[dict]:
         if self.db:
-            items = (self._repo.list_scenarios() if kind == 'scenario'
-                     else self._repo.list_trainings())
-            if items or self.mode == 'db-only':
+            items = (self._repo.list_scenarios(owner=owner) if kind == 'scenario'
+                     else self._repo.list_trainings(owner=owner))
+            if owner is not None or items or self.mode == 'db-only':
                 return items
         root = self.directory / 'curriculum'
         if not root.exists():
@@ -201,6 +207,9 @@ class StorageAdapter:
         if self.db and self.mode == 'files-to-db':
             for doc in docs:
                 self.resource_save(dict(doc))
+        if owner is not None:
+            key = 'owner_id' if kind == 'scenario' else 'teacher_id'
+            docs = [doc for doc in docs if doc.get(key) == owner]
         return docs
 
     # ------------------------------------------------------------ materials
@@ -210,11 +219,13 @@ class StorageAdapter:
         root.mkdir(parents=True, exist_ok=True)
         return root / 'materials.json'
 
-    def materials_items(self) -> List[dict]:
+    def materials_items(self, owner: Optional[int] = None) -> List[dict]:
         if self.db:
-            items = self._repo.list_materials()
-            if items or self.mode == 'db-only':
+            items = self._repo.list_materials(owner=owner)
+            if owner is not None or items or self.mode == 'db-only':
                 return items
+        elif owner is not None:
+            return []
         path = self._materials_file()
         rows = json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
         if self.db and self.mode == 'files-to-db':

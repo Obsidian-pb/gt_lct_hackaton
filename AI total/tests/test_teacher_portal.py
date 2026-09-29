@@ -1,6 +1,8 @@
 import tempfile
 import unittest
+from unittest.mock import Mock
 from ai_core import Engine
+from storage_adapter import StorageAdapter
 from web_ui import dispatch
 from test_core import Fake
 
@@ -29,6 +31,39 @@ class TeacherPortalTests(unittest.TestCase):
         self.assertNotIn('expected', str(own))
         with self.assertRaisesRegex(ValueError, 'тестирования'):
             self.engine.hint(first['session_ids'][0])
+
+    def test_jwt_launch_keys_idempotency_by_user_id(self):
+        self.engine.approve(self.task['id'], 'Тестов')
+        storage = StorageAdapter(self.temp.name, mode='files')
+        repository = Mock()
+        repository.resolve_students.return_value = [11, 12]
+        self.engine.storage = Mock(wraps=storage)
+        self.engine.storage._repo = repository
+        payload = {**self.payload, 'students': ['login11', 'login12'], '_owner_id': 7}
+        first = dispatch(self.engine, 'teacher_launch', payload)
+        for session_id in first['session_ids']:
+            session = self.engine.load(session_id)
+            session['student'] = 'Одно имя'
+            self.engine.save(session)
+        second = dispatch(self.engine, 'teacher_launch', payload)
+        self.assertEqual(first, second)
+        sessions = self.engine.list_items('s', teacher=7)
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual({s['student_id'] for s in sessions}, {11, 12})
+        self.assertEqual({s['student'] for s in sessions}, {'Одно имя'})
+        repository.resolve_students.assert_called_with(['login11', 'login12'])
+
+    def test_jwt_launch_rejects_aliases_for_same_student(self):
+        self.engine.approve(self.task['id'], 'Тестов')
+        storage = StorageAdapter(self.temp.name, mode='files')
+        repository = Mock()
+        repository.resolve_students.return_value = [11, 11]
+        self.engine.storage = Mock(wraps=storage)
+        self.engine.storage._repo = repository
+        payload = {**self.payload, 'students': ['login11', 'alias11'], '_owner_id': 7}
+        with self.assertRaisesRegex(ValueError, 'повторно'):
+            dispatch(self.engine, 'teacher_launch', payload)
+        self.assertEqual(self.engine.list_items('s'), [])
 
     def test_monitor_comment_and_finish_preserve_saved_card_and_separate_final_grade(self):
         self.engine.approve(self.task['id'], 'Тестов')

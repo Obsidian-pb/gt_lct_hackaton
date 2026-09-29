@@ -17,11 +17,54 @@ import secrets
 import socket
 import ssl as _ssl
 import struct
+import threading
 from typing import Dict, Optional
 
 PROTOCOL_VERSION = 196608  # 3 << 16
 SSL_REQUEST_CODE = 80877103
 SCRAM_MECHANISM = 'SCRAM-SHA-256'
+_CONNECTION_LOCAL = threading.local()
+
+
+def connection_from_config(config: Dict[str, object]) -> PostgresConnection:
+    """Return a thread-local PostgreSQL connection, connecting it on demand."""
+    key = tuple(str(config.get(name, default)) for name, default in (
+        ('host', '127.0.0.1'), ('port', 5432), ('dbname', ''), ('user', ''),
+        ('password', ''), ('sslmode', 'prefer')))
+    cached = getattr(_CONNECTION_LOCAL, 'connection', None)
+    if cached is not None and getattr(_CONNECTION_LOCAL, 'key', None) == key:
+        if cached._sock is not None and not getattr(cached, '_broken', False):
+            return cached
+        cached.close()
+        try:
+            cached.connect()
+            cached._broken = False
+            return cached
+        except DbConnectionError:
+            cached.close()
+            raise
+    if cached is not None:
+        cached.close()
+    connection = PostgresConnection(
+        host=config.get('host', '127.0.0.1'), port=int(config.get('port', 5432)),
+        dbname=str(config.get('dbname', '')), user=str(config.get('user', '')),
+        password=str(config.get('password', '')),
+        connect_timeout=float(config.get('connect_timeout', 10)),
+        sslmode=str(config.get('sslmode', 'prefer')))
+    connection.connect()
+    connection._thread_cached = True
+    _CONNECTION_LOCAL.connection = connection
+    _CONNECTION_LOCAL.key = key
+    return connection
+
+
+def close_thread_connection() -> None:
+    """Close and forget the connection cached by the current thread."""
+    connection = getattr(_CONNECTION_LOCAL, 'connection', None)
+    if connection is not None:
+        connection.close()
+    _CONNECTION_LOCAL.connection = None
+    _CONNECTION_LOCAL.key = None
 
 
 class DbConnectionError(RuntimeError):
@@ -63,6 +106,7 @@ class PostgresConnection:
         self.connect_timeout = float(connect_timeout)
         self.sslmode = str(sslmode).lower()
         self._sock: Optional[socket.socket] = None
+        self._broken = False
         self._buffer = b''
         self._auth_method = ''
         self._server_params: Dict[str, str] = {}
@@ -77,6 +121,8 @@ class PostgresConnection:
 
     def connect(self) -> None:
         """Open the socket, negotiate SSL, authenticate and wait for readiness."""
+        self._broken = False
+        self._buffer = b''
         try:
             self._sock = socket.create_connection((self.host, self.port), timeout=self.connect_timeout)
         except OSError as exc:
@@ -115,7 +161,8 @@ class PostgresConnection:
         return self
 
     def __exit__(self, *_exc) -> None:
-        self.close()
+        if not getattr(self, '_thread_cached', False):
+            self.close()
 
     @property
     def ssl_active(self) -> bool:
@@ -153,6 +200,99 @@ class PostgresConnection:
         if not isinstance(sql, str) or not sql.strip():
             raise ValueError('SQL-запрос не может быть пустым.')
         rows, tag = self._simple_query(sql)
+        self._command_tag = tag
+        self._rowcount = self._tag_rowcount(tag)
+        return rows
+
+    def execute_params(self, sql: str, params) -> list:
+        """Execute one statement with PostgreSQL's Extended Query protocol.
+
+        Parameters use PostgreSQL text format and are sent separately from SQL,
+        so they cannot alter the query syntax. Supported values are ``None``,
+        strings, booleans, integers and floats. Strings containing NUL are
+        rejected because PostgreSQL text values cannot contain that byte.
+        SQL must contain PostgreSQL positional placeholders (``$1``, ``$2``, …);
+        as with the wire protocol, this call accepts exactly one statement.
+
+        Result rows, command_tag and rowcount behave like :meth:`execute`.
+        ``None`` is sent as SQL NULL; casts may be needed when PostgreSQL cannot
+        infer a parameter's type from the statement.
+        """
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError('SQL-запрос не может быть пустым.')
+        if '\x00' in sql:
+            raise ValueError('SQL-запрос не может содержать NUL-байт.')
+        if not isinstance(params, (tuple, list)):
+            raise TypeError('Параметры должны быть списком или кортежем.')
+        if len(params) > 32767:
+            raise ValueError('Слишком много параметров для PostgreSQL Extended Query.')
+
+        encoded_params = []
+        for value in params:
+            if value is None:
+                encoded_params.append(None)
+            elif isinstance(value, bool):
+                encoded_params.append(b'true' if value else b'false')
+            elif isinstance(value, (int, float)):
+                encoded_params.append(str(value).encode('ascii'))
+            elif isinstance(value, str):
+                if '\x00' in value:
+                    raise ValueError('Параметр содержит NUL-байт.')
+                encoded_params.append(value.encode('utf-8'))
+            else:
+                raise TypeError(
+                    'Поддерживаются только None, str, bool, int и float.')
+
+        # Parse unnamed statement, Bind unnamed portal (all text format),
+        # Execute without a row limit, then Sync to delimit the response.
+        payload = b'P' + struct.pack('!i', 4 + 1 + len(sql.encode('utf-8')) + 1 + 2)
+        payload += b'\x00' + sql.encode('utf-8') + b'\x00' + struct.pack('!h', 0)
+        bind = b'\x00\x00' + struct.pack('!h', 0)  # portal, statement, formats
+        bind += struct.pack('!h', len(encoded_params))
+        for value in encoded_params:
+            if value is None:
+                bind += struct.pack('!i', -1)
+            else:
+                bind += struct.pack('!i', len(value)) + value
+        bind += struct.pack('!h', 0)  # all result columns in text format
+        payload += b'B' + struct.pack('!i', len(bind) + 4) + bind
+        execute = b'\x00' + struct.pack('!i', 0)  # unnamed portal, unlimited rows
+        payload += b'E' + struct.pack('!i', len(execute) + 4) + execute
+        payload += b'S' + struct.pack('!i', 4)
+        try:
+            self._sock.sendall(payload)
+        except (OSError, AttributeError) as exc:
+            self._broken = True
+            self.close()
+            message = _oserror_text(exc) if isinstance(exc, OSError) else 'сокет закрыт'
+            raise DbConnectionError(f'Ошибка записи в сокет ({message})') from None
+
+        rows: list = []
+        tag = ''
+        error = None
+        while True:
+            code, body = self._read_message()
+            if code == b'T':
+                self._parse_row_description(body)
+            elif code == b'D':
+                rows.append(self._parse_data_row(body))
+            elif code == b'C':
+                tag = body[:-1].decode('utf-8', 'replace')
+            elif code == b'E':
+                # Extended Query errors abort this batch until Sync; consume
+                # through ReadyForQuery so the connection remains reusable.
+                error = _error_fields(body)
+            elif code == b'Z':
+                break
+            elif code in (b'1', b'2', b'3', b'n', b'I', b'S', b'N', b'K', b'A'):
+                pass  # Parse/Bind/Close complete, status, notice, key, notification
+            else:
+                self._broken = True
+                self.close()
+                raise DbConnectionError(
+                    f'Неожиданный ответ сервера: {code.decode("ascii", "replace")}')
+        if error is not None:
+            raise DbConnectionError(error)
         self._command_tag = tag
         self._rowcount = self._tag_rowcount(tag)
         return rows
@@ -214,10 +354,16 @@ class PostgresConnection:
             try:
                 chunk = self._sock.recv(65536)
             except socket.timeout:
+                self._broken = True
+                self.close()
                 raise DbConnectionError('Таймаут ожидания ответа от сервера') from None
             except OSError as exc:
+                self._broken = True
+                self.close()
                 raise DbConnectionError(f'Ошибка чтения сокета ({_oserror_text(exc)})') from None
             if not chunk:
+                self._broken = True
+                self.close()
                 raise DbConnectionError('Сервер закрыл соединение во время подключения')
             self._buffer += chunk
         data, self._buffer = self._buffer[:size], self._buffer[size:]
@@ -232,7 +378,13 @@ class PostgresConnection:
         return code, self._read_exact(length - 4)
 
     def _send_payload(self, code: bytes, payload: bytes) -> None:
-        self._sock.sendall(code + struct.pack('!i', len(payload) + 4) + payload)
+        try:
+            self._sock.sendall(code + struct.pack('!i', len(payload) + 4) + payload)
+        except (OSError, AttributeError) as exc:
+            self._broken = True
+            self.close()
+            message = _oserror_text(exc) if isinstance(exc, OSError) else 'сокет закрыт'
+            raise DbConnectionError(f'Ошибка записи в сокет ({message})') from None
 
     # -------------------------------------------------------------- auth flow
 

@@ -1,12 +1,11 @@
-"""Storage mode configuration for the repository switch (Этап 5).
+"""Storage mode configuration for the repository switch (Этап 6).
 
-Priority: default 'files'  <  "storage.mode" in config.local.json  <  STORAGE_MODE env.
+Priority: default 'db-only' < "storage.mode" in config.local.json < STORAGE_MODE env.
 
 Modes:
-- 'files'       — legacy JSON files only (default; existing tests/deployments).
-- 'files-to-db' — dual-write: DB + file; reads prefer the DB and mirror files on
-                  first access (transitional mode).
-- 'db-only'     — PostgreSQL is the only source of truth; files are ignored.
+- 'files'       — deprecated legacy JSON files only.
+- 'files-to-db' — deprecated dual-write migration mode.
+- 'db-only'     — PostgreSQL is the source of truth (default).
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_MODE = 'files'
+DEFAULT_MODE = 'db-only'
 MODES = ('files', 'files-to-db', 'db-only')
 
 

@@ -192,25 +192,19 @@ def student_portal_view(engine, identifier, full_form=False):
 
 def dispatch(engine, action, p):
     if action == 'materials_list':
-        return materials.items(engine)
+        return materials.items(engine, owner=p.get('_owner_id'))
     if action == 'materials_add':
         return materials.add(engine, p)
     if action == 'reports_insights':
-        rows = [s for s in engine.list_items('s') if s.get('assessment') and
-                (not p.get('group') or (s.get('training') or {}).get('group') == p['group'])]
-        counts = {}
-        for s in rows:
-            for field, verdict in s['assessment']['fields'].items():
-                if verdict['verdict'] in ('incorrect','missing','partial'):
-                    label = (s['task'].get('field_labels') or {}).get(field, field)
-                    counts[label] = counts.get(label, 0) + 1
-        if not rows:
-            raise ValueError('Для аналитики сначала проверьте работы обучающихся.')
-        result = engine.provider.generate('Ты анализируешь только обезличенные агрегаты учебной группы. Не называй имена. JSON: {"summary":"типичные ошибки", "recommendations":"что отработать на следующем занятии"}. Не приписывай отсутствующие причины.',
-            {'works':len(rows), 'errors_by_field':counts}, .2, schema=obj(summary=TEXT,recommendations=TEXT))
-        return {'works':len(rows), 'counts':counts, 'summary':result['summary'], 'recommendations':result['recommendations']}
+        import insights_service
+        auth_user = p.get('_auth_user')
+        owner = (p.get('_owner_id') or auth_user.get('id')
+                 if auth_user and auth_user.get('role') == 'teacher' else None)
+        return insights_service.get_insights(engine, p.get('group'),
+                                             force=bool(p.get('force')),
+                                             owner=owner)
     if action == 'scenario_list':
-        return curriculum.list_resources(engine, 'scenario')
+        return curriculum.list_resources(engine, 'scenario', owner=p.get('_owner_id'))
     if action == 'scenario_get':
         return curriculum.get(engine, p['resource_id'])
     if action == 'scenario_save':
@@ -220,28 +214,30 @@ def dispatch(engine, action, p):
     if action == 'scenario_delete':
         return curriculum.delete_scenario(engine, p['resource_id'])
     if action == 'training_list':
-        return curriculum.list_resources(engine, 'training')
+        return curriculum.list_resources(engine, 'training', owner=p.get('_owner_id'))
     if action == 'training_get':
         return curriculum.get(engine, p['resource_id'])
     if action == 'training_save':
-        return curriculum.save_training(engine, p, p.get('resource_id'))
+        return curriculum.save_training(engine, p, p.get('resource_id'), teacher_id=p.get('_owner_id'))
     if action == 'training_activate':
         return curriculum.activate(engine, p['resource_id'])
     if action == 'training_complete':
-        return curriculum.complete(engine, p['resource_id'], p['teacher'])
+        return curriculum.complete(engine, p['resource_id'], p['teacher'], p.get('_owner_id'))
     if action == 'training_delete':
         return curriculum.delete_training(engine, p['resource_id'])
     if action == 'training_desk':
-        return curriculum.desk(engine, p['student'])
+        return curriculum.desk(engine, p['student'], p.get('_owner_id'))
     if action == 'training_route':
-        return curriculum.route_card(engine, p['resource_id'], p['card_id'], p['student'], p['services'], p.get('updates', {}))
+        return curriculum.route_card(engine, p['resource_id'], p['card_id'], p['student'], p['services'], p.get('updates', {}), p.get('_owner_id'))
     if action == 'training_service_action':
-        return curriculum.service_action(engine, p['resource_id'], p['card_id'], p['student'], p['text'])
+        return curriculum.service_action(engine, p['resource_id'], p['card_id'], p['student'], p['text'], p.get('_owner_id'))
     if action in ('teacher_dashboard', 'teacher_session', 'teacher_task', 'teacher_note', 'teacher_finish', 'teacher_launch'):
         return teacher_portal.dispatch(engine, action, p)
     if action == 'student_overview':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
-        sessions = [s for s in engine.list_items('s') if s['student'] == student]
+        sessions = [s for s in engine.list_items('s', owner=p.get('_owner_id'))
+                    if s.get('student_id') == p['_owner_id']] if p.get('_owner_id') is not None else [
+                        s for s in engine.list_items('s') if s['student'] == student]
         bound_ids = {task_id for scenario in curriculum.list_resources(engine, 'scenario')
                      if scenario['status'] == 'approved' for task_id in scenario['task_ids']}
         for candidate in sessions:
@@ -264,16 +260,21 @@ def dispatch(engine, action, p):
     if action == 'student_start':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
         task_id = p.get('task_id')
-        for s in engine.list_items('s'):
-            if s['student'] == student and s['task']['id'] == task_id and s['status'] == 'active':
+        for s in engine.list_items('s', owner=p.get('_owner_id')):
+            owned = (s.get('student_id') == p['_owner_id'] if p.get('_owner_id') is not None
+                     else s['student'] == student)
+            if owned and s['task']['id'] == task_id and s['status'] == 'active':
                 return student_portal_view(engine, s['id'], p.get('full_form', False))
         if any(task_id in scenario['task_ids'] for scenario in curriculum.list_resources(engine, 'scenario') if scenario['status'] == 'approved'):
             raise ValueError('Задание выполняется в назначенной активной тренировке. Примите входящий вызов в списке.')
-        return student_portal_view(engine, engine.start(task_id, student)['id'], p.get('full_form', False))
+        return student_portal_view(engine, engine.start(task_id, student, student_id=p.get('_owner_id'))['id'], p.get('full_form', False))
     if action == 'student_action':
         student = require_text(p.get('student'), 'Имя обучающегося', 160)
         current = engine.load(p.get('id'))
-        if current['student'] != student:
+        owned = (p.get('_auth_user', {}).get('role') == 'admin' or
+                 (current.get('student_id') == p['_owner_id'] if p.get('_owner_id') is not None
+                  else current['student'] == student))
+        if not owned:
             raise ValueError('Эта тренировка относится к другому обучающемуся.')
         operation = p.get('operation')
         if operation not in ('student', 'accept', 'ask', 'nudge', 'save_card', 'submit', 'connect', 'channel'):
@@ -309,14 +310,15 @@ def dispatch(engine, action, p):
             return view
         return student_portal_view(engine, p['id'], p.get('full_form', False))
     if action == 'teacher_overview':
+        teacher_id = p.get('_owner_id')
         return {
             'sessions': [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'],
                           'status': s['status'], 'workflow': s['task'].get('workflow', 'caller'),
                           'created_at': s.get('created_at'),
                           'grade': (s.get('teacher_decision') or {}).get('grade') if s['status'] == 'reviewed' else None}
-                         for s in engine.list_items('s')],
+                         for s in engine.list_items('s', teacher=teacher_id)],
             'tasks': [{key: t.get(key) for key in ('id', 'title', 'status', 'workflow', 'level')}
-                      for t in engine.list_items('t')],
+                      for t in engine.list_items('t', teacher=teacher_id)],
         }
     if action == 'card_publish':
         return incident_training.publish(engine, p)
@@ -356,9 +358,10 @@ def dispatch(engine, action, p):
                 'workflows': WORKFLOWS, 'action_labels': ACTION_LABELS,
                 'counts': {key: len(engine.approved_tasks(key)) for key in WORKFLOWS}}
     if action == 'tasks':
-        return engine.list_items('t')
+        return engine.list_items('t', teacher=p.get('_owner_id'))
     if action == 'create':
-        return engine.sample(p['level'], p.get('workflow', 'caller')) if p.get('sample') else engine.draft(p['topic'], p['level'], p.get('workflow', 'caller'))
+        return (engine.sample(p['level'], p.get('workflow', 'caller'), owner_id=p.get('_owner_id'))
+                if p.get('sample') else engine.draft(p['topic'], p['level'], p.get('workflow', 'caller'), owner_id=p.get('_owner_id')))
     if action == 'save_task':
         task = engine.load(p['id'])
         if not task['id'].startswith('t-') or task['status'] != 'draft':
@@ -373,13 +376,15 @@ def dispatch(engine, action, p):
     if action == 'approve':
         return engine.approve(p['id'], p['teacher'])
     if action == 'start':
-        return engine.start_assigned(p['student'], p.get('workflow'))
+        return engine.start_assigned(p['student'], p.get('workflow'), student_id=p.get('_owner_id'))
     if action == 'connect':
         return engine.connect_service(p['id'])
     if action == 'channel':
         return engine.set_channel(p['id'], p['mode'])
     if action == 'sessions':
-        return [engine.student_view(s['id']) for s in engine.list_items('s') if s['student'] == p['student']]
+        return [engine.student_view(s['id']) for s in engine.list_items('s', owner=p.get('_owner_id'))
+                if (s.get('student_id') == p['_owner_id'] if p.get('_owner_id') is not None
+                    else s['student'] == p['student'])]
     if action == 'student':
         return engine.student_view(p['id'])
     if action == 'ask':
@@ -410,16 +415,18 @@ def dispatch(engine, action, p):
         engine.assess(p['id'])
         return {'status': 'pending_teacher'}
     if action == 'works':
-        return [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'], 'status': s['status']} for s in engine.list_items('s') if s['status'] != 'active']
+        return [{'id': s['id'], 'title': s['task']['title'], 'student': s['student'], 'status': s['status']} for s in engine.list_items('s', teacher=p.get('_owner_id')) if s['status'] != 'active']
     if action == 'review':
         s = engine.load(p['id'])
         if not s['id'].startswith('s-') or s['status'] == 'active':
             raise ValueError('Эта работа ещё не сдана.')
         return s
     if action == 'finalize':
-        return engine.finalize(p['id'], p['teacher'], p['grade'], p['conclusion'], p['decisions'])
+        return engine.finalize(p['id'], p['teacher'], p['grade'], p['conclusion'], p['decisions'],
+                               teacher_id=p.get('_owner_id'))
     if action == 'finalize_percent':
-        return engine.finalize_percent(p['id'], p['teacher'], p['percent'], p['conclusion'], p['decisions'])
+        return engine.finalize_percent(p['id'], p['teacher'], p['percent'], p['conclusion'], p['decisions'],
+                                       teacher_id=p.get('_owner_id'))
     # --- Этап 2.1: слой пользователей и аутентификации (JWT) ---
     if action == 'auth_login':
         return auth_service.login(p.get('login', ''), p.get('password', ''), p.get('user_agent', ''))
@@ -434,6 +441,10 @@ def dispatch(engine, action, p):
         return auth_service.list_users()
     if action == 'auth_users_create':
         return auth_service.create_user(p['login'], p['password'], p['full_name'], p['role'])
+    if action == 'auth_users_reset_passwords':
+        return auth_service.reset_passwords(
+            user_ids=p.get('user_ids'), group_id=int(p['group_id']) if p.get('group_id') else None,
+            password=p.get('password'))
     if action == 'auth_users_update':
         return auth_service.update_user(
             int(p['user_id']), full_name=p.get('full_name'), role=p.get('role'),

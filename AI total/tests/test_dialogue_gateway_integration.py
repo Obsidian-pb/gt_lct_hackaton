@@ -65,10 +65,11 @@ class EndToEndGatewayTests(unittest.TestCase):
         current = dict(started['card'])
         current['street'] = 'Сосновая'
         current['_report'] = 'Пострадавших нет'
-        response = self.router.handle('POST', f"/api/v1/students/Курсант/sessions/{started['id']}/messages", {
-            'question':'Подскажите улицу и что известно о пострадавших?',
-            'source':'text', 'full_form':True, 'card':current,
-        })
+        with patch('rest_api.auth_service.roles_required', return_value=False):
+            response = self.router.handle('POST', f"/api/v1/students/Курсант/sessions/{started['id']}/messages", {
+                'question':'Подскажите улицу и что известно о пострадавших?',
+                'source':'text', 'full_form':True, 'card':current,
+            })
         self.assertIn(self.expected_street, response.data['history'][-1]['text'])
         sent = self.remote_provider.calls[-1][1]
         self.assertEqual(sent['student_fields']['street'], 'Сосновая')

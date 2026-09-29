@@ -224,6 +224,25 @@ class SessionRoundTripTest(unittest.TestCase):
         self.assertEqual(restored['created_at'], doc['created_at'])
         self.assertFalse(restored['timed_out'])
 
+    def test_teacher_ids_survive_ambiguous_names(self):
+        doc = self._session()
+        doc['teacher_note_by'] = 'Одно имя'
+        doc['teacher_note_by_id'] = 17
+        doc['teacher_decision']['teacher'] = 'Одно имя'
+        doc['teacher_decision']['teacher_id'] = 17
+
+        def ambiguous(name, kind):
+            if name == 'Одно имя':
+                raise ValueError('Неоднозначное имя')
+            return resolve(name, kind)
+
+        rows = docs.session_to_rows(doc, ambiguous)
+        self.assertEqual(rows['session'][16], 17)
+        self.assertEqual(rows['decision']['row'][1], 17)
+        restored = self._restore(doc)
+        self.assertEqual(restored['teacher_note_by_id'], 17)
+        self.assertEqual(restored['teacher_decision']['teacher_id'], 17)
+
     def test_dds_session_delivered_flags(self):
         doc = self._session()
         doc['status'] = 'active'
@@ -306,7 +325,9 @@ class CurriculumRoundTripTest(unittest.TestCase):
             self.assertEqual(restored['id'], doc['id'])
             self.assertEqual(restored['status'], 'active')
             self.assertEqual(restored['scenario_ids'], doc['scenario_ids'])
-            self.assertEqual(restored['participants'], doc['participants'])
+            self.assertEqual([p['student'] for p in restored['participants']],
+                             [p['student'] for p in doc['participants']])
+            self.assertEqual([p['user_id'] for p in restored['participants']], [2, 3])
             self.assertEqual(restored['cards'][0]['id'], 'card-1234567890ab')
             self.assertEqual(restored['cards'][0]['status'], 'done')
             self.assertEqual(restored['cards'][0]['card'], {'address': 'Ленина 5'})
@@ -314,6 +335,7 @@ class CurriculumRoundTripTest(unittest.TestCase):
             self.assertEqual(restored['cards'][0]['service_actions']['101']['text'],
                              'Выехали')
             self.assertEqual(restored['cards'][0]['dds_by'], 'Студент2')
+            self.assertEqual(restored['cards'][0]['dds_by_id'], 3)
         finally:
             NAMES.pop('Студент2', None)
 
@@ -324,7 +346,29 @@ class CurriculumRoundTripTest(unittest.TestCase):
         repo = __import__('storage_repository')
         row = row_dict(repo.MATERIAL_COLUMNS, docs.material_to_rows(doc, resolve))
         restored = docs.material_from_row(row, name_of)
-        self.assertEqual(restored, doc)
+        self.assertEqual(restored, {**doc, 'teacher_id': 1})
+
+    def test_ids_override_ambiguous_display_names(self):
+        def ambiguous(_name, _kind):
+            raise AssertionError('ID must not be resolved from a display name')
+
+        task = docs.task_to_rows(base_task(owner_id=7), ambiguous)
+        self.assertEqual(task['task'][12], 7)
+        session = SessionRoundTripTest()._session()
+        session['student_id'] = 8
+        session['teacher_note_by'] = None
+        session['teacher_decision'] = None
+        self.assertEqual(docs.session_to_rows(session, lambda name, kind: None if name is None else ambiguous(name, kind))['session'][4], 8)
+        training = {'id': 'training-1234567890ab', 'title': 'Обучение',
+                    'teacher_id': 7, 'status': 'prepared', 'teacher': 'Одно имя',
+                    'participants': [{'student': 'Одно имя', 'role': 'operator', 'user_id': 8},
+                                     {'student': 'Одно имя', 'role': 'dds', 'user_id': 9}],
+                    'scenario_ids': [], 'cards': []}
+        rows = docs.training_to_rows(training, ambiguous)
+        self.assertEqual(rows['training'][7], 7)
+        self.assertEqual([row[1] for row in rows['participants']], [8, 9])
+        material = {'id': 'material-1234567890ab', 'teacher': 'Одно имя', 'teacher_id': 7}
+        self.assertEqual(docs.material_to_rows(material, ambiguous)[4], 7)
 
 
 class LoadTsTest(unittest.TestCase):

@@ -91,7 +91,7 @@ class AuthRepository:
         self._config = config or db_config.get_db_config()
 
     def _connect(self) -> db_connection.PostgresConnection:
-        return db_connection.connect_from_config(self._config)
+        return db_connection.connection_from_config(self._config)
 
     # ----------------------------------------------------------------- schema
 
@@ -139,10 +139,32 @@ class AuthRepository:
                 'SELECT ' + ', '.join(_USER_COLUMNS) + ' FROM "user" WHERE id = ' + q(int(user_id)))
         return self._user_from_row(row)
 
-    def list_users(self) -> List[dict]:
+    def list_users(self, role: Optional[str] = None) -> List[dict]:
+        where = ' WHERE role = ' + q(role) if role is not None else ''
         with self._connect() as connection:
             rows = connection.execute(
-                'SELECT ' + ', '.join(_USER_COLUMNS) + ' FROM "user" ORDER BY role, login')
+                'SELECT ' + ', '.join(_USER_COLUMNS) + ' FROM "user"'
+                + where + ' ORDER BY role, login')
+        return [self._user_from_row(row) for row in rows]
+
+    def list_students_by_ids(self, user_ids: List[int]) -> List[dict]:
+        if not user_ids:
+            return []
+        identifiers = ', '.join(q(int(user_id)) for user_id in sorted(set(user_ids)))
+        with self._connect() as connection:
+            rows = connection.execute(
+                'SELECT ' + ', '.join(_USER_COLUMNS) + ' FROM "user"'
+                ' WHERE role = ' + q('student') + ' AND id IN (' + identifiers + ')'
+                ' ORDER BY login')
+        return [self._user_from_row(row) for row in rows]
+
+    def list_students_in_group(self, group_id: int) -> List[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                'SELECT ' + ', '.join('u.' + column for column in _USER_COLUMNS)
+                + ' FROM group_member m JOIN "user" u ON u.id = m.user_id'
+                ' WHERE m.group_id = ' + q(int(group_id))
+                + ' AND u.role = ' + q('student') + ' ORDER BY u.login')
         return [self._user_from_row(row) for row in rows]
 
     def count_users(self) -> int:

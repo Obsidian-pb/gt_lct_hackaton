@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 from ai_core import now, require_text
 
 
-def items(engine):
-    return engine.materials_items()
+def items(engine, owner=None):
+    return engine.materials_items(owner=owner)
 
 
 def add(engine, request):
@@ -23,4 +23,6 @@ def add(engine, request):
              'description': str(request.get('description') or '')[:1000],
              'teacher': require_text(request.get('teacher'), 'Преподаватель', 160),
              'created_at': now()}
+    if request.get('_owner_id') is not None:
+        entry['teacher_id'] = request['_owner_id']
     return engine.materials_add(entry)

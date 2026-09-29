@@ -18,6 +18,7 @@ from provider import AIProvider
 from ui_release import release_id, validate_ui, compatible_server
 from api_contract import PREFIX, ROUTES, openapi
 from rest_api import APIError, RestAPI
+from db_connection import close_thread_connection
 import uuid
 
 # Every first-level API segment that has at least one JWT-protected route.
@@ -41,6 +42,12 @@ from application import dispatch, student_portal_view, briefing_meta, briefing_b
 
 class LocalServer(ThreadingHTTPServer):
     allow_reuse_address = False
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            close_thread_connection()
 
     def server_bind(self):
         # Windows otherwise permits two local copies to share the same port.
@@ -297,6 +304,8 @@ def main():
         except StorageUnavailable as exc:
             print('[STORAGE] ' + str(exc), flush=True)
             raise SystemExit(2) from None
+    else:
+        raise SystemExit('Режим files отключён: для запуска требуется PostgreSQL.')
     engine = Engine(AIProvider(), args.data_dir, storage=storage)
     try:
         server = make_server(engine, args.port, api_token=os.environ.get('TRAINING_API_TOKEN'),

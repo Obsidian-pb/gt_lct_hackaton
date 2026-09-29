@@ -1,6 +1,7 @@
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from ai_core import Engine
 from card_fake import FactoryFake
@@ -71,16 +72,17 @@ class CurriculumFlow(unittest.TestCase):
         training=self.create([{'student':'Курсант','role':'operator'}])
         router=RestAPI(self.engine, threading.Lock())
         session_id=training['cards'][0]['operator_session_id']
-        response=router.handle('POST',f'/api/v1/students/Курсант/sessions/{session_id}/acceptance',{})
-        self.assertEqual(response.data['status'],'active')
-        session=self.engine.load(session_id)
-        session['status']='submitted';session['submitted_at']=session['activated_at'];self.engine.save(session)
-        decisions={key:'Проверено преподавателем' for key in session['task']['fields']}
-        result=router.handle('PUT',f'/api/v1/works/{session_id}/percentage-decision',
-                             {'teacher':'Преподаватель','percent':72,'conclusion':'Карточка проверена','decisions':decisions})
-        self.assertEqual(result.data['percent'],72)
-        with self.assertRaises(APIError):
-            router.handle('POST',f'/api/v1/students/Курсант/sessions/{session_id}/acceptance',{})
+        with patch('rest_api.auth_service.roles_required', return_value=False):
+            response=router.handle('POST',f'/api/v1/students/Курсант/sessions/{session_id}/acceptance',{})
+            self.assertEqual(response.data['status'],'active')
+            session=self.engine.load(session_id)
+            session['status']='submitted';session['submitted_at']=session['activated_at'];self.engine.save(session)
+            decisions={key:'Проверено преподавателем' for key in session['task']['fields']}
+            result=router.handle('PUT',f'/api/v1/works/{session_id}/percentage-decision',
+                                 {'teacher':'Преподаватель','percent':72,'conclusion':'Карточка проверена','decisions':decisions})
+            self.assertEqual(result.data['percent'],72)
+            with self.assertRaises(APIError):
+                router.handle('POST',f'/api/v1/students/Курсант/sessions/{session_id}/acceptance',{})
 
     def test_adaptive_next_card_uses_previous_score_and_task_levels(self):
         ids=[]
