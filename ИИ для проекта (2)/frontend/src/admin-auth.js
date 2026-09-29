@@ -8,7 +8,7 @@ export async function hashPassword(value){
  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 export function readAdminAccount(){try{return JSON.parse(localStorage.getItem(ADMIN_ACCOUNT)||'null');}catch{return null;}}
-export function adminSignedIn(){try{return JSON.parse(sessionStorage.getItem(ADMIN_SESSION)||'null')?.ok===true;}catch{return false;}}
+export function adminSignedIn(){try{const session=JSON.parse(sessionStorage.getItem(ADMIN_SESSION)||'null'),account=readAdminAccount();return session?.ok===true&&!!account&&session.login===account.login;}catch{return false;}}
 export function adminName(){return readAdminAccount()?.name||'Администратор';}
 export function adminLogout(){sessionStorage.removeItem(ADMIN_SESSION);}
 export async function createAdmin({name,login,password}){
@@ -22,7 +22,7 @@ export async function signInAdmin(login,password){
  const account=readAdminAccount();
  if(!account)return false;
  const ok=account.login===login.trim()&&account.password_hash===await hashPassword(password);
- if(ok)sessionStorage.setItem(ADMIN_SESSION,JSON.stringify({ok:true,login:account.login,at:new Date().toISOString()}));
+ if(ok){sessionStorage.setItem(ADMIN_SESSION,JSON.stringify({ok:true,login:account.login,at:new Date().toISOString()}));seedAdminUser(account);}
  return ok;
 }
 export function seedAdminUser(account=readAdminAccount()){

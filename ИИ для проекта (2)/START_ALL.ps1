@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 $runtime = Join-Path $root '.runtime'
@@ -21,8 +21,19 @@ function Find-Python {
     }
     $py = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($py) {
-        $resolved = (& $py.Source -3 -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1)
-        if ($resolved -and (Test-Path $resolved.Trim())) { return $resolved.Trim() }
+        # Resolve the actual interpreter through a temporary script. Avoid `-c` here:
+        # Windows PowerShell 5.1/WindowsApps can strip quotes from Python code arguments.
+        $probe = Join-Path $runtime ('.resolve-python-' + $PID + '.py')
+        try {
+            Set-Content -LiteralPath $probe -Value 'import sys; print(sys.executable)' -Encoding UTF8
+            $resolved = (& $py.Source -3 $probe 2>$null | Select-Object -First 1)
+            if ($resolved) {
+                $resolved = $resolved.ToString().Trim()
+                if (Test-Path $resolved) { return $resolved }
+            }
+        } finally {
+            Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        }
     }
     $python = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($python) { return $python.Source }
@@ -42,6 +53,16 @@ function Stop-Listener([int]$port) {
     } catch {
         # Get-NetTCPConnection may be unavailable on very old Windows. The bind check below will report the issue.
     }
+}
+
+function Stop-Old-Console {
+    $path = Join-Path $runtime 'server-console.pid'
+    if (-not (Test-Path $path)) { return }
+    $oldPid = (Get-Content $path -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($oldPid -match '^\d+$' -and (Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue)) {
+        & taskkill.exe /PID $oldPid /T /F 2>$null | Out-Null
+    }
+    Remove-Item $path -Force -ErrorAction SilentlyContinue
 }
 
 function Wait-Health([string]$url, [System.Diagnostics.Process]$process, [string]$stderrPath, [string]$expectedField = 'status', [string]$expectedValue = 'ok', [int]$attempts = 60) {
@@ -94,6 +115,18 @@ try {
     $localHosts = @('127.0.0.1','localhost','::1')
     $useLocalAi = $localHosts -contains $dialogueUri.Host
 
+    # Stop the previous application BEFORE touching Piper packages. On Windows a running
+    # Python process keeps native .pyd files (numpy/onnxruntime) locked and pip cannot
+    # replace/delete them. This ordering prevents WinError 5 on repeated START.cmd.
+    Step 'Stopping previous local services before Piper check...'
+    Stop-Listener 8878
+    if ($useLocalAi) { Stop-Listener $dialogueUri.Port }
+    Stop-Old-Console
+    Start-Sleep -Milliseconds 600
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'PREPARE_PIPER.ps1') -PythonPath $python
+    if ($LASTEXITCODE -ne 0) { Step 'Piper setup could not finish. The interface will start, but local Piper voice is unavailable; see .runtime\piper-selftest.log.' }
+
     if (-not $env:AI_REST_TOKEN -or $env:AI_REST_TOKEN.Length -lt 24) {
         if ($useLocalAi) {
             # Per-launch internal bearer token. It is inherited by both local backend processes and never sent to the browser.
@@ -104,10 +137,7 @@ try {
     }
     $env:AI_DIALOGUE_REST_URL = $dialogueUrl
 
-    Stop-Listener 8878
-
     if ($useLocalAi) {
-        Stop-Listener $dialogueUri.Port
         $aiOut = Join-Path $runtime 'ai-rest.out.log'
         $aiErr = Join-Path $runtime 'ai-rest.err.log'
         Remove-Item $aiOut,$aiErr -Force -ErrorAction SilentlyContinue
@@ -134,6 +164,12 @@ try {
     $uiProcess = Start-Process -FilePath $python -ArgumentList @('web_ui.py','--port','8878','--no-browser') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $uiOut -RedirectStandardError $uiErr -PassThru
     Set-Content -Path (Join-Path $runtime 'web-ui.pid') -Value $uiProcess.Id -NoNewline
     Wait-Health 'http://127.0.0.1:8878/health' $uiProcess $uiErr 'app' 'ai-project-ui' | Out-Null
+
+    Stop-Old-Console
+    Step 'Opening a separate server console with live logs...'
+    $console = Join-Path $root 'SERVER_CONSOLE.cmd'
+    $consoleProcess = Start-Process -FilePath $env:ComSpec -WorkingDirectory $root -ArgumentList ('/k ""{0}""' -f $console) -PassThru
+    Set-Content -Path (Join-Path $runtime 'server-console.pid') -Value $consoleProcess.Id -NoNewline
 
     Step 'Everything is ready. Opening the interface...'
     Start-Process 'http://127.0.0.1:8878'

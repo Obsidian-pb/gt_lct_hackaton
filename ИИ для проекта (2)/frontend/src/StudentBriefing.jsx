@@ -1,7 +1,7 @@
 import {Icon} from './Shell.jsx';
 const steps=['Ознакомиться с условиями учебного вызова','Уточнить сведения у собеседника','Самостоятельно заполнить карточку','Сохранить и сдать работу преподавателю'];
 export default function StudentBriefing({task,stage,setStage,start,back,busy}){
- const banner=task.banner_key?`/banners/${task.banner_key}.png`:null;
+ const banner=task.banner_key?`/banners/${task.banner_key}.webp`:null;
  const workflow=task.workflow==='dds'?'Диспетчер ДДС':'Оператор 112';
  const description=task.workflow==='dds'?'Проверьте полученную карточку 112 по доступному уточнению. Свяжитесь с представителем службы и передайте сведения о происшествии.':'Примите учебное сообщение, задайте заявителю уточняющие вопросы и самостоятельно заполните карточку происшествия.';
  return <><button className="student-link" onClick={back} disabled={busy}>← Назад к списку</button><div className="student-title-row"><div><h1>{stage==='launch'?'Запуск тренировки':task.title}</h1><p className="student-subtitle">{stage==='launch'?'Подтвердите параметры и начните выполнение учебной тренировки':'Ознакомьтесь с параметрами тренировки и начните выполнение'}</p></div></div>

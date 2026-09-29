@@ -58,9 +58,12 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
             self.connection.settimeout(30)
 
         def log_message(self, *args):
-            pass
+            # Keep request bodies, query strings, student names and UI tokens out of logs.
+            return
 
         def respond(self, code, body, mime='application/json; charset=utf-8', headers=None):
+            if getattr(self, '_log_action', None):
+                print(f'[WEB] {self.command} {self._log_action}: HTTP {code} request={getattr(self, "_request_id", "-")}', flush=True)
             content = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode('utf-8')
             self.send_response(code)
             self.send_header('Content-Type', mime)
@@ -116,6 +119,8 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
 
         def rest_request(self):
             request_id = uuid.uuid4().hex
+            self._request_id = request_id
+            self._log_action = 'REST API'
             headers = {'X-Request-ID': request_id}
             try:
                 if not self.local_host():
@@ -126,6 +131,7 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
                     raise APIError(403, 'origin_denied', 'Этот Origin не разрешён для API.')
                 path = urlsplit(self.path).path
                 if path in (PREFIX + '/health', PREFIX + '/openapi.json'):
+                    self._log_action = None
                     if self.command not in ('GET','HEAD'):
                         raise APIError(405, 'method_not_allowed', 'Используйте GET.', headers={'Allow':'GET, HEAD'})
                     self.read_json()
@@ -146,6 +152,11 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
                 bearer_ok = api_token and secrets.compare_digest(supplied_auth.encode(), ('Bearer ' + api_token).encode())
                 if not (ui_ok or bearer_ok):
                     raise APIError(401, 'unauthorized', 'Нужен токен локального интерфейса или отдельный токен REST API.', headers={'WWW-Authenticate':'Bearer'})
+                try:
+                    route, _ = router.resolve('GET' if self.command == 'HEAD' else self.command, self.path)
+                    self._log_action = route.action + (('/' + route.operation) if route.operation else '')
+                except APIError:
+                    pass
                 body = self.read_json()
                 result = router.handle('GET' if self.command == 'HEAD' else self.command, self.path, body)
                 headers.update(result.headers)
@@ -179,7 +190,7 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
                 file_path = ROOT / 'ui' / 'banners' / filename
                 if not file_path.is_file():
                     self.respond(404, {'error': 'Не найдено'}); return
-                self.respond(200, file_path.read_bytes(), 'image/png'); return
+                self.respond(200, file_path.read_bytes(), 'image/webp'); return
             if path in ('/student/', '/teacher/', '/admin-login/', '/admin/', '/cards/', '/training/', '/scenarios/'):
                 self.send_response(302)
                 self.send_header('Location', path.rstrip('/'))
