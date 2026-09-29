@@ -29,6 +29,9 @@
 
 <img src="Преподаватель.png" alt="Панель преподавателя" width="100%">
 
+🎨 [**Дизайн и UX-макеты в Figma**](https://www.figma.com/design/DuyF0x3DrhDdApa4AR3HTG/Hackathon?node-id=0-1)
+[![Figma](https://img.shields.io/badge/Figma-F24E1E?style=for-the-badge&logo=figma&logoColor=white)](https://www.figma.com/design/DuyF0x3DrhDdApa4AR3HTG/Hackathon?node-id=0-1)
+
 ## База данных
 
 Модуль базы данных тренажёра ДДС «Система-112» находится в папке
