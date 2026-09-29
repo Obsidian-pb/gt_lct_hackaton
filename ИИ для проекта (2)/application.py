@@ -21,7 +21,7 @@ import materials
 ROOT = Path(__file__).resolve().parent
 
 BANNER_DIR = ROOT / 'ui' / 'banners'
-BANNER_FILES = {path.stem: path.name for path in BANNER_DIR.glob('*.png')}
+BANNER_FILES = {path.stem: path.name for path in BANNER_DIR.glob('*.webp')}
 _CLASS_BY_ID = {row['id']: row for row in card_factory.CATALOG}
 _BANNER_MAP_PATH = ROOT / 'ui' / 'banners' / 'banner-map.json'
 

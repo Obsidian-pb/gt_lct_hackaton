@@ -7,3 +7,5 @@ config.local.json
 ui-error.log
 frontend/node_modules/
 frontend/.tools/
+.runtime/
+piper_voices/*.onnx

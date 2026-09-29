@@ -7,8 +7,8 @@ REQUIRED_UI = ('api-client.js', 'api-routes.js', 'api-docs.html', 'react.html', 
                'theme.css', 'making.css', 'cards.css', 'welcome.css', 'admin.css', 'hero-logo.svg',
                'hero-background.svg', 'address.css', 'geo/addresses.json', 'geo/map.json',
                'scenarios.html', 'scenarios.css', 'scenarios.js', 'enhancements.js',
-               'banners/gas-leak.png', 'banners/person-danger.png', 'banners/road-injured.png',
-               'banners/mass-event.png', 'banners/industrial-fire.png', 'banners/residential-fire.png')
+               'banners/gas-leak.webp', 'banners/person-danger.webp', 'banners/road-injured.webp',
+               'banners/mass-event.webp', 'banners/industrial-fire.webp', 'banners/residential-fire.webp')
 
 
 def release_id(root=ROOT):

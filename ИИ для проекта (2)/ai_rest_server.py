@@ -209,6 +209,8 @@ def make_server(provider, port=8890, *, token, host='127.0.0.1'):
             pass  # Do not put prompts, URLs or credentials into console logs.
 
         def reply(self, status, data, content_type='application/json; charset=utf-8'):
+            if getattr(self, '_log_action', None):
+                print(f'[AI] {self._log_action}: HTTP {status} request={self.request_id}', flush=True)
             payload = data.encode('utf-8') if isinstance(data, str) else json.dumps(data, ensure_ascii=False).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', content_type)
@@ -233,6 +235,7 @@ def make_server(provider, port=8890, *, token, host='127.0.0.1'):
 
         def do_POST(self):
             self.request_id = uuid.uuid4().hex
+            self._log_action = 'генерация карточки' if self.path == PATH else 'ответ заявителя' if self.path == REPLY_PATH else 'REST API'
             if self.path not in (PATH, REPLY_PATH):
                 self.fail(404, 'not_found', 'Маршрут не найден.'); return
             auth = self.headers.get('Authorization', '')

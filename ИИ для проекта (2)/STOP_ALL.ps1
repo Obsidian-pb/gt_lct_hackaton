@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'SilentlyContinue'
+﻿$ErrorActionPreference = 'SilentlyContinue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runtime = Join-Path $root '.runtime'
 $stopped = @()
@@ -23,6 +23,20 @@ foreach ($port in @(8878,8890)) {
             $stopped += $item.OwningProcess
         }
     }
+}
+$consolePidPath = Join-Path $runtime 'server-console.pid'
+if (Test-Path $consolePidPath) {
+    $consoleId = (Get-Content $consolePidPath -Raw).Trim()
+    if ($consoleId -match '^\d+$' -and (Get-Process -Id ([int]$consoleId) -ErrorAction SilentlyContinue)) {
+        & taskkill.exe /PID $consoleId /T /F 2>$null | Out-Null
+    }
+    Remove-Item $consolePidPath -Force
+}
+$substMarker = Join-Path $runtime 'piper-subst-drive.txt'
+if (Test-Path -LiteralPath $substMarker) {
+    $drive = (Get-Content -LiteralPath $substMarker -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($drive -match '^[A-Z]:$') { & subst.exe $drive /D 2>$null | Out-Null }
+    Remove-Item -LiteralPath $substMarker -Force -ErrorAction SilentlyContinue
 }
 Write-Host '112 services stopped.' -ForegroundColor Green
 exit 0

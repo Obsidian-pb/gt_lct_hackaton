@@ -75,7 +75,7 @@ def _known_phones(text):
     """Extract only phone-like sequences, rather than concatenating unrelated digits."""
     return {
         _phone_key(match)
-        for match in re.findall(r'(?:\+?\d[\s()+.\-]*){7,}', text)
+        for match in re.findall(r'(?:\+?\d[ \t()+.\-]*){7,}', text)
         if 7 <= len(re.sub(r'\D', '', match)) <= 18
     }
 
@@ -88,7 +88,7 @@ def _grounding_issue(reply, student_fields, trusted_text):
     model has produced a natural-language reply.
     """
     allowed_phones = _known_phones(trusted_text)
-    for phone in re.findall(r'(?:\+?\d[\s()+.\-]*){7,}', reply):
+    for phone in re.findall(r'(?:\+?\d[ \t()+.\-]*){7,}', reply):
         digits = re.sub(r'\D', '', phone)
         if 7 <= len(digits) <= 18 and _phone_key(phone) not in allowed_phones:
             return ('Ответ содержит номер телефона, которого нет в доверенных сведениях '
