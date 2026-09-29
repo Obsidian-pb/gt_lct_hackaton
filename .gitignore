@@ -60,3 +60,5 @@ database/classifier_import.sql
 
 # Frontend dependencies
 /frontend/node_modules
+
+*.trainer112*
