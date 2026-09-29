@@ -170,6 +170,22 @@ try {
         Write-Host $authInitOutput -ForegroundColor Yellow
     }
 
+    Step 'Initializing the catalog layer (PostgreSQL)...'
+    try {
+        $catalogInitOutput = (& $python 'init_catalog.py' '--init' 2>&1 | Out-String).Trim()
+        $catalogInitCode = $LASTEXITCODE
+    } catch {
+        $catalogInitOutput = $_.Exception.Message
+        $catalogInitCode = 1
+    }
+    Set-Content -Path (Join-Path $runtime 'catalog-init.log') -Value $catalogInitOutput -Encoding UTF8
+    Write-Host ''
+    if ($catalogInitCode -eq 0) {
+        Write-Host $catalogInitOutput -ForegroundColor Green
+    } else {
+        Write-Host $catalogInitOutput -ForegroundColor Yellow
+    }
+
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray

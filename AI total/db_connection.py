@@ -107,7 +107,11 @@ class PostgresConnection:
             self._sock = None
 
     def __enter__(self) -> 'PostgresConnection':
-        self.connect()
+        # connect_from_config() already establishes the session, so entering
+        # the context must not open a second socket (each connect() allocates
+        # a fresh socket; connecting twice used to leak the first one).
+        if self._sock is None:
+            self.connect()
         return self
 
     def __exit__(self, *_exc) -> None:

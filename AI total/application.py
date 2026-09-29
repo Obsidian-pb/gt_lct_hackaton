@@ -18,6 +18,7 @@ import training_progress
 import curriculum
 import materials
 import auth_service
+import catalog_service
 
 ROOT = Path(__file__).resolve().parent
 
@@ -461,5 +462,51 @@ def dispatch(engine, action, p):
         return {'ok': True}
     if action == 'auth_groups_remove_member':
         auth_service.remove_group_member(int(p['group_id']), int(p['user_id']))
+        return {'ok': True}
+    # --- Этап 2.2: справочники (JWT admin) ---
+    if action == 'catalog_services_list':
+        return catalog_service.list_services()
+    if action == 'catalog_services_create':
+        return catalog_service.create_service(p['code'], p['name'])
+    if action == 'catalog_services_update':
+        return catalog_service.update_service(p['service_code'], p['name'])
+    if action == 'catalog_services_delete':
+        catalog_service.delete_service(p['service_code'])
+        return {'ok': True}
+    if action == 'catalog_categories_list':
+        return catalog_service.list_categories()
+    if action == 'catalog_categories_create':
+        return catalog_service.create_category(p['category_id'], p['name'])
+    if action == 'catalog_categories_update':
+        return catalog_service.update_category(p['category_id'], p['name'])
+    if action == 'catalog_categories_delete':
+        catalog_service.delete_category(p['category_id'])
+        return {'ok': True}
+    if action == 'catalog_entries_list':
+        return catalog_service.list_entries(p.get('category_id'))
+    if action == 'catalog_entries_create':
+        return catalog_service.create_entry(p)
+    if action == 'catalog_entries_update':
+        return catalog_service.update_entry(p['entry_id'], p)
+    if action == 'catalog_entries_delete':
+        catalog_service.delete_entry(p['entry_id'])
+        return {'ok': True}
+    if action == 'catalog_entry_services_list':
+        return catalog_service.list_entry_services(p.get('entry_id'), p.get('service_code'))
+    if action == 'catalog_entry_services_create':
+        return catalog_service.create_entry_service(p)
+    if action == 'catalog_entry_services_update':
+        return catalog_service.update_entry_service(p['entry_service_id'], p)
+    if action == 'catalog_entry_services_delete':
+        catalog_service.delete_entry_service(p['entry_service_id'])
+        return {'ok': True}
+    if action == 'catalog_geo_addresses_list':
+        return catalog_service.list_geo_addresses(p.get('kind'), p.get('limit'))
+    if action == 'catalog_geo_addresses_create':
+        return catalog_service.create_geo_address(p)
+    if action == 'catalog_geo_addresses_update':
+        return catalog_service.update_geo_address(p['address_id'], p)
+    if action == 'catalog_geo_addresses_delete':
+        catalog_service.delete_geo_address(p['address_id'])
         return {'ok': True}
     raise ValueError('Неизвестное действие.')

@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from api_contract import PREFIX, ROUTES, COMMON, input_schema
 from application import dispatch
 import auth_service
+import catalog_service
 
 ROOT = Path(__file__).resolve().parent
 
@@ -38,7 +39,8 @@ class APIResponse:
 def validate(value, schema, name):
     expected = schema.get('type')
     valid_type = {'object': lambda x: isinstance(x, dict), 'array': lambda x: isinstance(x, list),
-                  'integer': lambda x: type(x) is int, 'string': lambda x: isinstance(x, str),
+                  'integer': lambda x: type(x) is int, 'number': lambda x: isinstance(x, (int, float)) and not isinstance(x, bool),
+                  'string': lambda x: isinstance(x, str),
                   'boolean': lambda x: type(x) is bool}
     if expected in valid_type and not valid_type[expected](value):
         raise APIError(422, 'invalid_field', f'Поле {name}: неверный тип данных.', details={'field': name, 'type': expected})
@@ -188,6 +190,8 @@ class RestAPI:
         except APIError:
             raise
         except auth_service.AuthError as exc:
+            raise APIError(exc.status, exc.code, exc.message) from None
+        except catalog_service.CatalogError as exc:
             raise APIError(exc.status, exc.code, exc.message) from None
         except FileNotFoundError:
             raise APIError(404, 'not_found', 'Данные не найдены.') from None
