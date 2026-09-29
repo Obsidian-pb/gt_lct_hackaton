@@ -38,20 +38,13 @@ def _write(engine, item):
 
 
 def get(engine, identifier):
-    value = json.loads(_path(engine, identifier).read_text(encoding='utf-8'))
-    if value.get('id') != identifier:
-        raise ValueError('Учебный ресурс повреждён.')
-    return value
+    return engine.resource_get(identifier)
 
 
 def list_resources(engine, kind):
     if kind not in ('scenario', 'training'):
         raise ValueError('Неизвестный учебный ресурс.')
-    root = Path(engine.directory) / 'curriculum'
-    if not root.exists():
-        return []
-    return sorted((get(engine, p.stem) for p in root.glob(kind + '-*.json')),
-                  key=lambda v: v['created_at'], reverse=True)
+    return engine.resource_list(kind)
 
 
 def _task_ids(engine, values):
@@ -77,7 +70,7 @@ def save_scenario(engine, data, identifier=None):
                 description=str(data.get('description') or '')[:2000], task_ids=task_ids,
                 task_difficulties={task_id:levels.get(task_id,3) for task_id in task_ids},
                 created_by=require_text(data.get('teacher'), 'Преподаватель', 160))
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def approve_scenario(engine, identifier, teacher):
@@ -86,15 +79,14 @@ def approve_scenario(engine, identifier, teacher):
         raise ValueError('Сценарий уже утверждён.')
     _task_ids(engine, item['task_ids'])
     item.update(status='approved', approved_by=require_text(teacher, 'Преподаватель', 160), approved_at=now())
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def delete_scenario(engine, identifier):
     item = get(engine, identifier)
     if item['status'] != 'draft' or any(identifier in t['scenario_ids'] for t in list_resources(engine, 'training')):
         raise ValueError('Удалить можно только черновик, не включённый в тренировки.')
-    _path(engine, identifier).unlink()
-    return {'deleted': True}
+    return engine.resource_delete(identifier)
 
 
 def _participants(values):
@@ -149,7 +141,7 @@ def save_training(engine, data, identifier=None):
                 difficulty=data.get('difficulty', 'medium'))
     if item['difficulty'] not in ('easy', 'medium', 'hard', 'adaptive'):
         raise ValueError('Неизвестная сложность тренировки.')
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def activate(engine, identifier):
@@ -181,7 +173,7 @@ def activate(engine, identifier):
                                   'task_id': task_id, 'student': operator['student'], 'status': 'awaiting_call',
                                   'service_actions': {}, 'services': [], 'card': None})
     item.update(status='active', started_at=now())
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def accept_call(engine, session):
@@ -237,7 +229,7 @@ def on_submission(engine, session):
                 record['services'] = [code for code in _services(session['card']) if code in available]
                 if not record['services']:
                     record['status'] = 'done'
-            _write(engine, item)
+            engine.resource_save(item)
             return
 
 
@@ -283,7 +275,7 @@ def route_card(engine, training_id, card_id, student, services, updates):
         raise ValueError('Выбранной службы нет среди участников тренировки.')
     record['card'].update(updates)
     record.update(status='service_review', services=services, dds_by=student, routed_at=now())
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def service_action(engine, training_id, card_id, student, text):
@@ -295,7 +287,7 @@ def service_action(engine, training_id, card_id, student, text):
     record['service_actions'][participant['service']] = {'student': student, 'text': require_text(text, 'Действия службы', 2000), 'at': now()}
     if all(s in record['service_actions'] for s in record['services']):
         record['status'] = 'done'
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def complete(engine, training_id, teacher):
@@ -310,12 +302,11 @@ def complete(engine, training_id, teacher):
             if record['status'] in ('awaiting_call', 'operator_work'):
                 record.update(card=copy.deepcopy(s['card']), status='stopped')
     item.update(status='completed', completed_at=now())
-    return _write(engine, item)
+    return engine.resource_save(item)
 
 
 def delete_training(engine, identifier):
     item = get(engine, identifier)
     if item['status'] != 'prepared':
         raise ValueError('Удалить можно только подготовленную тренировку.')
-    _path(engine, identifier).unlink()
-    return {'deleted': True}
+    return engine.resource_delete(identifier)

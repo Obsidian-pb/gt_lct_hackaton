@@ -16,9 +16,21 @@ from datetime import datetime
 from ai_core import Engine
 from provider import AIProvider
 from ui_release import release_id, validate_ui, compatible_server
-from api_contract import PREFIX, openapi
+from api_contract import PREFIX, ROUTES, openapi
 from rest_api import APIError, RestAPI
 import uuid
+
+# Every first-level API segment that has at least one JWT-protected route.
+# When auth.require_roles is enabled these paths are guarded by the JWT layer
+# and are therefore exempt from the legacy X-UI-Token check.
+ROLE_PATHS = tuple(sorted({PREFIX + '/' + r.path.split('/')[1]
+                           for r in ROUTES if r.auth}))
+
+
+def auth_service_roles_required():
+    """Deferred import to avoid a hard dependency at module load time."""
+    from auth_service import roles_required
+    return roles_required()
 
 ROOT = Path(__file__).resolve().parent
 # Capture once: changing files must not make an old process claim to run new code.
@@ -144,10 +156,15 @@ def make_server(engine, port=8878, *, api_token=None, allowed_origins=(), api_on
                 supplied_auth = self.headers.get('Authorization', '')
                 ui_ok = not api_only and secrets.compare_digest(supplied_ui.encode(), token.encode())
                 bearer_ok = api_token and secrets.compare_digest(supplied_auth.encode(), ('Bearer ' + api_token).encode())
-                # /api/v1/auth/* and /api/v1/catalog/* are protected by their
-                # own JWT checks (Этапы 2.1/2.2), so the legacy UI/API tokens
-                # are not required for them.
-                auth_path = path.startswith(PREFIX + '/auth/') or path.startswith(PREFIX + '/catalog/')
+                # /api/v1/auth/*, /api/v1/catalog/* and /api/v1/workshop/*
+                # are protected by their own JWT checks (Этапы 2.1/2.2/5), so
+                # the legacy UI/API tokens are not required for them. With
+                # auth.require_roles enabled every JWT-protected segment joins
+                # this exemption and the frontend authenticates with Bearer.
+                jwt_path = path.startswith(ROLE_PATHS)
+                auth_path = (jwt_path if auth_service_roles_required()
+                             else path.startswith((PREFIX + '/auth/', PREFIX + '/catalog/',
+                                                   PREFIX + '/workshop/')))
                 if not auth_path and not (ui_ok or bearer_ok):
                     raise APIError(401, 'unauthorized', 'Нужен токен локального интерфейса или отдельный токен REST API.', headers={'WWW-Authenticate':'Bearer'})
                 body = self.read_json()
@@ -270,7 +287,17 @@ def main():
     args = parser.parse_args()
     if not args.api_only:
         validate_ui()
-    engine = Engine(AIProvider(), args.data_dir)
+    storage = None
+    from storage_config import get_storage_config
+    from storage_adapter import StorageAdapter, StorageUnavailable
+    if get_storage_config().get('mode') != 'files':
+        try:
+            storage = StorageAdapter(args.data_dir)
+            print('[STORAGE] Хранилище: режим «' + storage.mode + '», PostgreSQL подключён.', flush=True)
+        except StorageUnavailable as exc:
+            print('[STORAGE] ' + str(exc), flush=True)
+            raise SystemExit(2) from None
+    engine = Engine(AIProvider(), args.data_dir, storage=storage)
     try:
         server = make_server(engine, args.port, api_token=os.environ.get('TRAINING_API_TOKEN'),
                              allowed_origins=args.allowed_origin, api_only=args.api_only, legacy_api=not args.no_legacy_api)

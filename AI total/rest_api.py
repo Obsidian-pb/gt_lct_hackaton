@@ -163,9 +163,12 @@ class RestAPI:
             payload = self.payload(route, path_values, target, body)
             with self.lock if route.storage else self.speech_lock if route.action == 'tts_synthesize' else self.auth_lock if route.action.startswith('auth_') else nullcontext():
                 self.check_state(route, payload)
-                # JWT middleware (Этап 2.1): routes with route.auth require a
-                # valid Bearer token; roles are enforced for non-'user' levels.
-                if route.auth:
+                # JWT middleware (Этапы 2.1/5): routes with route.auth require a
+                # valid Bearer token. Auth/catalog/workshop are always enforced;
+                # the remaining legacy routes join when auth.require_roles is on.
+                protected = (route.path.startswith(('/auth/', '/catalog/', '/workshop/'))
+                             or auth_service.roles_required())
+                if route.auth and protected:
                     user = auth_service.authenticate_access_token(authorization or '')
                     if route.auth != 'user':
                         auth_service.require_role(user, (route.auth,))
@@ -192,6 +195,8 @@ class RestAPI:
         except auth_service.AuthError as exc:
             raise APIError(exc.status, exc.code, exc.message) from None
         except catalog_service.CatalogError as exc:
+            raise APIError(exc.status, exc.code, exc.message) from None
+        except __import__('workshop_service').WorkshopError as exc:
             raise APIError(exc.status, exc.code, exc.message) from None
         except FileNotFoundError:
             raise APIError(404, 'not_found', 'Данные не найдены.') from None

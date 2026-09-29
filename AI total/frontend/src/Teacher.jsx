@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {api} from './api.js';
+import RequireRole from './auth-gate.jsx';
 import {Icon,PROFILE,readProfile,sections} from './Shell.jsx';
 import Materials from './Materials.jsx';
 const statuses={active:'В процессе',submitted:'На проверке',pending_teacher:'На проверке',reviewed:'Проверена'};
@@ -10,6 +11,9 @@ function Home({data}){return <><section className="teacher-hero"><p className="t
  ].map(([icon,first,last,url],i)=><a key={icon} className={'teacher-tile '+(i===0?'primary':'')} href={url}><Icon name={icon}/><span className="tile-label">{first}<br/>{last}</span><span className="tile-arrow"><Icon name="arrow"/></span></a>)}</section><section><div className="teacher-section-heading"><h2>Последние тренировки</h2><span className="rule"/><a href="/teacher#trainings">Все тренировки <Icon name="arrow"/></a></div><Table rows={data.sessions.slice(0,4)} empty="Тренировок пока нет. Начните с подготовки карточек или создайте тренировку." blank/></section></>;}
 function Settings(){const [name,setName]=useState(()=>readProfile()==='Преподаватель'?'':readProfile()),[status,setStatus]=useState('');return <form id="profile-form" className="teacher-form" onSubmit={e=>{e.preventDefault();if(!name.trim())return;try{localStorage.setItem(PROFILE,JSON.stringify({name:name.trim()}));window.dispatchEvent(new Event('profile-changed'));setStatus('Имя сохранено.');}catch{setStatus('Браузер не смог сохранить имя.');}}}><label htmlFor="profile-input">Имя преподавателя</label><input id="profile-input" maxLength={160} required value={name} onChange={e=>setName(e.target.value)} placeholder="Фамилия и инициалы"/><p>Имя отображается в шапке панели на этом устройстве. При утверждении карточки имя преподавателя указывается отдельно.</p><button className="teacher-dark">Сохранить</button><p id="profile-status" role="status">{status}</p></form>;}
 export default function Teacher({section}){
+ return <RequireRole role="teacher"><TeacherContent section={section}/></RequireRole>;
+}
+function TeacherContent({section}){
  const [data,setData]=useState({sessions:[],tasks:[],scenarios:[],trainings:[]}),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
  useEffect(()=>{let active=true;Promise.all([api('teacher_overview'),api('scenario_list'),api('training_list')]).then(([value,scenarios,trainings])=>{if(active){setData({...value,scenarios,trainings});setError('');}}).catch(()=>{if(active)setError('Не удалось загрузить сохранённые тренировки. Карточки доступны через меню.');});return()=>{active=false;};},[attempt]);
  useEffect(()=>{document.body.dataset.teacherReady='true';return()=>{delete document.body.dataset.teacherReady;};},[]);

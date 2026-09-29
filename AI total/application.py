@@ -509,4 +509,35 @@ def dispatch(engine, action, p):
     if action == 'catalog_geo_addresses_delete':
         catalog_service.delete_geo_address(p['address_id'])
         return {'ok': True}
+    # --- Этап 5: мастерская карточек (JWT teacher/admin) ---
+    import workshop_service
+    if action == 'workshop_cards_list':
+        return workshop_service.list_cards()
+    if action == 'workshop_cards_create':
+        return workshop_service.create_card(p.get('content'), _workshop_author(p))
+    if action == 'workshop_cards_get':
+        return workshop_service.get_card(p['workshop_ref'])
+    if action == 'workshop_cards_update':
+        return workshop_service.update_card(p['workshop_ref'], p.get('content'),
+                                            _workshop_author(p))
+    if action == 'workshop_cards_delete':
+        return workshop_service.delete_card(p['workshop_ref'])
+    if action == 'workshop_cards_approve':
+        return workshop_service.approve_card(p['workshop_ref'], p.get('review'),
+                                             _workshop_author(p))
+    if action == 'workshop_cards_reopen':
+        return workshop_service.reopen_card(p['workshop_ref'], _workshop_author(p))
+    if action == 'workshop_import':
+        return workshop_service.import_cards(p.get('cards'), _workshop_author(p))
     raise ValueError('Неизвестное действие.')
+
+
+def _workshop_author(payload: dict):
+    """Author id: authenticated JWT user, else the explicit author_id field."""
+    user = payload.get('_auth_user')
+    if isinstance(user, dict) and user.get('id') is not None:
+        return int(user['id'])
+    try:
+        return int(payload['author_id']) if payload.get('author_id') else None
+    except (TypeError, ValueError):
+        return None

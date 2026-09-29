@@ -159,9 +159,14 @@ def _load_auth_section() -> dict:
     return dict(section) if isinstance(section, dict) else {}
 
 
-def get_auth_config() -> Dict[str, int]:
-    """Effective auth timing settings: defaults < config.local.json < env."""
-    config = {'access_ttl': DEFAULT_ACCESS_TTL, 'refresh_ttl': DEFAULT_REFRESH_TTL}
+def get_auth_config() -> Dict[str, object]:
+    """Effective auth settings: defaults < config.local.json < env.
+
+    Keys: access_ttl, refresh_ttl (seconds) and require_roles (bool, Этап 5:
+    enforce JWT roles on every REST route instead of the legacy UI token).
+    """
+    config = {'access_ttl': DEFAULT_ACCESS_TTL, 'refresh_ttl': DEFAULT_REFRESH_TTL,
+              'require_roles': False}
     for key in ('access_ttl', 'refresh_ttl'):
         env_value = os.environ.get('JWT_' + key.upper())
         if env_value:
@@ -176,6 +181,13 @@ def get_auth_config() -> Dict[str, int]:
                 config[key] = int(value)
             except (TypeError, ValueError):
                 pass
+    env_roles = os.environ.get('REQUIRE_ROLES', '').strip().lower()
+    if env_roles:
+        config['require_roles'] = env_roles in ('1', 'true', 'yes', 'да')
+    else:
+        value = _load_auth_section().get('require_roles')
+        config['require_roles'] = (bool(value) if isinstance(value, bool)
+                                   else str(value).strip().lower() in ('1', 'true', 'yes', 'да'))
     return config
 
 

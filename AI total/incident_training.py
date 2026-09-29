@@ -35,7 +35,7 @@ def publish(engine, request):
     # Stable content identity: retries never duplicate tasks; sessions retain their own snapshot.
     identity = json.dumps([content, ref, scenario, opening, level], ensure_ascii=False, sort_keys=True)
     identifier = 't-' + hashlib.sha256(identity.encode()).hexdigest()[:12]
-    if (engine.directory / (identifier+'.json')).exists():
+    if engine.exists(identifier):
         return {'task_id': identifier}
     expected = {key: row['value'] for key, row in ref['answer']['expected_fields'].items()}
     expected.update(_class_ids=json.dumps(content['class_ids'], ensure_ascii=False),

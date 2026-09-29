@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {api} from './api.js';
+import RequireRole from './auth-gate.jsx';
 import {Icon} from './Shell.jsx';
 import StudentSession from './StudentSession.jsx';
 import StudentBriefing from './StudentBriefing.jsx';
@@ -14,6 +15,9 @@ const workflow=w=>w==='dds'?'Диспетчер ДДС':'Оператор 112';
 const duration=seconds=>{const s=Math.max(0,Math.floor(seconds));return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(x=>String(x).padStart(2,'0')).join(':');};
 
 export default function Student(){
+ return <RequireRole role="student"><StudentContent/></RequireRole>;
+}
+function StudentContent(){
  const [name,setName]=useState(readName),[profileName,setProfileName]=useState(readName),[section,setSection]=useState('trainings');
  const [data,setData]=useState({tasks:[],sessions:[],fields:{}}),[loaded,setLoaded]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(false);
  const [brief,setBrief]=useState(null),[stage,setStage]=useState('details'),[resultMode,setResultMode]=useState(false);

@@ -202,6 +202,22 @@ try {
         Write-Host $dataInitOutput -ForegroundColor Yellow
     }
 
+    Step 'Checking the storage layer (PostgreSQL)...'
+    try {
+        $storageInitOutput = (& $python 'init_storage.py' '--check' 2>&1 | Out-String).Trim()
+        $storageInitCode = $LASTEXITCODE
+    } catch {
+        $storageInitOutput = $_.Exception.Message
+        $storageInitCode = 1
+    }
+    Set-Content -Path (Join-Path $runtime 'storage-init.log') -Value $storageInitOutput -Encoding UTF8
+    Write-Host ''
+    if ($storageInitCode -eq 0) {
+        Write-Host $storageInitOutput -ForegroundColor Green
+    } else {
+        Write-Host $storageInitOutput -ForegroundColor Yellow
+    }
+
     Write-Host ''
     Write-Host '112 is running. You can close this launcher window.' -ForegroundColor Green
     Write-Host 'To stop all local services, run STOP.cmd.' -ForegroundColor DarkGray

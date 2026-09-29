@@ -1,6 +1,7 @@
 import Editor from './IncidentEditor.jsx';
 import {useEffect,useState,useSyncExternalStore} from 'react';
 import {createWorkshopStore} from './workshop-store.js';
+import RequireRole from './auth-gate.jsx';
 import ServicesDock from './ServicesDock.jsx';
 import {Cascade,Flags,ServiceDialog} from './Classification.jsx';
 function Generator({store,snapshot,onStart}){
@@ -28,6 +29,9 @@ function QueueProgress({snapshot,store}){const {state,generating,reviewing}=snap
  return <> <div id="progress-panel" hidden={!b}>{b&&<><div className="progress-line"><span id="progress-text" role="status">Готово {b.done} из {b.total} · {suffix}</span><button id="stop" className="quiet" hidden={!generating} disabled={snapshot.stopRequested} onClick={store.stop}>Остановить после текущей</button><button id="resume" className="quiet" hidden={generating||b.done>=b.total} disabled={reviewing} onClick={store.resume}>Продолжить оставшиеся</button></div><progress id="progress" max={b.total} value={b.done}/></>}</div>
 </>;}
 export default function Cards(){
+ return <RequireRole role="teacher"><CardsContent/></RequireRole>;
+}
+function CardsContent(){
  const [store]=useState(createWorkshopStore),snapshot=useSyncExternalStore(store.subscribe,store.getSnapshot);
  const {state,meta,ready,reviewing,generating,referencePending}=snapshot;
  const [creating,setCreating]=useState(location.hash==='#create');

@@ -249,6 +249,23 @@ CLI `init_training_data.py --init/--check/--self-test` + `TEST_DATA.cmd` +
 - Поэтапно переводить операции REST ([api_contract.py](api_contract.py:67)) на новый репозиторий без изменения контрактов API.
 - Оставить `config.local.json` (ключ ИИ) вне БД — это секрет, не доменные данные.
 
+**Статус: выполнено (2026-09-29, отчёт `workflow/step_6.md`, план `plans/step_5_plan.md`).**
+Реализовано: конвертеры «документ↔строки» (`storage_documents.py`) и row-level CRUD
+(`storage_repository.py`, схема **2.4.0**: `workshop_card.content`/`uid`); адаптер
+`StorageAdapter` с режимами `files` / `files-to-db` / `db-only` (конфиг
+`"storage": {"mode": …}` в `config.local.json` или env `STORAGE_MODE`), инъекция
+в `Engine` без изменения контрактов REST; на БД переведены задания, сессии
+(все дочерние таблицы), сценарии, тренировки, материалы и мастерская карточек
+(`/workshop/*`, JWT teacher/admin, перенос localStorage upsert-ом по `number`);
+**ролевая авторизация всех маршрутов** (`auth` на каждом маршруте; включается
+флагом `"auth": {"require_roles": true}` или env `REQUIRE_ROLES`; вход
+студента/преподавателя через `/auth/login`); CLI `init_storage.py`
+(`--init --check --self-test --mirror`), `TEST_STORAGE.cmd`, некритичный шаг
+в `START_ALL.ps1` (лог `.runtime\storage-init.log`); тесты
+`tests/test_storage_documents.py` (9 unit) и `tests/test_storage_integration.py`
+(4 integration, живая БД). Проверено на живом PostgreSQL 14.2: самопроверка
+round-trip и интеграционные сценарии пройдены.
+
 ## 6. Индексы (рекомендуемые)
 
 | Таблица | Индекс | Назначение |

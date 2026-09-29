@@ -74,6 +74,11 @@ def require_role(user: dict, roles) -> None:
         raise AuthError(403, 'forbidden', 'Недостаточно прав для этой операции.')
 
 
+def roles_required() -> bool:
+    """Этап 5: enforce JWT roles on every REST route (config auth.require_roles)."""
+    return bool(auth_crypto.get_auth_config().get('require_roles'))
+
+
 # -------------------------------------------------------------------- session
 
 def login(login: str, password: str, user_agent: str = '') -> dict:

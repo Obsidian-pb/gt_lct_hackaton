@@ -48,8 +48,9 @@ def validate_task(task):
 
 
 class Engine:
-    def __init__(self, provider, directory=None):
+    def __init__(self, provider, directory=None, storage=None):
         self.provider = provider
+        self.storage = storage
         self.directory = Path(directory or Path(__file__).with_name('data'))
         self.directory.mkdir(parents=True, exist_ok=True)
 
@@ -57,6 +58,8 @@ class Engine:
         if not re.fullmatch(r'[ts]-[0-9a-f]{12}', item.get('id', '')):
             raise ValueError('Неверный идентификатор.')
         item['updated_at'] = now()
+        if self.storage is not None:
+            return self.storage.save(item)
         path = self.directory / (item['id'] + '.json')
         temp = path.with_suffix('.tmp')
         temp.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -66,13 +69,85 @@ class Engine:
     def load(self, identifier):
         if not re.fullmatch(r'[ts]-[0-9a-f]{12}', identifier):
             raise ValueError('Неверный идентификатор.')
+        if self.storage is not None:
+            return self.storage.load(identifier)
         return json.loads((self.directory / (identifier + '.json')).read_text(encoding='utf-8'))
 
     def list_items(self, kind):
+        if self.storage is not None:
+            return self.storage.list_items(kind)
         result = []
         for path in sorted(self.directory.glob(kind + '-*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
             result.append(json.loads(path.read_text(encoding='utf-8')))
         return result
+
+    def exists(self, identifier):
+        """True when a task/session document exists (Этап 5 duplicate check)."""
+        if self.storage is not None:
+            return self.storage.exists(identifier)
+        return (self.directory / (identifier + '.json')).exists()
+
+    # ------- curriculum/materials resources routed through the storage layer
+
+    def _curriculum_path(self, identifier):
+        root = self.directory / 'curriculum'
+        root.mkdir(parents=True, exist_ok=True)
+        return root / (identifier + '.json')
+
+    def resource_save(self, item):
+        """Persist a scenario-*/training-* resource (via adapter when enabled)."""
+        if self.storage is not None:
+            return self.storage.resource_save(item)
+        item['updated_at'] = now()
+        path = self._curriculum_path(item['id'])
+        temp = path.with_suffix('.tmp')
+        temp.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding='utf-8')
+        temp.replace(path)
+        return item
+
+    def resource_get(self, identifier):
+        if self.storage is not None:
+            return self.storage.resource_get(identifier)
+        value = json.loads(self._curriculum_path(identifier).read_text(encoding='utf-8'))
+        if value.get('id') != identifier:
+            raise ValueError('Учебный ресурс повреждён.')
+        return value
+
+    def resource_list(self, kind):
+        if self.storage is not None:
+            return self.storage.resource_list(kind)
+        root = self.directory / 'curriculum'
+        if not root.exists():
+            return []
+        return sorted((self.resource_get(p.stem) for p in root.glob(kind + '-*.json')),
+                      key=lambda value: value['created_at'], reverse=True)
+
+    def resource_delete(self, identifier):
+        if self.storage is not None:
+            return self.storage.resource_delete(identifier)
+        path = self._curriculum_path(identifier)
+        if path.exists():
+            path.unlink()
+        return {'deleted': True}
+
+    def materials_items(self):
+        if self.storage is not None:
+            return self.storage.materials_items()
+        path = self.directory / 'curriculum' / 'materials.json'
+        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
+
+    def materials_add(self, entry):
+        if self.storage is not None:
+            return self.storage.materials_add(entry)
+        root = self.directory / 'curriculum'
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / 'materials.json'
+        rows = json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
+        rows.append(entry)
+        temp = path.with_suffix('.tmp')
+        temp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')
+        temp.replace(path)
+        return entry
 
     def draft(self, topic, level, workflow='caller'):
         require_text(topic, 'Тема')

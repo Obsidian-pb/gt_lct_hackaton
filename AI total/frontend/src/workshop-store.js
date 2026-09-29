@@ -1,5 +1,6 @@
 import {ADDRESS_KEYS,LOCATION_KEYS,addressFields} from './address-search.js';
-import {api} from './api.js';
+import {api,attachToken} from './api.js';
+import {adminSignedIn,accessToken} from './admin-auth.js';
 import {syncServices,chooseService} from './service-routing.js';
 import {referenceCurrent} from './reference-state.js';
 import {ensureCallerId,prepareCaller} from './telephony.js';
@@ -12,11 +13,17 @@ export function createWorkshopStore(){
  const listeners=new Set();let snapshot;
  const emit=()=>{snapshot={state,meta,ready,generating,reviewing,referencePending,stopRequested,warning,notice,error};listeners.forEach(fn=>fn());};
  const notify=(text,isError=false)=>{notice=text;error=isError;emit();};
- const persist=()=>{if(!storageOK)return false;try{localStorage.setItem(STORAGE,JSON.stringify(state));return true;}catch{warning='Браузер не смог сохранить изменения. Скачайте JSON до закрытия вкладки.';return false;}};
+ // Этап 5: мастерская читает/пишет PostgreSQL через /workshop/* (JWT teacher/admin).
+ let serverMode=false;const dirty=new Set();
+ const serverSync=async()=>{if(!serverMode)return;const pending=[...dirty];dirty.clear();
+  for(const number of pending){const card=state.cards.find(c=>c.number===number);if(!card)continue;
+   try{await api('workshop_cards_update',{workshop_ref:number,content:card});}
+   catch{try{await api('workshop_cards_create',{content:card});}catch{}}}}
+ const persist=()=>{if(!storageOK)return false;try{localStorage.setItem(STORAGE,JSON.stringify(state));if(serverMode){const current=selected();if(current)dirty.add(current.number);serverSync();}return true;}catch{warning='Браузер не смог сохранить изменения. Скачайте JSON до закрытия вкладки.';return false;}};
  const selected=()=>state.cards.find(c=>c.id===state.selected);
- const touch=card=>{card.updated_at=new Date().toISOString();card.revision++;card.reference_checked=false;persist();emit();};
+ const touch=card=>{card.updated_at=new Date().toISOString();card.revision++;card.reference_checked=false;if(serverMode)dirty.add(card.number);persist();emit();};
  const empty=()=>({title:'Новая карточка',report:'',fields:Object.fromEntries(Object.values(meta.groups).flatMap(([,fields])=>Object.keys(fields).map(k=>[k,'']))),class_ids:[],services:[],main_service:'',flags:{}});
- function add(content,provenance){const at=new Date().toISOString(),id=crypto.randomUUID();const card={id,number:'К-'+id.slice(0,8).toUpperCase(),status:'draft',created_at:at,updated_at:at,revision:1,content,provenance,review:null,history:[{at,action:'created',text:['ai','gigachat'].includes(provenance.source)?'Создано ИИ':'Создано вручную'}]};ensureCallerId(card,true);prepareCaller(card);card.content.fields.phone_callback='';syncServices(meta,card);state.cards.unshift(card);if(!state.selected)state.selected=id;return card;}
+ function add(content,provenance){const at=new Date().toISOString(),id=crypto.randomUUID();const card={id,number:'К-'+id.slice(0,8).toUpperCase(),status:'draft',created_at:at,updated_at:at,revision:1,content,provenance,review:null,history:[{at,action:'created',text:['ai','gigachat'].includes(provenance.source)?'Создано ИИ':'Создано вручную'}]};ensureCallerId(card,true);prepareCaller(card);card.content.fields.phone_callback='';syncServices(meta,card);state.cards.unshift(card);if(!state.selected)state.selected=id;if(serverMode)dirty.add(card.number);return card;}
  async function init(){try{
   meta=await api('card_meta');
   try{const raw=localStorage.getItem(STORAGE);if(raw){const saved=JSON.parse(raw),keys=Object.keys(empty().fields);
@@ -27,6 +34,19 @@ export function createWorkshopStore(){
   if(!state.teacher?.trim())state.teacher=teacherProfile();
   if(storageOK){const before=JSON.stringify(state.cards);state.cards.forEach(card=>{let changed=false;const at=new Date().toISOString();if(ensureCallerId(card)){changed=true;card.history.push({at,action:'caller_id_simulated',text:'Добавлен условный номер входящего звонка (АОН)'});}if(card.status==='draft'&&!card.caller_scenario){prepareCaller(card);changed=true;card.history.push({at,action:'caller_scenario_migrated',text:'Подготовлен сценарий заявителя для выделенного REST-диалога; эталон требуется обновить'});}if(changed){card.updated_at=at;card.revision=(card.revision||0)+1;card.reference_checked=false;}syncServices(meta,card);});if(before!==JSON.stringify(state.cards))persist();}
   if(storageOK){for(const card of state.cards.filter(c=>c.status==='approved'&&!c.training_task_id&&c.caller_scenario&&c.reference)){try{const published=await api('card_publish',{content:card.content,reference:card.reference,caller_scenario:card.caller_scenario,reference_checked:true,teacher:card.review.teacher,note:card.review.note||'',level:'medium',opening:card.training_opening||undefined});card.training_task_id=published.task_id;}catch{warning='Некоторые ранее утверждённые карточки не добавлены в тренировки. Откройте карточку и нажмите «Добавить в тренировки обучающегося».';}}persist();}
+  // Этап 5: мастерская из PostgreSQL (JWT преподавателя), localStorage — кэш.
+  serverMode=adminSignedIn();
+  if(serverMode){attachToken(accessToken());
+   try{const brief=await api('workshop_cards_list');
+    if(brief.length){const cards=[];
+     for(const row of brief){try{cards.push(await api('workshop_cards_get',{workshop_ref:row.number}));}catch{}}
+     if(cards.length){state.cards=cards;if(!state.selected)state.selected=cards[0]?.id||null;persist();}}
+    const raw=localStorage.getItem(STORAGE);
+    if(raw){const local=JSON.parse(raw);
+     if(local&&Array.isArray(local.cards)&&local.cards.length){
+      try{const result=await api('workshop_import',{cards:local.cards});
+       if(result&&result.imported)notice=`Перенесено в БД карточек: ${result.imported}.`;}catch{}}}
+   }catch{serverMode=false;}}
   ready=true;emit();
  }catch(e){notify(e.message,true);}}
  async function buildReference(card){
