@@ -1,5 +1,0 @@
-INFO:     127.0.0.1:62136 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62137 - "POST /api/v1/cards/validations HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:62138 - "GET /api/v1/metadata HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62139 - "POST /api/v1/cards/validations HTTP/1.1" 422 Unprocessable Entity
-INFO:     127.0.0.1:62140 - "POST /api/v1/ai/checks HTTP/1.1" 502 Bad Gateway

@@ -1,6 +1,0 @@
-INFO:     Started server process [5572]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-D:\Git\gt_lct_hackaton\backend_new\app\api\v1\ai.py:107: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
-  return ValidateFieldsOut(**await AIService(session).validate_fields(task_id, payload.content))

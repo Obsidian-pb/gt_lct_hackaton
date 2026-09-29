@@ -1,6 +1,0 @@
-INFO:     Started server process [2244]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8890 (Press CTRL+C to quit)
-g:\GitRepositories\gt_lct_hackaton\ai_service\app\api\routes.py:96: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
-  raise _error(exc) from None
