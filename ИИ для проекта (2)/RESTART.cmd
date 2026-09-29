@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0restart_ui.ps1"
-if errorlevel 1 pause
-endlocal
+call "%~dp0STOP.cmd"
+call "%~dp0START.cmd"
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%

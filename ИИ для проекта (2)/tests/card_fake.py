@@ -43,4 +43,8 @@ class FactoryFake:
             raise RuntimeError('Тестовая недоступность модели')
         if payload.get('topic') == 'SLOW':
             time.sleep(.25)
-        return response(payload.get('batch_position', 1))
+        result = response(payload.get('batch_position', 1))
+        if address := payload.get('osm_address'):
+            result['fields'].update({key:address[key] for key in ('country','region','city','street','house')})
+            result['report'] = f"Я по адресу {address['street']}, дом {address['house']}. Вижу дым из гаража. Муж заходил внутрь, я не видела, чтобы он вышел."
+        return result

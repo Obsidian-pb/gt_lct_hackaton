@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from ai_core import FIELDS, VERDICTS, LEVELS, require_text, now
 from dds import ACTION_LABELS
 from incident_training import LABELS as INCIDENT_LABELS
+from card_factory import CATALOG, CATEGORIES
+
+CLASS_CATEGORIES = {row['id']: str(row.get('category') or '') for row in CATALOG}
 
 
 def session(engine, identifier):
@@ -23,16 +26,23 @@ def overview(engine):
         rows.append({
             'id': s['id'], 'student': s['student'], 'title': s['task']['title'],
             'task_id': s['task']['id'], 'status': s['status'], 'level': s.get('effective_level', s['task']['level']),
+            'category': next((CLASS_CATEGORIES.get(cid,'') for cid in (s['task'].get('incident_source') or {}).get('class_ids',[]) if CLASS_CATEGORIES.get(cid)), ''),
             'workflow': s['task'].get('workflow', 'caller'), 'created_at': s['created_at'],
             'updated_at': s.get('updated_at'), 'duration_seconds': seconds,
             'filled': sum(bool(v.strip()) for v in s['card'].values()), 'total_fields': len(s['card']),
             'grade': (s.get('teacher_decision') or {}).get('grade'),
+            'machine_percent': (s.get('machine_assessment') or {}).get('percent'),
+            'ai_percent': (s.get('assessment') or {}).get('percent'),
+            'final_percent': (s.get('teacher_decision') or {}).get('percent'),
             'ai_remarks': (sum(r['verdict'] in ('partial', 'incorrect', 'missing')
                                for r in assessment['fields'].values()) if assessment else None),
             'training': s.get('training'), 'comment': s.get('teacher_note', ''),
         })
     return {'sessions': rows, 'fields': FIELDS, 'labels': INCIDENT_LABELS | FIELDS | ACTION_LABELS, 'verdicts': VERDICTS,
-            'tasks': [{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format')}
+            'categories': CATEGORIES,
+            'tasks': [{**{k: t.get(k) for k in ('id', 'title', 'status', 'level', 'workflow', 'format', 'approved_by', 'approved_at', 'created_at')},
+                       'category_ids': sorted({CLASS_CATEGORIES.get(cid, '') for cid in (t.get('incident_source') or {}).get('class_ids', [])} - {''}),
+                       **({'incident_source': t.get('incident_source')} if t.get('format') == 'incident-v1' else {})}
                       for t in engine.list_items('t')]}
 
 
@@ -64,6 +74,8 @@ def dispatch(engine, action, p):
         # Submit the last saved card; never fabricate missing learner answers.
         s.update(status='submitted', submitted_at=now(),
                  forced_finish={'teacher': teacher, 'reason': reason, 'at': now()})
+        from scoring import compare
+        s['machine_assessment'] = compare(s)
         engine.save(s)
         return {'status': 'submitted'}
     if action == 'teacher_launch':

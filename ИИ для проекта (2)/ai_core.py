@@ -48,15 +48,22 @@ def validate_task(task):
 
 
 class Engine:
-    def __init__(self, provider, directory=None):
+    def __init__(self, provider, directory=None, *, store=None, database_url=None, auto_migrate=False):
         self.provider = provider
         self.directory = Path(directory or Path(__file__).with_name('data'))
         self.directory.mkdir(parents=True, exist_ok=True)
+        if store is None and database_url is not None:
+            from database import store_from_url
+            store = store_from_url(database_url, auto_migrate=auto_migrate)
+        self.store = store
 
     def save(self, item):
         if not re.fullmatch(r'[ts]-[0-9a-f]{12}', item.get('id', '')):
             raise ValueError('Неверный идентификатор.')
         item['updated_at'] = now()
+        if self.store is not None:
+            self.store.save_engine_item(item)
+            return item
         path = self.directory / (item['id'] + '.json')
         temp = path.with_suffix('.tmp')
         temp.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -66,9 +73,22 @@ class Engine:
     def load(self, identifier):
         if not re.fullmatch(r'[ts]-[0-9a-f]{12}', identifier):
             raise ValueError('Неверный идентификатор.')
+        if self.store is not None:
+            return self.store.load_engine_item(identifier)
         return json.loads((self.directory / (identifier + '.json')).read_text(encoding='utf-8'))
 
+    def exists(self, identifier):
+        if not re.fullmatch(r'[ts]-[0-9a-f]{12}', identifier):
+            return False
+        if self.store is not None:
+            return self.store.engine_item_exists(identifier)
+        return (self.directory / (identifier + '.json')).exists()
+
     def list_items(self, kind):
+        if kind not in ('t','s'):
+            raise ValueError('Неизвестный тип учебного объекта.')
+        if self.store is not None:
+            return self.store.list_engine_items(kind)
         result = []
         for path in sorted(self.directory.glob(kind + '-*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
             result.append(json.loads(path.read_text(encoding='utf-8')))
@@ -184,14 +204,14 @@ medium: неполное сообщение. hard: растерянность, �
             raise ValueError('Работа уже сдана: менять карточку и продолжать разговор нельзя.')
         return s
 
-    def ask(self, identifier, question, source='text'):
+    def ask(self, identifier, question, source='text', student_fields=None):
         s = self._active(identifier)
         question = require_text(question, 'Вопрос', 2000)
         if len(s['history']) >= 101:
             raise ValueError('Достигнут предел пробной версии: 50 вопросов. Сдайте карточку.')
         if s['task'].get('format') == 'incident-v1':
             from incident_training import ask
-            return ask(self, s, question, source)
+            return ask(self, s, question, source, student_fields)
         if dds.workflow(s['task']) == 'dds':
             return dds.ask(self, s, question, source)
         result = self.provider.generate('''Ты заявитель в учебном звонке. Не преподаватель и не помощник.
@@ -222,6 +242,8 @@ medium: неполное сообщение. hard: растерянность, �
         s = self._active(identifier)
         if (s.get('training') or {}).get('mode') == 'testing':
             raise ValueError('В режиме тестирования подсказки отключены.')
+        if (s.get('training') or {}).get('mode') == 'practice':
+            raise ValueError('В режиме тренировки подсказки отключены.')
         result = self.provider.generate('''Ты учебный помощник диспетчера. JSON {"hint":"короткий совет"}.
 Предложи один следующий уточняющий вопрос или объясни, как записать УЖЕ сказанные сведения.
 Ты не знаешь скрытый сценарий. Не придумывай ответы за заявителя. Сохраняй неопределённость.
@@ -239,6 +261,8 @@ medium: неполное сообщение. hard: растерянность, �
             s['connection'] = 'ended'; s['next_channel'] = 'clear'
             dds.event(s, 'Упражнение завершено, разговор закрыт.', now(), event='submitted')
         s.update(status='submitted', submitted_at=now())
+        from scoring import compare
+        s['machine_assessment'] = compare(s)
         self.save(s)
 
     def assess(self, identifier):
@@ -294,6 +318,8 @@ JSON {"summary":"краткий разбор", "fields":{"address":{"verdict":"c
             clean['action_recovery'] = {'verdict': 'unavailable', 'comment': 'Учебного обрыва не было; критерий не применяется.',
                                         'clarification': 'Не снижать оценку за отсутствие перезвона.', 'evidence': [], 'citation_warning': False}
         s['assessment'] = {'summary': result['summary'], 'fields': clean, 'at': now(), 'reference_hash': s['reference_hash']}
+        from scoring import ai_percent
+        s['assessment']['percent'] = ai_percent(s)
         s['status'] = 'pending_teacher'
         self.save(s)
         return copy.deepcopy(s['assessment'])
@@ -312,6 +338,27 @@ JSON {"summary":"краткий разбор", "fields":{"address":{"verdict":"c
             require_text(row.get('comment'), 'Комментарий преподавателя')
         s['teacher_decision'] = {'teacher': require_text(teacher, 'Преподаватель'), 'grade': grade,
                                  'conclusion': require_text(conclusion, 'Итог'), 'fields': copy.deepcopy(decisions), 'at': now()}
+        s['teacher_decision']['percent'] = round((grade - 2) * 100 / 3)
+        s['status'] = 'reviewed'
+        self.save(s)
+        return s['teacher_decision']
+
+    def finalize_percent(self, identifier, teacher, percent, conclusion, decisions):
+        s = self.load(identifier)
+        if s['status'] not in ('submitted', 'pending_teacher'):
+            raise ValueError('Сначала сдайте карточку.')
+        if type(percent) is not int or not 0 <= percent <= 100:
+            raise ValueError('Итоговая оценка: от 0 до 100%.')
+        if not isinstance(decisions, dict) or set(decisions) != set(s['task']['fields']):
+            raise ValueError('Прокомментируйте каждое поле утверждённого эталона.')
+        clean = {key: require_text(note, 'Комментарий к полю', 1000) for key, note in decisions.items()}
+        from scoring import compare
+        if not s.get('machine_assessment'):
+            s['machine_assessment'] = compare(s)
+        s['teacher_decision'] = {'teacher': require_text(teacher, 'Преподаватель', 160),
+                                 'percent': percent, 'grade': max(2, min(5, round(percent * 3 / 100 + 2))),
+                                 'conclusion': require_text(conclusion, 'Итог'),
+                                 'fields': {key: {'comment': note} for key, note in clean.items()}, 'at': now()}
         s['status'] = 'reviewed'
         self.save(s)
         return s['teacher_decision']

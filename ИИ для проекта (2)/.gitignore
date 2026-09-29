@@ -1,9 +1,0 @@
-__pycache__/
-data/
-test-output/
-config.local.json
-.gigachat-config-*.tmp
-.venv/
-ui-error.log
-frontend/node_modules/
-frontend/.tools/

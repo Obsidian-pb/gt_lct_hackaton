@@ -2,6 +2,9 @@
 import copy
 import uuid
 import json
+import re
+import secrets
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime, timezone
 from schemas import obj
@@ -56,6 +59,25 @@ FLAGS = {'injured': 'Пострадавшие', 'not_on_scene': 'Пострад�
          'no_access': 'Нет доступа / заблокированы', 'threat': 'Угроза людям',
          'offence': 'Правонарушение', 'medical': 'Нужна медицинская помощь',
          'evacuation': 'Требуется эвакуация', 'gas': 'Газификация'}
+CALLER_ROLES = ('Неизвестно', 'Очевидец', 'Пострадавший', 'Участник', 'Родственник')
+
+
+@lru_cache(maxsize=1)
+def osm_addresses():
+    data = json.loads((Path(__file__).parent / 'ui' / 'geo' / 'addresses.json').read_text(encoding='utf-8'))
+    houses = [row for row in data['addresses'] if row.get('kind') == 'building'
+              and row.get('street') and row.get('house') and len(row.get('point', [])) == 2]
+    if not houses:
+        raise ValueError('В локальном справочнике OSM нет домов с адресами.')
+    return data, houses
+
+
+def _address_tokens(value):
+    return re.sub(r'[^a-zа-я0-9]+', ' ', str(value).lower().replace('ё', 'е')).split()
+
+
+def _same_address(value, expected):
+    return _address_tokens(value) == _address_tokens(expected)
 
 
 def timestamp():
@@ -66,7 +88,7 @@ def metadata():
     return {'version': VERSION, 'groups': GROUPS, 'catalog': CATALOG,
             'legacy_catalog': LEGACY_CATALOG, 'catalog_version': SOURCE['version'],
             'source': SOURCE['source'], 'flags': FLAGS,
-            'services': SERVICES, 'categories': CATEGORIES, 'max_count': 100,
+            'services': SERVICES, 'categories': CATEGORIES, 'caller_roles': CALLER_ROLES, 'max_count': 100,
             'reference_fields': {k: LABELS[k] for k in GENERATED}}
 
 
@@ -148,6 +170,19 @@ def generate(provider, request):
     location = request.get('location', 'Учебный город')
     if not isinstance(location, str) or len(location) > 160:
         raise ValueError('Локация: не более 160 символов.')
+    osm = None
+    if request.get('osm_address_id') is not None:
+        data, houses = osm_addresses()
+        requested = request['osm_address_id']
+        if requested == 'auto':
+            osm = houses[(secrets.randbelow(len(houses)) + index - 1) % len(houses)]
+        elif isinstance(requested, str):
+            osm = next((row for row in houses if row['id'] == requested), None)
+        if osm is None:
+            raise ValueError('Выберите дом из локального справочника OSM.')
+        if location not in (data['city'], f"{data['city']}, {data['region']}"):
+            raise ValueError('Для выбранного города нет соответствующего справочника OSM.')
+        exact_address = f"{data['country']}, {data['region']}, {data['city']}, {osm['street']}, дом {osm['house']}"
     recent = request.get('recent_titles', [])
     if not isinstance(recent, list) or len(recent) > 10 or any(not isinstance(s, str) or len(s) > 160 for s in recent):
         raise ValueError('Неверный список предыдущих карточек.')
@@ -166,12 +201,12 @@ title — название до 160 символов, report — исходно�
 Перечисли в report все конкретные детали, которые записал: номер гаража/дома, этаж, число людей,
 ориентиры и путь подъезда. Не добавляй в fields район, округ, возраст, номер объекта или направление проезда,
 если не собираешься включать это в report. Для сокращения сообщения оставляй необязательные детали неизвестными.
-caller_role: «Участник», «Очевидец», «Родственник» или «Неизвестно».
+caller_role: выбирай только из переданного caller_roles.
 Описание injured пиши понятной русской фразой; заболевание само по себе не доказывает наличие травмы.
 Не выводи медицинский диагноз или причину симптомов. Записывай жалобы, а не «неврологический характер» и подобные догадки.
 В people не считай всех присутствующих по числу больных: заявитель тоже может находиться дома; при сомнении не указывай точное число.
 Неизвестное явно обозначай «Неизвестно»; неприменимое — «Не относится». Не превращай «не видел» в «нет».
-Адреса, ФИО и объекты вымышленные. Населённый пункт бери из location; если он не задан, называй «Учебный город». Телефоны не придумывай: «Не указан».
+Если задан osm_address, используй ТОЛЬКО этот существующий учебный адрес OSM: субъект, город, улицу и дом точно как передано. Явно назови улицу и дом в report. Других адресов и регионов не придумывай. Если osm_address нет, населённый пункт бери из location. ФИО вымышленные. Телефоны не придумывай: «Не указан».
 Выбери правдоподобные обстоятельства, ориентиры и неполные сведения; меняй адрес, участников и детали между карточками.
 В теме может быть описание желаемого примера. Если оно несовместимо с incident_class, приоритет имеет incident_class.
 Не давай инструкций лечения, нормативов, эталона или оценки. Не утверждай, что службы уведомлены или выехали.
@@ -180,6 +215,9 @@ caller_role: «Участник», «Очевидец», «Родственни�
 Верни ровно поля схемы.''',
         {'topic': topic, 'incident_class': {k: v for k, v in selected.items() if k != 'rules'},
          'generation_flags': {FLAGS[k]: v for k, v in flags.items()}, 'location': location or 'Учебный город',
+         'caller_roles': CALLER_ROLES,
+         'osm_address': {'full': exact_address, 'country': data['country'], 'region': data['region'],
+                         'city': data['city'], 'street': osm['street'], 'house': osm['house']} if osm else None,
          'field_labels': {k: LABELS[k] for k in GENERATED},
          'batch_position': index, 'batch_size': total, 'variation_seed': uuid.uuid4().hex,
          'recent_titles': recent}, temperature=.65, schema=schema)
@@ -187,11 +225,32 @@ caller_role: «Участник», «Очевидец», «Родственни�
         raise ValueError('ИИ вернул неполную карточку. Повторите генерацию этой позиции.')
     fields = {k: '' for k in LABELS}
     fields.update(result['fields'])
+    if osm:
+        if fields['caller_role'] not in CALLER_ROLES:
+            fields['caller_role'] = 'Неизвестно'
+        for key, expected in [('country', data['country']), ('region', data['region']),
+                              ('city', data['city']), ('street', osm['street']), ('house', osm['house'])]:
+            if not _same_address(fields[key], expected):
+                if not request.get('_osm_retry'):
+                    return generate(provider, {**request, 'osm_address_id':osm['id'], '_osm_retry':True})
+                raise ValueError('ИИ указал адрес вне выбранного дома OSM. Повторите генерацию.')
+        report_tokens = _address_tokens(result['report'])
+        street_tokens = [token for token in _address_tokens(osm['street']) if token not in ('улица', 'проспект', 'переулок')]
+        if not all(token in report_tokens for token in street_tokens + _address_tokens(osm['house'])):
+            if not request.get('_osm_retry'):
+                return generate(provider, {**request, 'osm_address_id':osm['id'], '_osm_retry':True})
+            raise ValueError('ИИ не назвал выбранную улицу и дом в сообщении заявителя. Повторите генерацию.')
+        fields.update(country=data['country'], region=data['region'], city=data['city'],
+                      street=osm['street'], house=osm['house'],
+                      latitude=str(osm['point'][1]), longitude=str(osm['point'][0]),
+                      address_text=exact_address)
     fields.update(phone_aon='Не определён: вымышленная карточка', vis_info='Не предоставлена')
     content = validate_content(dict(title=result['title'], report=result['report'], fields=fields,
                                     class_ids=[selected['id']], services=selected['services'][:],
                                     main_service=selected['main_service'], flags=copy.deepcopy(flags)))
-    return {'content': content, 'generated_at': timestamp(), 'model': getattr(provider, 'model', 'test'),
+    return {'content': content, 'osm_address': {'source':'OpenStreetMap', 'id':osm['id'],
+            'kind':osm['kind'], 'point':osm['point'], 'city':data['city'], 'region':data['region']} if osm else None,
+            'generated_at': timestamp(), 'model': getattr(provider, 'model', 'test'),
             'prompt_version': 'cards-v2.0', 'catalog_version': SOURCE['version']}
 
 

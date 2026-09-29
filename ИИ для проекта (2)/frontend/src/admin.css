@@ -1,0 +1,9 @@
+
+/* Administrator's linked learner profile and one-click classroom enrollment. */
+.admin-training-enroll{margin:14px 0;padding:14px;border:1px solid #d5e0e7;background:#f7fafc}
+.admin-training-enroll h4{margin:0 0 10px;color:#274554}
+.admin-training-enroll-grid{display:grid;grid-template-columns:minmax(220px,2fr) minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:end}
+.admin-training-enroll-grid label{display:grid;gap:5px;font-size:12px;color:#607480}
+.admin-training-enroll-grid select{min-height:38px}
+.admin-training-enroll-grid button{min-height:38px}
+@media(max-width:900px){.admin-training-enroll-grid{grid-template-columns:1fr}}

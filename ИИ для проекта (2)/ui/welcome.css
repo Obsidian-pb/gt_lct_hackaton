@@ -16,3 +16,14 @@ p{font-size:17px;line-height:1.65;color:#60666d;margin:0}
 .welcome-roles{display:flex;gap:0;margin-top:34px;border:1px solid #c5ced6}.welcome-roles button{flex:1;min-width:0;border:0;background:#f8fafbcc;color:#65717b;font:13px Arial,sans-serif;padding:16px 8px;cursor:pointer}.welcome-roles button[aria-pressed=true]{background:#354b5b;color:#fff}.welcome .welcome-enter{margin-top:24px}.welcome-roles button:focus-visible{outline:2px solid #188bdd;outline-offset:2px}
 .welcome-roles:has(#role-admin){display:grid;grid-template-columns:1fr 1fr 1fr}.welcome-roles:has(#role-admin) button{font-size:12px;padding-left:4px;padding-right:4px}
 @media(max-width:760px){.welcome-roles:has(#role-admin){grid-template-columns:1fr}.welcome-roles:has(#role-admin) button{padding:12px 8px}}
+
+/* Login/password fields on the original welcome screen. The hero image and page layout are unchanged. */
+.welcome-auth{margin:0}
+.welcome-auth-fields{display:grid;gap:12px;margin-top:14px}
+.welcome-auth-field{display:grid;gap:6px;font:13px Arial,sans-serif;color:#4d5962}
+.welcome-auth-field input{width:100%;height:48px;border:1px solid #bcc7cf;background:rgba(255,255,255,.9);padding:0 14px;font:15px Arial,sans-serif;color:#111;outline:none}
+.welcome-auth-field input:focus{border-color:#354b5b;box-shadow:0 0 0 2px rgba(53,75,91,.12)}
+.welcome-auth-error{margin-top:10px;padding:9px 11px;background:#fff0f1;border:1px solid #efc6ca;color:#a62e38;font-size:12px;line-height:1.4}
+.welcome-auth .welcome-enter{border:0;cursor:pointer;margin-top:18px}
+.welcome-auth .welcome-enter:disabled{opacity:.58;cursor:not-allowed}
+@media(max-width:760px){.welcome-auth-fields{gap:10px}.welcome-auth-field input{height:46px}}

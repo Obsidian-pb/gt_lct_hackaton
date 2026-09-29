@@ -169,11 +169,14 @@ class RestAPI:
                         matches = [row for row in source['addresses'] if all(word in (row.get('street','')+' '+row.get('house','')).lower().replace('ё','е') for word in words)]
                         limit = payload.get('limit', 20)
                         result = {**source, 'addresses': matches[:limit], 'total': len(matches), 'limit': limit}
+                elif route.action == 'training_callback':
+                    import curriculum
+                    result = curriculum.callback(self.engine,payload['resource_id'],payload['card_id'],payload['student'],payload['question'],payload.get('source','text'),payload['call_id'],self.lock)
                 else:
                     result = dispatch(self.engine, route.action, payload)
             headers = {}
             if route.status == 201 and isinstance(result, dict) and result.get('id'):
-                resource = '/tasks/' if result['id'].startswith('t-') else '/sessions/'
+                resource = '/trainings/' if result['id'].startswith('training-') else '/scenarios/' if result['id'].startswith('scenario-') else '/tasks/' if result['id'].startswith('t-') else '/sessions/'
                 headers['Location'] = PREFIX + resource + result['id']
             return APIResponse(result, route.status, headers)
         except APIError:

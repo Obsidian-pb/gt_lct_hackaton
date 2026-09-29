@@ -35,7 +35,7 @@ critical_errors: 1–8 конкретных ошибок заполнения, �
 '''
 
 
-def validate_answer(answer, content, scenario=None):
+def validate_answer(answer, content, scenario=None, generated=False):
     keys = {'expected_fields', 'summary', 'classification_reason', 'services_reason', 'questions', 'critical_errors'}
     if not isinstance(answer, dict) or set(answer) != keys:
         raise ValueError('Неверная структура эталонного ответа. Повторите генерацию.')
@@ -56,7 +56,7 @@ def validate_answer(answer, content, scenario=None):
             raise ValueError('Цитата эталона отсутствует в сообщении заявителя: ' + LABELS[key])
         unknown = {'неизвестно', 'не указан', 'не указана', 'не указано', 'не указаны',
                    'не относится', 'не применимо', 'не предоставлено', 'не уточнено'}
-        if not quote and row['value'].strip().rstrip('.').lower() not in unknown:
+        if not generated and not quote and row['value'].strip().rstrip('.').lower() not in unknown:
             raise ValueError('Для известного значения эталона нужна исходная цитата: ' + LABELS[key])
     for key in ('questions', 'critical_errors'):
         values = answer[key]
@@ -69,7 +69,7 @@ def validate_answer(answer, content, scenario=None):
 
 
 def validate_reference(reference, content, scenario=None):
-    if not isinstance(reference, dict) or reference.get('version') != 1:
+    if not isinstance(reference, dict) or reference.get('version') not in (1, 2):
         raise ValueError('Сначала создайте эталонный ответ.')
     if reference.get('source_content') != content:
         raise ValueError('Карточка изменена после создания эталона. Обновите эталон перед утверждением.')
@@ -78,7 +78,15 @@ def validate_reference(reference, content, scenario=None):
     if reference.get('source_scenario') != scenario:
         raise ValueError('Сведения заявителя изменены. Обновите эталон перед утверждением.')
     result = copy.deepcopy(reference)
-    result['answer'] = validate_answer(reference.get('answer'), content, scenario)
+    generated = reference['version'] == 2
+    result['answer'] = validate_answer(reference.get('answer'), content, scenario, generated=generated)
+    if generated:
+        if reference.get('origin') != 'generated-card':
+            raise ValueError('Неверный источник эталона ИИ-карточки.')
+        for key in GENERATED:
+            expected = scenario['phone_callback'] if key == 'phone_callback' and scenario else content['fields'][key].strip() or 'Неизвестно'
+            if result['answer']['expected_fields'][key]['value'] != expected:
+                raise ValueError('Эталон ИИ-карточки должен совпадать с её полями: ' + LABELS[key])
     return result
 
 

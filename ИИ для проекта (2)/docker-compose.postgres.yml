@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trainer112
+      POSTGRES_USER: trainer112
+      POSTGRES_PASSWORD: ${TRAINER_DB_PASSWORD:-change-this-before-public-deploy}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - trainer112_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trainer112 -d trainer112"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  trainer112_postgres:

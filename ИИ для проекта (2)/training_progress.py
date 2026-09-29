@@ -29,21 +29,31 @@ def advance(engine, completed_id):
 
     candidates = [s for s in engine.list_items('s') if _same_assignment(completed, s)]
     current_index = int(training.get('card_index') or 0)
+    adaptive = training.get('difficulty') == 'adaptive'
     queued = sorted(
-        (s for s in candidates if s.get('status') == 'queued' and int((s.get('training') or {}).get('card_index') or 0) > current_index),
+        (s for s in candidates if s.get('status') == 'queued' and (adaptive or int((s.get('training') or {}).get('card_index') or 0) > current_index)),
         key=lambda s: int((s.get('training') or {}).get('card_index') or 0),
     )
     if not queued:
         return {'next_id': None, 'scenario_complete': True, 'adaptation': None}
 
-    nxt = queued[0]
-    nxt['status'] = 'active'
-    nxt['activated_at'] = datetime.now(timezone.utc).isoformat()
+    score = (completed.get('machine_assessment') or {}).get('percent',50)
+    desired = min(5,max(1,1+score//20))
+    nxt = min(queued,key=lambda s:(abs(int((s.get('training') or {}).get('task_difficulty') or 3)-desired), int((s.get('training') or {}).get('card_index') or 0))) if adaptive else queued[0]
+    if adaptive:
+        nxt['training']['card_index'] = current_index+1
+    if training.get('training_id'):
+        nxt['status'] = 'awaiting_call'
+        nxt['activated_at'] = None
+    else:
+        nxt['status'] = 'active'
+        nxt['activated_at'] = datetime.now(timezone.utc).isoformat()
     # Difficulty is no longer a learner/teacher setting. Keep the dialogue model
     # neutral and stable for legacy generators that still require a level token.
-    nxt['effective_level'] = 'medium'
+    nxt['effective_level'] = ('hard' if desired>=4 else 'easy' if desired<=2 else 'medium') if adaptive else (nxt.get('effective_level') or 'medium')
     engine.save(nxt)
-    return {'next_id': nxt['id'], 'scenario_complete': False, 'adaptation': None}
+    return {'next_id': nxt['id'], 'scenario_complete': False,
+            'adaptation': {'target':desired,'task_difficulty':nxt['training']['task_difficulty'],'previous_machine_percent':score} if adaptive else None}
 
 
 def _is_blank(value):

@@ -6,6 +6,7 @@ export default function CallerDialogue({card,store,reviewing,generating}){
  return <section className="incident-panel caller-dialogue">
   <h3>Разговор с заявителем</h3>
   <p className="source-note">Пробный разговор для преподавателя. Задавайте вопросы от лица диспетчера; полученные сведения вносите в карточку вручную.</p>
+  <label className="caller-voice-choice">Голос заявителя для этой карточки<select disabled={card.status==='approved'||reviewing||generating} value={card.voice_id||'ru_RU-irina-medium'} onChange={e=>store.edit('training','voice_id',e.target.value)}><option value="ru_RU-irina-medium">Ирина</option><option value="ru_RU-denis-medium">Денис</option><option value="ru_RU-dmitri-medium">Дмитрий</option></select></label>
   {!prepared?<><p>Для этой карточки разговор ещё не подготовлен.</p><button id="prepare-caller" disabled={card.status==='approved'||reviewing||generating} onClick={store.prepareCaller}>Подготовить разговор</button>{card.status==='approved'&&<p>Верните карточку на доработку, чтобы добавить разговор.</p>}</>:<>
    <div className="caller-transcript" role="log" aria-label="История разговора" aria-live="polite">
     <p><strong>Заявитель: </strong>{card.content.report||'Что вы хотите уточнить?'}</p>

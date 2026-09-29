@@ -2,6 +2,7 @@ import copy
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from ai_core import Engine
 from card_fake import FactoryFake
 import card_factory
@@ -21,6 +22,20 @@ class FullIncidentTests(unittest.TestCase):
         ref = card_reference.generate(self.provider, {'content': content, 'caller_scenario': self.scenario})
         self.request = {'content': content, 'reference': ref, 'caller_scenario': self.scenario,
                         'teacher': 'Учитель', 'reference_checked': True, 'opening': 'Помогите, дым!', 'level': 'hard'}
+        self.remote_calls = []
+        remote = patch('dialogue_gateway.ai_rest_client.caller_reply', side_effect=self.remote_reply)
+        remote.start()
+        self.addCleanup(remote.stop)
+
+
+    def remote_reply(self, *, card, student_fields, turns, question):
+        self.remote_calls.append({'card': copy.deepcopy(card), 'student_fields': copy.deepcopy(student_fields),
+                                  'turns': copy.deepcopy(turns), 'question': question})
+        if question == 'FAIL':
+            raise RuntimeError('Тестовая ошибка выделенного ИИ REST API')
+        if any(word in question.lower() for word in ('телефон', 'перезвон', 'этому номеру')):
+            return {'reply': card['fields']['phone_callback']}
+        return {'reply': 'Муж заходил внутрь, я не видела, чтобы он вышел.'}
 
     def start(self):
         task = dispatch(self.engine, 'card_publish', self.request)
@@ -43,6 +58,15 @@ class FullIncidentTests(unittest.TestCase):
             self.assertNotIn(secret, encoded)
         self.assertIsNone(s['reference'])
 
+    def test_teacher_voice_is_fixed_in_published_task(self):
+        alternate = dispatch(self.engine, 'card_publish', {**self.request, 'voice_id':'ru_RU-denis-medium'})
+        self.assertNotEqual(alternate['task_id'], dispatch(self.engine, 'card_publish', self.request)['task_id'])
+        self.assertEqual(self.engine.load(alternate['task_id'])['voice_id'], 'ru_RU-denis-medium')
+        view = dispatch(self.engine, 'student_start', {'student':'Ученик', 'task_id':alternate['task_id']})
+        self.assertEqual(view['voice_id'], 'ru_RU-denis-medium')
+        with self.assertRaises(ValueError):
+            dispatch(self.engine, 'card_publish', {**self.request, 'voice_id':'other'})
+
     def test_phone_gate_unknown_codes_failed_reply_and_submission_lock(self):
         s = self.start()
         req = {'student': 'Ученик', 'id': s['id']}
@@ -53,7 +77,10 @@ class FullIncidentTests(unittest.TestCase):
         self.assertEqual(len(self.engine.load(s['id'])['history']), 1)
         with self.assertRaises(ValueError):
             dispatch(self.engine, 'student_action', {**req, 'operation': 'hint'})
-        s = dispatch(self.engine, 'student_action', {**req, 'operation': 'ask', 'question': 'Ваш телефон для перезвона?'})
+        current = {**s['card'], 'street': 'Ошибочная улица', '_report': 'Ошибочная запись ученика'}
+        s = dispatch(self.engine, 'student_action', {**req, 'operation': 'ask', 'question': 'Ваш телефон для перезвона?', 'card': current})
+        self.assertEqual(self.remote_calls[-1]['student_fields']['street'], 'Ошибочная улица')
+        self.assertEqual(self.remote_calls[-1]['card']['fields']['street'], self.request['content']['fields']['street'])
         self.assertTrue(s['callback_disclosed'])
         self.assertIn('444-55-66', s['history'][-1]['text'])
         self.assertEqual(s['card']['phone_callback'], '')
