@@ -1,0 +1,3 @@
+Key:   sk-aitunnel-rp0HPPWMtYKfpI01PGIXtLtFQ2FcTlsE
+URL:   https://api.aitunnel.ru/v1
+Model: gpt-5.4-nano
